@@ -103,6 +103,7 @@ class Programmer:
                 self.functions[fn.name] = fn
         self.programmer_fn = programmer_fn or self._default_programmer_fn()
         self.max_iterations = max_iterations
+        self._chain_session = None  # reused for chained Functions
 
     def run(self, task: str, initial_context: Optional[dict] = None) -> ProgrammerResult:
         """
@@ -110,6 +111,8 @@ class Programmer:
 
         Loop: think → decide → execute → log → repeat.
         """
+        self._chain_session = None  # reset chain for new run
+
         ctx = Context(task=task)
         if initial_context:
             ctx.update(initial_context)
@@ -180,7 +183,12 @@ class Programmer:
     # ------------------------------------------------------------------
 
     def _do_call(self, decision: ProgrammerDecision, ctx: Context):
-        """Execute a Function call with call stack tracking."""
+        """Execute a Function call with call stack tracking.
+
+        Respects the Function's scope setting:
+            - isolated: fresh Session, no prior context
+            - chained:  reuses the chain Session, sees prior I/O summaries
+        """
         fn_name = decision.function_name
         if fn_name not in self.functions:
             ctx.push("programmer", fn_name or "unknown", reason=decision.reasoning)
@@ -192,13 +200,21 @@ class Programmer:
         # Push frame onto call stack
         ctx.push("programmer", fn_name, reason=decision.reasoning)
 
-        # Build scoped context for this Function (only its declared params)
+        # Build scoped context for this Function
         call_context = ctx.scope_for(fn.params)
         if decision.function_args:
             call_context.update(decision.function_args)
 
         try:
-            result = self.runtime.execute(fn, call_context)
+            if fn.scope == Function.SCOPE_CHAINED:
+                # Chained: use persistent chain session
+                if self._chain_session is None:
+                    self._chain_session = self.runtime._session_factory()
+                result = fn.call(session=self._chain_session, context=call_context)
+            else:
+                # Isolated: fresh session via Runtime
+                result = self.runtime.execute(fn, call_context)
+
             result_dict = result.model_dump()
             ctx[fn_name] = result_dict
             ctx.pop(status="success", output=result_dict)

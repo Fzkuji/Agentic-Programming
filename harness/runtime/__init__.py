@@ -2,20 +2,29 @@
 Runtime — the execution environment for Functions.
 
 Like Python's interpreter: it runs Functions and returns typed results.
-Each execution gets a fresh Session (context isolation).
 
-Two execution modes:
-    - execute()           synchronous, one Function at a time
-    - execute_async()     async, for non-blocking execution
-    - execute_parallel()  async, multiple Functions concurrently
+Two context modes (set per-Function via function.scope):
 
-Parallel execution creates independent Sessions for each Function,
-so there are no shared-state issues — like running separate processes.
+    isolated    Fresh Session each time. No prior context. Clean slate.
+                Like calling a pure function — no side effects visible.
+
+    chained     Shares a Session with prior chained calls in the same sequence.
+                Each Function sees the call stack (who called whom) and
+                prior Functions' I/O summaries (not their full reasoning).
+                Like sequential statements in a function body — earlier
+                results are visible, but internals are not.
+
+How chained mode preserves KV cache:
+    The Session is reused across chained calls. Prior Function results
+    are appended (not inserted/modified), so the prefix stays intact
+    and KV cache hits are maximized. When a chained sequence ends,
+    the Session is discarded and only I/O summaries survive.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Callable, TypeVar, Optional
 from pydantic import BaseModel
 
@@ -29,88 +38,129 @@ class Runtime:
     """
     The execution environment for Functions.
 
-    Each execution gets a fresh Session (context isolation).
-
     Args:
-        session_factory:  Creates a new Session for each execution.
+        session_factory:  Creates a new Session for each isolated execution
+                          (or for each new chained sequence).
     """
 
     def __init__(self, session_factory: Callable[[], Session]):
         self._session_factory = session_factory
 
-    # --- Synchronous ---
+    # ------------------------------------------------------------------
+    # Single execution
+    # ------------------------------------------------------------------
 
     def execute(self, function: Function, context: dict) -> T:
         """
-        Execute a Function in an isolated Session (synchronous).
-
-        Creates Session → runs Function → returns result → destroys Session.
+        Execute a single Function. Always uses a fresh Session (isolated).
         """
         session = self._session_factory()
         return function.call(session=session, context=context)
 
-    # --- Async ---
+    # ------------------------------------------------------------------
+    # Chained execution
+    # ------------------------------------------------------------------
 
-    async def execute_async(self, function: Function, context: dict) -> T:
-        """
-        Execute a Function in an isolated Session (async).
-
-        Same as execute(), but runs in a thread pool to avoid blocking
-        the event loop. Useful when the Session's send() is synchronous
-        but you want concurrent execution.
-        """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,  # default thread pool
-            self.execute,
-            function,
-            context,
-        )
-
-    # --- Parallel ---
-
-    async def execute_parallel(
+    def execute_chain(
         self,
-        calls: list[tuple[Function, dict]],
+        functions: list[Function],
+        context: dict,
     ) -> list:
         """
-        Execute multiple Functions concurrently, each in its own Session.
+        Execute a sequence of Functions with shared context.
 
-        Like multiprocessing.Pool — each call is fully isolated.
-        No shared state, no race conditions.
+        For each Function in the chain:
+            - If scope == "isolated": new Session, only sees its own params
+            - If scope == "chained": reuses the chain Session, sees prior I/O
+
+        After the entire chain completes, the shared Session is discarded.
+        Only the structured I/O summaries survive in the returned results.
+
+        This maximizes KV cache hits within a chain (prefix-append only)
+        while keeping the overall context bounded.
 
         Args:
-            calls:  List of (Function, context) tuples
+            functions:  Ordered list of Functions to execute
+            context:    Initial context
 
         Returns:
-            List of results in the same order as calls.
-            Each result is either a typed Pydantic model or a FunctionError.
-
-        Example:
-            results = await runtime.execute_parallel([
-                (observe, {"task": "check screen A"}),
-                (observe, {"task": "check screen B"}),
-                (observe, {"task": "check screen C"}),
-            ])
+            List of results (Pydantic models) in order.
+            If a Function fails, returns FunctionError for that position
+            and stops the chain.
         """
         from harness.function import FunctionError
 
-        tasks = [
-            self.execute_async(fn, ctx)
-            for fn, ctx in calls
-        ]
+        chain_session = None  # lazy-created for chained Functions
+        chain_history = []    # I/O summaries for chained Functions
+        results = []
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for fn in functions:
+            if fn.scope == Function.SCOPE_CHAINED:
+                # Chained: reuse Session, append prior I/O
+                if chain_session is None:
+                    chain_session = self._session_factory()
+
+                # Build context with call stack info + prior I/O summaries
+                chain_context = dict(context)
+                if chain_history:
+                    chain_context["_prior_results"] = chain_history
+
+                try:
+                    result = fn.call(session=chain_session, context=chain_context)
+                    result_dict = result.model_dump()
+
+                    # Record I/O summary for next chained Function
+                    chain_history.append({
+                        "function": fn.name,
+                        "input_params": fn.params,
+                        "output": result_dict,
+                    })
+
+                    # Also store in main context
+                    context[fn.name] = result_dict
+                    results.append(result)
+
+                except FunctionError as e:
+                    results.append(e)
+                    break
+
+            else:
+                # Isolated: fresh Session, no shared state
+                try:
+                    result = self.execute(fn, context)
+                    context[fn.name] = result.model_dump()
+                    results.append(result)
+                except FunctionError as e:
+                    results.append(e)
+                    break
+
+        # Chain ends → shared Session discarded (GC)
+        # Only context[fn.name] (structured results) survive
         return results
 
-    # --- Convenience ---
+    # ------------------------------------------------------------------
+    # Async
+    # ------------------------------------------------------------------
+
+    async def execute_async(self, function: Function, context: dict) -> T:
+        """Async version of execute()."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.execute, function, context)
+
+    async def execute_parallel(self, calls: list[tuple[Function, dict]]) -> list:
+        """
+        Execute multiple Functions concurrently, each in its own Session.
+
+        Like multiprocessing — each call is fully isolated.
+        """
+        tasks = [self.execute_async(fn, ctx) for fn, ctx in calls]
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    # ------------------------------------------------------------------
+    # Convenience
+    # ------------------------------------------------------------------
 
     @staticmethod
     def from_session_class(session_class: type, **kwargs) -> "Runtime":
-        """
-        Create a Runtime from a Session class and constructor args.
-
-        Example:
-            runtime = Runtime.from_session_class(AnthropicSession, model="claude-haiku")
-        """
+        """Create a Runtime from a Session class and constructor args."""
         return Runtime(session_factory=lambda: session_class(**kwargs))

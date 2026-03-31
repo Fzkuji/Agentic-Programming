@@ -73,7 +73,13 @@ class Function:
         return_type Pydantic model this function MUST return
         examples    Optional list of {"input": ..., "output": ...} dicts
         max_retries How many times to retry if output is invalid
+        scope       Context mode for this Function:
+                    - "isolated": fresh Session, no prior context (default)
+                    - "chained":  receives call stack + prior I/O summaries
     """
+
+    SCOPE_ISOLATED = "isolated"
+    SCOPE_CHAINED = "chained"
 
     def __init__(
         self,
@@ -84,6 +90,7 @@ class Function:
         params: Optional[list[str]] = None,
         examples: Optional[list[dict]] = None,
         max_retries: int = 3,
+        scope: str = "isolated",
     ):
         self.name = name
         self.docstring = docstring
@@ -92,6 +99,7 @@ class Function:
         self.params = params
         self.examples = examples or []
         self.max_retries = max_retries
+        self.scope = scope
 
     def call(self, session: "Session", context: dict) -> T:
         """
