@@ -130,28 +130,31 @@ Runtime Session B (ephemeral):
 ```
 harness/
 ├── function/      # Function definition and execution
-├── session/       # Session interface and implementations
+├── session/       # Session interface and implementations (Anthropic, OpenAI, CLI, etc.)
 ├── runtime/       # Runtime: isolated Function execution
 ├── programmer/    # Programmer: planning and decision loop
 └── workflow/      # Static Workflow (convenience layer)
 
-skills/            # Natural language Skill files (Function bodies)
-├── programmer/SKILL.md
-├── observe/SKILL.md
-├── learn/SKILL.md
-├── act/SKILL.md
-└── verify/SKILL.md
+skills/
+└── programmer/SKILL.md   # Default Programmer instructions
+
+examples/
+├── gui_automation.py     # GUI automation example (static + dynamic modes)
+└── skills/               # Example Function body files
 ```
 
 ## Sessions
 
-Any class that implements `send(message: str) -> str` is a valid Session:
+Any class that implements `send(message) -> str` is a valid Session. Input can be text, images, or any format the backend supports:
 
 | Session | Description |
 |---------|-------------|
-| `AnthropicSession` | Direct Anthropic API |
-| `OpenAISession` | Direct OpenAI API |
-| `OpenClawSession` | Routes through OpenClaw agent |
+| `AnthropicSession` | Direct Anthropic API (text + images) |
+| `OpenAISession` | Direct OpenAI API (text + images) |
+| `ClaudeCodeSession` | Claude Code CLI with built-in tools |
+| `CodexSession` | OpenAI Codex CLI |
+| `OpenClawSession` | OpenClaw gateway (memory + tools) |
+| `CLISession` | Any CLI agent via subprocess |
 
 ## Install
 

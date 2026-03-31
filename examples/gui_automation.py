@@ -42,7 +42,7 @@ class VerifyResult(BaseModel):
 observe = Function(
     name="observe",
     docstring="Observe the current screen state and identify UI elements.",
-    body=open("skills/observe/SKILL.md").read(),
+    body=open("examples/skills/observe/SKILL.md").read(),
     return_type=ObserveResult,
     params=["task"],
 )
@@ -50,7 +50,7 @@ observe = Function(
 learn = Function(
     name="learn",
     docstring="Analyze the observation and determine the best action to take.",
-    body=open("skills/learn/SKILL.md").read(),
+    body=open("examples/skills/learn/SKILL.md").read(),
     return_type=LearnResult,
     params=["task", "observe"],
 )
@@ -58,7 +58,7 @@ learn = Function(
 act = Function(
     name="act",
     docstring="Execute the determined action on the target UI element.",
-    body=open("skills/act/SKILL.md").read(),
+    body=open("examples/skills/act/SKILL.md").read(),
     return_type=ActResult,
     params=["task", "observe", "learn"],
 )
@@ -66,7 +66,7 @@ act = Function(
 verify = Function(
     name="verify",
     docstring="Take a screenshot and verify the action was completed successfully.",
-    body=open("skills/verify/SKILL.md").read(),
+    body=open("examples/skills/verify/SKILL.md").read(),
     return_type=VerifyResult,
     params=["task", "act"],
 )
