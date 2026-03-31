@@ -1,16 +1,13 @@
 """
-Example: GUI automation workflow using LLM Agent Harness
+Example: GUI automation using Agentic Programming
 
-This example shows a 4-function workflow for GUI automation:
-    observe() → learn() → act() → verify()
-
-Each function is executed by an LLM Session.
-The workflow guarantees each function returns a valid typed result
-before the next function is called.
+Two modes:
+    1. Static (Workflow) — fixed sequence: observe → learn → act → verify
+    2. Dynamic (Programmer) — Programmer decides what to do based on results
 """
 
 from pydantic import BaseModel
-from harness import Function, Workflow, FunctionCall
+from harness import Function, Workflow, FunctionCall, Programmer, Runtime
 from harness.session import AnthropicSession
 
 
@@ -75,9 +72,10 @@ verify = Function(
 )
 
 
-# --- Run the workflow ---
+# --- Mode 1: Static Workflow ---
 
-def main():
+def run_static():
+    """Fixed sequence, no decision-making."""
     session = AnthropicSession()
 
     workflow = Workflow(
@@ -94,13 +92,38 @@ def main():
 
     if result.success:
         print("Workflow completed successfully")
-        verify_result = result.context.get("verify", {})
-        print(f"Final state: {verify_result.get('current_state')}")
-        print(f"Action confirmed: {verify_result.get('action_confirmed')}")
+        print(f"Final state: {result.context.get('verify', {})}")
     else:
         print(f"Workflow failed at: {result.failed_function}")
         print(f"Error: {result.error}")
 
 
+# --- Mode 2: Dynamic Programmer ---
+
+def run_dynamic():
+    """Programmer decides what to do based on results."""
+    programmer = Programmer(
+        session=AnthropicSession(model="claude-sonnet-4-6"),
+        runtime=Runtime(
+            session_factory=lambda: AnthropicSession(model="claude-haiku")
+        ),
+        functions=[observe, learn, act, verify],
+    )
+
+    result = programmer.run("Open Safari and search for 'hello world' on Google")
+
+    if result.success:
+        print(f"Task completed in {result.iterations} iterations")
+        if result.reply:
+            print(f"Programmer says: {result.reply}")
+    else:
+        print(f"Task failed: {result.failure_reason}")
+
+
 if __name__ == "__main__":
-    main()
+    import sys
+    mode = sys.argv[1] if len(sys.argv) > 1 else "static"
+    if mode == "dynamic":
+        run_dynamic()
+    else:
+        run_static()

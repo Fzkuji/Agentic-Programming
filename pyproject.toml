@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "llm-agent-harness"
-version = "0.1.0"
-description = "A session-typed LLM programming framework. The LLM is the runtime, not the orchestrator."
+name = "agentic-programming"
+version = "0.2.0"
+description = "Agentic Programming — a paradigm where LLM sessions are the compute units. The Programmer plans, the Runtime executes, Functions are the code."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

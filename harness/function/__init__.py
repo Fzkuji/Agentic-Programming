@@ -1,17 +1,17 @@
 """
-Function — the fundamental unit of execution in LLM Agent Harness.
+Function — the fundamental unit of execution in Agentic Programming.
 
-Modelled after programming language function terminology:
-    - A Function has a name, docstring, body (instructions), params, and return_type
-    - Calling a Function sends it to a Session (the runtime) and returns a typed result
-    - A Function does not return until its output matches the return_type
+A Function is like a function in any programming language:
+    - It has a name, docstring, body (instructions), params, and return_type
+    - Calling it sends it to a Session (the Runtime) and returns a typed result
+    - It does not return until its output matches the return_type
 
-Analogy to regular Python functions:
+    # Python function:
     def observe(task: str) -> ObserveResult:
         \"\"\"Observe the current screen state.\"\"\"
-        # ... instructions ...
+        ...
 
-    # In LLM Agent Harness:
+    # Agentic Programming Function:
     observe = Function(
         name="observe",
         docstring="Observe the current screen state.",
@@ -19,12 +19,12 @@ Analogy to regular Python functions:
         params=["task"],
         return_type=ObserveResult,
     )
-    result = observe.call(session, context)  # returns ObserveResult
+    result = observe.call(session, context)  # returns ObserveResult — guaranteed
 
 Execution flow:
     1. Extract params from context
     2. Assemble call message (docstring + body + params + return_type schema)
-    3. Send to session
+    3. Send to Session
     4. Parse and validate reply against return_type
     5. If valid   → return typed result
     6. If invalid → retry (up to max_retries), then raise FunctionError

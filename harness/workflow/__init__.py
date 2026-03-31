@@ -1,13 +1,15 @@
 """
-Workflow — ordered execution of Functions.
+Workflow — static mode for Agentic Programming.
 
-A Workflow is a sequence of Functions where:
-    - Functions execute in order
+A Workflow is a convenience layer for tasks where the execution order is known.
+It's equivalent to a Programmer that always makes the same decisions in the same order.
+
+    - Functions execute in declared order
     - Each Function's return value is added to the shared context
     - The next Function reads from that updated context
     - If any Function raises FunctionError, the Workflow stops
 
-Each Function can use a different Session — mix and match platforms freely.
+For dynamic tasks where the plan isn't known upfront, use Programmer instead.
 """
 
 from __future__ import annotations

@@ -1,17 +1,21 @@
-# LLM Agent Harness
+# Agentic Programming
 
-A programming framework where LLM sessions are the runtime.
+A programming paradigm where LLM sessions are the compute units.
 
 ## Core Idea
 
-Traditional agent frameworks let the LLM decide everything — what to do, in what order, when to stop. This framework inverts that:
+Current agent frameworks let the LLM decide everything — what to do, in what order, when to stop — all in one conversation with unbounded context growth.
 
-- **You** define Functions with typed inputs and outputs
-- **The LLM Session** executes each Function
-- **The framework** guarantees the return value matches the declared type before moving on
+**Agentic Programming** structures LLM execution the same way programming languages structure CPU execution:
+
+- **Programmer** (LLM): like a human developer — understands the task, selects or writes Functions, checks results, iterates
+- **Function**: like source code — has a name, typed inputs/outputs, and natural language instructions
+- **Runtime** (LLM Session): like a CPU — executes a single Function, returns a typed result, context destroyed
+
+The Programmer never executes. The Runtime never plans. Context is isolated between them.
 
 ```python
-# A Function is like a regular Python function — but executed by an LLM
+# A Function is like a Python function — but executed by an LLM
 observe = Function(
     name="observe",
     docstring="Observe the current screen state.",
@@ -20,72 +24,55 @@ observe = Function(
     return_type=ObserveResult,   # must return this, or retry
 )
 
-result = observe.call(session, context)  # returns ObserveResult — guaranteed
+# Execute with any Runtime
+result = runtime.execute(observe, context)  # returns ObserveResult — guaranteed
 ```
 
-## Concepts
+## The Programming Analogy
 
-| Concept | Analogy | Description |
-|---------|---------|-------------|
-| `Function` | Python function | A named, typed unit of execution with a docstring, body, params, and return type |
-| `Session` | Language runtime | The LLM (or agent) that executes the Function — pluggable |
-| `Workflow` | Program | An ordered sequence of Function calls |
-| `FunctionCall` | Function call | Binds a Function to a Session for use in a Workflow |
-| `FunctionError` | RuntimeError | Raised when a Function fails to return a valid value after all retries |
-| `body` | Function body | Natural language instructions — the Skill content |
-| `params` | Parameters | Which context keys this Function reads as input |
-| `return_type` | Return type annotation | Pydantic model the Function must return |
-| `call()` | Calling a function | Executes the Function using a Session |
+| Programming | Agentic Programming |
+|-------------|---------------------|
+| Programmer | Programmer (LLM) |
+| Function / source code | Function (name + body + return_type) |
+| Type signature | return_type (Pydantic schema) |
+| CPU / interpreter | Runtime (ephemeral LLM Session) |
+| Standard library | Function Pool (pre-built Skills) |
+| Type checker | Schema Validator |
 
-## Project Structure
+## Three Concepts
 
-```
-harness/
-├── function/    # Function definition and execution
-├── session/     # Session interface and implementations
-└── workflow/    # Workflow orchestration
+Everything is built from three primitives:
 
-skills/          # Natural language Skill files (body content)
-├── observe/SKILL.md
-├── learn/SKILL.md
-├── act/SKILL.md
-└── verify/SKILL.md
+| Concept | Description |
+|---------|-------------|
+| **Function** | Typed unit of execution — name, docstring, body, params, return_type |
+| **Runtime** | Executes a Function in an isolated Session — ephemeral, context destroyed after |
+| **Programmer** | Plans and iterates — selects/creates Functions, sends to Runtime, checks results |
 
-tests/           # Unit tests
-examples/        # Usage examples
-docs/            # Design documents
-```
+Plus a convenience layer:
+
+| Concept | Description |
+|---------|-------------|
+| **Workflow** | Static mode — fixed sequence of Functions, no Programmer needed |
 
 ## Quick Start
 
+### Static Mode (Workflow)
+
+For tasks where the execution order is known:
+
 ```python
-from pydantic import BaseModel
 from harness import Function, Workflow, FunctionCall
 from harness.session import AnthropicSession
 
-# 1. Define return types
-class ObserveResult(BaseModel):
-    current_state: str
-    elements_found: list[str]
-    is_target_visible: bool
-
-# 2. Define Functions
 observe = Function(
     name="observe",
-    docstring="Observe the current screen state and identify UI elements.",
+    docstring="Observe the current screen state.",
     body=open("skills/observe/SKILL.md").read(),
     return_type=ObserveResult,
     params=["task"],
 )
 
-# 3. Create a Session (the runtime)
-session = AnthropicSession()
-
-# 4. Call a single Function
-result = observe.call(session, context={"task": "Click the login button"})
-print(result.current_state)
-
-# 5. Or run a full Workflow
 workflow = Workflow(
     calls=[
         FunctionCall(function=observe),
@@ -93,9 +80,67 @@ workflow = Workflow(
         FunctionCall(function=act),
         FunctionCall(function=verify),
     ],
-    default_session=session,
+    default_session=AnthropicSession(),
 )
 result = workflow.run(task="Click the login button")
+```
+
+### Dynamic Mode (Programmer + Runtime)
+
+For complex tasks where the plan isn't known upfront:
+
+```python
+from harness import Function, Programmer, Runtime
+from harness.session import AnthropicSession
+
+programmer = Programmer(
+    session=AnthropicSession(model="claude-sonnet-4-6"),
+    runtime=Runtime(
+        session_factory=lambda: AnthropicSession(model="claude-haiku")
+    ),
+    functions=[observe, learn, act, verify],
+)
+
+result = programmer.run("Open Safari and search for 'hello world' on Google")
+# Programmer decides what to call, creates new Functions if needed,
+# handles failures, and iterates until done.
+```
+
+## Context Isolation
+
+The key mechanism:
+
+```
+Programmer Session (persistent):
+  "observe returned: {target_visible: true}"
+  "act returned: {success: true}"
+  → Only structured summaries. Grows slowly.
+
+Runtime Session A (ephemeral):
+  "Function: observe. Take a screenshot..."
+  → Created, executed, destroyed. Context gone.
+
+Runtime Session B (ephemeral):
+  "Function: act. Click the login button..."
+  → Created, executed, destroyed. Context gone.
+```
+
+## Project Structure
+
+```
+harness/
+├── function/      # Function definition and execution
+├── session/       # Session interface and implementations
+├── runtime/       # Runtime: isolated Function execution
+├── programmer/    # Programmer: planning and decision loop
+└── workflow/      # Static Workflow (convenience layer)
+
+skills/            # Natural language Skill files (Function bodies)
+├── programmer/SKILL.md
+├── observe/SKILL.md
+├── learn/SKILL.md
+├── act/SKILL.md
+└── verify/SKILL.md
 ```
 
 ## Sessions
@@ -104,20 +149,9 @@ Any class that implements `send(message: str) -> str` is a valid Session:
 
 | Session | Description |
 |---------|-------------|
-| `AnthropicSession` | Direct Anthropic API — full control |
-| `OpenClawSession` | Routes through OpenClaw agent — uses its memory and tools |
-| `NanobotSession` | Routes through nanobot agent |
-
-Custom Session:
-
-```python
-from harness.session import Session
-
-class MySession(Session):
-    def send(self, message: str) -> str:
-        # call your LLM or agent here
-        return reply
-```
+| `AnthropicSession` | Direct Anthropic API |
+| `OpenAISession` | Direct OpenAI API |
+| `OpenClawSession` | Routes through OpenClaw agent |
 
 ## Install
 
@@ -134,4 +168,4 @@ pytest tests/ -v
 
 ## Design
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the full design document.
+See [docs/DESIGN.md](docs/DESIGN.md) for the full design specification.

@@ -1,135 +1,241 @@
-# LLM Agent Harness — Design Document
+# Agentic Programming — Design Specification
+
+> A programming paradigm where LLM sessions are the compute units.
+
+---
 
 ## 1. Motivation
 
-Current LLM agent frameworks have a fundamental problem: they treat the LLM as the brain and let it decide everything. The agent decides what tools to call, in what order, and when to stop. This makes agents powerful but unpredictable.
+Current LLM agent frameworks have a fundamental problem: they treat the LLM as both the brain and the hands. The agent decides what to do, and the agent does it — all in one conversation, with context growing until it overflows or degrades.
 
-When you need a reliable, repeatable workflow — like GUI automation where every step must happen in order — this unpredictability is a blocker. The LLM might skip a step, take a shortcut, or decide the task is done when it isn't.
+When you need reliable, repeatable behavior — like GUI automation where every step must be verified — this is a blocker. The LLM might skip steps, take shortcuts, or decide it's done when it isn't.
 
 ### The Core Problem
 
 Today's approaches fall into two extremes:
 
 - **Pure code**: deterministic but rigid, can't handle ambiguity
-- **Pure LLM agent**: flexible but unpredictable, can't be relied upon
+- **Pure LLM agent**: flexible but unpredictable, context grows unbounded
 
-Neither works for complex, real-world workflows that need both structure and intelligence.
+Neither works for complex, real-world tasks that need both structure and intelligence.
 
 ### The Insight
 
-What if we treated LLM calls the way we treat function calls? A function has:
+What if we structured LLM execution the same way programming languages structure CPU execution?
 
-- A name and description (what it does)
-- Typed inputs (what it receives)
-- Typed outputs (what it must return)
-- A runtime that executes it (CPU, JVM, interpreter)
+In programming:
+- A **programmer** writes functions with typed inputs and outputs
+- A **runtime** executes each function
+- The programmer doesn't manually move bits — the runtime handles that
+- Each function call has its own scope — context doesn't leak
 
-A **Step** in this framework is exactly this — except the runtime is an LLM session, and the description is written in natural language. The LLM executes the function. The framework guarantees the output.
-
-> **The LLM is not the orchestrator. The LLM is the runtime. Your code is the orchestrator.**
+**Agentic Programming** applies this exact structure to LLM agents.
 
 ---
 
 ## 2. Core Concepts
 
-### Step
+There are only three concepts. Everything else is built from these.
 
-The fundamental unit of execution. A typed function executed by an LLM session.
+### 2.1 Function
+
+The fundamental unit of execution. Like a function in Python — has a name, a docstring, a body, parameters, and a return type.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| name | Yes | Identifier for this step |
-| description | Yes | What this step does (1-2 sentences) |
-| instructions | Yes | How to do it — the Skill content, in natural language |
-| output_schema | Yes | Pydantic model this step MUST return |
-| reads | No | Which context fields this step needs (None = full context) |
+| name | Yes | Identifier, e.g. "observe" |
+| docstring | Yes | What this function does (1-2 sentences) |
+| body | Yes | How to do it — natural language instructions (the Skill) |
+| return_type | Yes | Pydantic model this function MUST return |
+| params | No | Which context keys to read (None = full context) |
 | examples | No | Sample input/output pairs to guide the LLM |
+| max_retries | No | How many times to retry if output is invalid (default: 3) |
 
-**Key principle**: a Step does not return until its output matches the output_schema. If the session's reply doesn't conform, the framework retries automatically.
+**Key rules:**
+- A Function does not complete until its output matches `return_type`
+- A Function is stateless — all input comes from `params`
+- A Function's `body` is natural language, not code
+- A Function can be executed by ANY Session — it's runtime-agnostic
 
-### Session
+### 2.2 Runtime
 
-The pluggable runtime. Single interface:
+The execution environment. Like a Python interpreter — it runs Functions and returns typed results.
+
+```python
+class Runtime:
+    def execute(self, function: Function, context: dict) -> BaseModel:
+        session = self.session_factory()  # fresh session
+        result = function.call(session, context)
+        # session is discarded — context gone
+        return result
+```
+
+**Key rules:**
+- Each execution creates a **fresh Session** (ephemeral)
+- The Session is destroyed after the Function returns
+- This is how context isolation works — execution details never leak out
+- Only the structured return value propagates back
+
+### 2.3 Programmer
+
+The planning and decision-making agent. Like a human programmer — it understands the task, selects or writes Functions, sends them to the Runtime for execution, and iterates based on results.
+
+```python
+class Programmer:
+    def run(self, task: str) -> ProgrammerResult:
+        # Loop: think → decide → execute → check → repeat
+```
+
+**Key rules:**
+- The Programmer has a **persistent Session** (it remembers what it tried)
+- It only sees **structured return values** from Functions, never execution details
+- It can **create new Functions** at runtime
+- It is itself driven by a Function (programmer_fn) — staying within the paradigm
+
+### How they interact
 
 ```
-session.send(message: str) → reply: str
+Programmer (persistent Session — remembers across steps)
+  │
+  │  "I need to see what's on screen"
+  │  → picks observe Function
+  │
+  ├── Runtime → creates fresh Session → executes observe() → returns ObserveResult → Session destroyed
+  │
+  │  "Target is visible, I'll click it"
+  │  → picks act Function
+  │
+  ├── Runtime → creates fresh Session → executes act() → returns ActResult → Session destroyed
+  │
+  │  "Let me verify"
+  │  → picks verify Function
+  │
+  ├── Runtime → creates fresh Session → executes verify() → returns VerifyResult → Session destroyed
+  │
+  │  "Done!"
+  └── returns ProgrammerResult
 ```
-
-| Session Type | Description |
-|-------------|-------------|
-| AnthropicSession | Direct Anthropic API — full control |
-| OpenClawSession | Routes through OpenClaw agent — uses its memory and tools |
-| NanobotSession | Routes through nanobot agent |
-| CustomSession | Any implementation of send() → reply |
-
-The Session is passed to the Step at runtime. Switching platforms means switching the Session — the Step definition never changes.
-
-### Workflow
-
-An ordered sequence of Steps. The output of each Step becomes part of the shared context available to subsequent Steps.
-
-The Workflow engine guarantees:
-- Steps execute in order
-- Context accumulates across Steps
-- Failure is explicit — if a Step fails, the Workflow stops and reports which Step failed
-
-### Context
-
-A shared dictionary that flows through the entire Workflow. Each Step declares:
-- `reads`: which fields it needs as input
-- After execution, its output is written to `context[step.name]`
-
-### Skill
-
-The natural language instructions inside a Step — the `instructions` field. It tells the LLM what to do and how to think about it.
-
-Skills are just text. They can be:
-- Inline strings in the Step definition
-- Loaded from a SKILL.md file (compatible with OpenClaw / nanobot skill format)
-- Generated dynamically based on context
 
 ---
 
-## 3. How a Step Executes
+## 3. Context Isolation
 
-### Phase 1 — Message Assembly
+This is the core mechanism that makes Agentic Programming work.
 
-The framework assembles a structured message:
+### Why it matters
+
+Without isolation, every execution detail accumulates in one conversation:
+- Screenshots, UI element lists, retry attempts, error messages
+- Context window fills up, cost increases, performance degrades
+- Irrelevant information confuses subsequent steps
+
+With isolation:
+- Each Runtime execution starts clean
+- Only structured return values propagate to the Programmer
+- The Programmer's context grows slowly (just summaries)
+
+### How it works
 
 ```
-## Step: {name}
+Programmer Session (persistent):
+  [task description]
+  [decision: call observe]
+  [observe returned: {current_state: "homepage", target_visible: true}]
+  [decision: call act]
+  [act returned: {success: true}]
+  → Compact. Only structured data. Grows slowly.
 
-### What this step does
-{description}
+Runtime Session A (ephemeral):
+  [Function message: "observe the screen..."]
+  [reply: {current_state: ..., elements: [...50 items...]}]
+  → Destroyed. All 50 elements gone. Only the summary reached the Programmer.
 
-### How to do it
-{instructions}
-
-### Input
-{selected fields from context}
-
-### Required output format
-{output_schema as JSON schema}
+Runtime Session B (ephemeral):
+  [Function message: "click the login button..."]
+  [reply: {action_taken: "click", success: true}]
+  → Destroyed.
 ```
-
-### Phase 2 — Session Execution
-
-The assembled message is sent to the Session. The Session's LLM reasons over it, may use tools available in its environment, and produces a reply.
-
-The framework does not constrain what happens inside the Session. It only constrains the final output.
-
-### Phase 3 — Output Validation
-
-The reply is parsed and validated against output_schema:
-- If valid → the Step returns the structured result
-- If invalid → retry with a correction message (up to max_retries)
-- If retries exhausted → raise StepFailure
 
 ---
 
-## 4. Session Contract
+## 4. Execution Model
 
-Any Session must satisfy:
+### 4.1 Single Function Execution
+
+```
+1. Extract params from context
+2. Assemble call message:
+   - Function name + docstring
+   - Body (natural language instructions)
+   - Arguments (from params)
+   - Return type schema
+3. Send to Session
+4. Parse reply → validate against return_type
+   - Valid   → return typed result
+   - Invalid → retry with correction (up to max_retries)
+   - Exhausted → raise FunctionError
+```
+
+### 4.2 Programmer Loop
+
+```
+1. Create persistent Session for Programmer
+2. Initialize context: {task, history: [], available_functions: [...]}
+3. Loop:
+   a. Call programmer_fn → returns ProgrammerDecision
+   b. Match decision.action:
+      - "call"   → Runtime.execute(function, context) → append result to history
+      - "create" → build new Function from spec → add to pool
+      - "reply"  → return message to user
+      - "done"   → return success
+      - "fail"   → return failure with reason
+   c. Continue loop
+4. Safety: stop after max_iterations
+```
+
+### 4.3 Static Workflow (convenience)
+
+For known sequences, Workflow provides a shortcut — no Programmer needed:
+
+```python
+workflow = Workflow(
+    calls=[observe, learn, act, verify],
+    default_session=session,
+)
+result = workflow.run(task="Click login")
+```
+
+Equivalent to a Programmer that always makes the same decisions in the same order.
+
+---
+
+## 5. Function Lifecycle
+
+### Pre-built (standard library)
+
+```
+skills/
+├── observe/SKILL.md
+├── learn/SKILL.md
+├── act/SKILL.md
+└── verify/SKILL.md
+```
+
+Loaded at startup. Always available in the Function pool.
+
+### Dynamically created
+
+The Programmer can create new Functions at runtime by specifying name, docstring, body, params, and return_type_schema. The framework builds the Function and adds it to the pool.
+
+### Persisted (optional)
+
+Created Functions can be saved to disk as SKILL.md files for reuse across runs.
+
+---
+
+## 6. Session Contract
+
+Any class that implements `send(message: str) -> str` is a valid Session:
 
 ```python
 class Session(ABC):
@@ -138,46 +244,52 @@ class Session(ABC):
         pass
 ```
 
-**The Session must provide:**
-- Replies are text
-- Replies are complete (not streamed)
+The Session handles:
+- Its own conversation history
+- Its own connection and authentication
+- Returning complete (not streamed) replies
 
-**The Session does NOT need to provide:**
-- Structured output (the Step handles parsing)
-- Tool execution (the Session's environment handles it)
-- Memory (Sessions without memory still work)
-
----
-
-## 5. Design Principles
-
-| Principle | What it means |
-|-----------|---------------|
-| LLM is runtime, not orchestrator | The framework drives execution; the LLM executes individual steps |
-| Outputs are contracts | A Step doesn't complete until its output matches the schema |
-| Sessions are pluggable | Switching platforms = switching Session; Steps never change |
-| Skills are content, not code | Skills work with any Session |
-| Context is explicit | Steps declare reads; no hidden state |
-| Failure is loud | Steps fail explicitly; the Workflow never silently skips |
+The Session does NOT handle:
+- Parsing return values (Function does that)
+- Retry logic (Function does that)
+- Deciding what to do next (Programmer does that)
 
 ---
 
-## 6. Comparison
+## 7. Error Handling
 
-| Feature | LangGraph | OpenClaw Skills | Instructor | LLM Agent Harness |
-|---------|-----------|----------------|------------|-------------------|
-| Structured output guarantee | Partial | No | Yes | Yes |
-| Session pluggable | No | No | No | Yes |
-| Step ordering enforced | Yes | No | No | Yes |
-| Natural language instructions | No | Yes | No | Yes |
-| Works with external agents | No | N/A | No | Yes |
-| Context isolation per Step | Partial | No | No | Yes |
+### Function-level
+If a Function can't return valid output after max_retries → raises FunctionError.
+The Programmer catches this and decides: retry? different Function? fail?
+
+### Programmer-level
+If the Programmer can't make a valid decision → retry the programmer_fn.
+If exhausted → task fails.
+
+### Task-level
+The Programmer can explicitly decide `action: "fail"`. This is deliberate, not an error.
 
 ---
 
-## 7. What This Framework Is Not
+## 8. Design Principles
 
-- **Not an agent framework** — the LLM has no autonomy to decide what to do next
-- **Not a prompt library** — Skills are execution instructions, not templates
-- **Not a replacement for LangGraph** — for fully autonomous agents, LangGraph is more appropriate
-- **Not tied to one LLM provider** — the Session abstraction means the framework has no opinion on which LLM you use
+| Principle | Description |
+|-----------|-------------|
+| **Three concepts only** | Programmer, Function, Runtime. That's it. |
+| **Context isolation** | Runtime Sessions are ephemeral. Only returns propagate. |
+| **Outputs are contracts** | Functions don't return until output matches the schema. |
+| **Programmer is a programmer** | It plans, selects, creates, but never executes. |
+| **Sessions are pluggable** | Any LLM, any platform. Functions never change. |
+| **Failure is explicit** | Functions fail loudly. Programmer handles recovery. |
+
+---
+
+## 9. Comparison
+
+| | Prompted Agent | Tool-calling Agent | Agentic Programming |
+|---|---|---|---|
+| Who decides next step | LLM (free-form) | LLM (picks from tools) | Programmer (structured) |
+| Execution isolation | None | Partial | Full (separate Sessions) |
+| Output guarantee | None | Tool-dependent | Pydantic schema enforced |
+| Can create new capabilities | No | No | Yes (Programmer creates Functions) |
+| Context growth | Unbounded | Unbounded | Controlled (only summaries) |

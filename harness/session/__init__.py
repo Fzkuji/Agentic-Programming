@@ -1,22 +1,19 @@
 """
-Session — the pluggable runtime for Function execution.
+Session — the pluggable execution backend for Agentic Programming.
 
-Analogous to a language runtime (CPython, JVM, V8):
-    - The Session is what actually "runs" a Function
-    - Any class that implements send(message: str) -> str can be a Session
-    - The framework has no opinion on which LLM or platform you use
+A Session is like a CPU or interpreter — it executes what it's given and returns
+the result. It doesn't decide what to run or in what order.
+
+In Agentic Programming, Sessions have two lifecycles:
+    - Ephemeral: created for one Function execution, then destroyed (Runtime uses these)
+    - Persistent: survives across multiple calls (Programmer uses these)
+
+Any class that implements send(message: str) -> str is a valid Session.
 
 Built-in implementations:
     - AnthropicSession   direct Anthropic API
     - OpenClawSession    routes through OpenClaw agent
     - NanobotSession     routes through nanobot agent
-
-To add a new platform, implement the Session interface:
-
-    class MySession(Session):
-        def send(self, message: str) -> str:
-            # call your platform here
-            return reply
 """
 
 from __future__ import annotations
