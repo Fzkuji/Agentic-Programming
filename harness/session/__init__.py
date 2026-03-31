@@ -4,32 +4,22 @@ Session — the pluggable execution backend for Agentic Programming.
 A Session is like a CPU or interpreter — it executes what it's given and returns
 the result. It doesn't decide what to run or in what order.
 
-In Agentic Programming, Sessions have two lifecycles:
-    - Ephemeral: created for one Function execution, then destroyed (Runtime uses these)
-    - Persistent: survives across multiple calls (Programmer uses these)
+Two lifecycles:
+    - Ephemeral: created for one Function, then destroyed (Runtime uses these)
+    - Persistent: survives across calls, maintains conversation (Programmer uses these)
+
+All Sessions maintain conversation history so that:
+    1. Persistent Sessions can be reused across multiple calls
+    2. KV cache prefix is preserved when the same Session is reused
+    3. Context accumulates naturally (append-only)
 
 Any class that implements send() is a valid Session.
-
-The send() interface accepts flexible input:
-    - str: plain text message
-    - dict: structured message (e.g. {"text": "...", "images": [...]})
-    - list: multi-part message (e.g. [{"type": "text", ...}, {"type": "image", ...}])
-
-This allows Sessions to support multimodal input (text, images, audio, etc.)
-depending on the underlying model's capabilities.
-
-Built-in implementations:
-    - AnthropicSession   Direct Anthropic API (text + images)
-    - OpenAISession      Direct OpenAI API (text + images)
-    - ClaudeCodeSession  Claude Code CLI (--print mode)
-    - CodexSession       OpenAI Codex CLI
-    - OpenClawSession    OpenClaw gateway API
-    - CLISession         Any CLI agent via subprocess
 """
 
 from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Union
+import uuid
 
 
 # Message can be plain text, a structured dict, or a list of content parts
@@ -43,15 +33,11 @@ class Session(ABC):
     A Session is anything that can:
         1. Receive a message (text, multimodal, or structured)
         2. Return a reply (string)
-
-    Input format depends on the Session implementation:
-        - str: all Sessions must support plain text
-        - dict/list: Sessions may support multimodal content
-          (images, audio, etc.) based on their backend
+        3. Maintain conversation history for reuse
 
     The Session is responsible for:
         - Interpreting the message format
-        - Maintaining its own conversation history (if applicable)
+        - Maintaining its own conversation history
         - Managing its own connection and authentication
         - Returning complete (not streamed) replies
 
@@ -63,30 +49,27 @@ class Session(ABC):
 
     @abstractmethod
     def send(self, message: Message) -> str:
-        """
-        Send a message and return the reply.
-
-        Args:
-            message: The input message. Can be:
-                - str: plain text
-                - dict: structured message, e.g.:
-                    {"text": "describe this", "images": ["path/to/img.png"]}
-                - list: content parts (Anthropic/OpenAI format), e.g.:
-                    [{"type": "text", "text": "..."}, {"type": "image_url", ...}]
-
-        Returns:
-            The reply as a plain string
-        """
+        """Send a message and return the reply."""
         pass
 
+    def reset(self):
+        """Clear conversation history. Override in subclasses."""
+        pass
 
-# ------------------------------------------------------------------
-# Direct API Sessions
-# ------------------------------------------------------------------
+    @property
+    def history_length(self) -> int:
+        """Number of turns in conversation history. Override in subclasses."""
+        return 0
+
+
+# ==================================================================
+# Direct API Sessions (stateful — maintain history in memory)
+# ==================================================================
 
 class AnthropicSession(Session):
     """
     Direct Anthropic API session. Supports text and image input.
+    Maintains full conversation history for KV cache reuse.
 
     Args:
         model:          Model name (default: claude-sonnet-4-6)
@@ -111,10 +94,10 @@ class AnthropicSession(Session):
         self._model = model
         self._max_tokens = max_tokens
         self._system_prompt = system_prompt
-        self._history = []
+        self._history: list[dict] = []
 
     def send(self, message: Message) -> str:
-        content = self._to_anthropic_content(message)
+        content = self._to_content(message)
         self._history.append({"role": "user", "content": content})
 
         response = self._client.messages.create(
@@ -129,16 +112,20 @@ class AnthropicSession(Session):
         return reply
 
     def reset(self):
-        """Clear conversation history to start a fresh session."""
+        """Clear conversation history."""
         self._history = []
 
+    @property
+    def history_length(self) -> int:
+        return len(self._history) // 2  # each turn = user + assistant
+
     @staticmethod
-    def _to_anthropic_content(message: Message):
+    def _to_content(message: Message):
         """Convert flexible message format to Anthropic content format."""
         if isinstance(message, str):
             return message
         if isinstance(message, list):
-            return message  # assume already in Anthropic format
+            return message
         if isinstance(message, dict):
             parts = []
             if "text" in message:
@@ -148,13 +135,10 @@ class AnthropicSession(Session):
                 for img_path in message["images"]:
                     with open(img_path, "rb") as f:
                         data = base64.standard_b64encode(f.read()).decode()
-                    # Detect media type from extension
                     ext = img_path.rsplit(".", 1)[-1].lower()
                     media_type = {
-                        "png": "image/png",
-                        "jpg": "image/jpeg",
-                        "jpeg": "image/jpeg",
-                        "gif": "image/gif",
+                        "png": "image/png", "jpg": "image/jpeg",
+                        "jpeg": "image/jpeg", "gif": "image/gif",
                         "webp": "image/webp",
                     }.get(ext, "image/png")
                     parts.append({
@@ -172,6 +156,7 @@ class AnthropicSession(Session):
 class OpenAISession(Session):
     """
     Direct OpenAI API session. Supports text and image input.
+    Maintains full conversation history for KV cache reuse.
 
     Args:
         model:          Model name (default: gpt-4o)
@@ -204,10 +189,10 @@ class OpenAISession(Session):
         self._model = model
         self._max_tokens = max_tokens
         self._system_prompt = system_prompt
-        self._history = []
+        self._history: list[dict] = []
 
     def send(self, message: Message) -> str:
-        content = self._to_openai_content(message)
+        content = self._to_content(message)
         self._history.append({"role": "user", "content": content})
 
         messages = [{"role": "system", "content": self._system_prompt}] + self._history
@@ -223,16 +208,20 @@ class OpenAISession(Session):
         return reply
 
     def reset(self):
-        """Clear conversation history."""
         self._history = []
 
+    @property
+    def history_length(self) -> int:
+        return len(self._history) // 2
+
+
     @staticmethod
-    def _to_openai_content(message: Message):
+    def _to_content(message: Message):
         """Convert flexible message format to OpenAI content format."""
         if isinstance(message, str):
             return message
         if isinstance(message, list):
-            return message  # assume already in OpenAI format
+            return message
         if isinstance(message, dict):
             parts = []
             if "text" in message:
@@ -244,49 +233,240 @@ class OpenAISession(Session):
                         data = base64.standard_b64encode(f.read()).decode()
                     ext = img_path.rsplit(".", 1)[-1].lower()
                     media_type = {
-                        "png": "image/png",
-                        "jpg": "image/jpeg",
-                        "jpeg": "image/jpeg",
-                        "gif": "image/gif",
+                        "png": "image/png", "jpg": "image/jpeg",
+                        "jpeg": "image/jpeg", "gif": "image/gif",
                         "webp": "image/webp",
                     }.get(ext, "image/png")
                     parts.append({
                         "type": "image_url",
-                        "image_url": {
-                            "url": f"data:{media_type};base64,{data}"
-                        }
+                        "image_url": {"url": f"data:{media_type};base64,{data}"}
                     })
             return parts if parts else message
         return message
 
 
-# ------------------------------------------------------------------
-# CLI Agent Sessions
-# ------------------------------------------------------------------
+# ==================================================================
+# CLI Agent Sessions (stateful — use session ID for persistence)
+# ==================================================================
+
+class ClaudeCodeSession(Session):
+    """
+    Claude Code CLI session with conversation persistence.
+
+    Uses --session-id to maintain a persistent conversation across calls.
+    Each send() resumes the same conversation, preserving full context.
+
+    Two modes:
+        - Persistent (default): uses --resume + --session-id to continue conversations
+        - Stateless: each send() is independent (set session_id=None)
+
+    Args:
+        model:              Model override
+        max_turns:          Max agent turns per invocation
+        system_prompt:      System prompt override
+        allowed_tools:      List of allowed tools
+        permission_mode:    Permission mode (default: bypassPermissions)
+        session_id:         Session ID for persistence (auto-generated if not set)
+        timeout:            Seconds to wait for completion (default: 600)
+    """
+
+    def __init__(
+        self,
+        model: str = None,
+        max_turns: int = None,
+        system_prompt: str = None,
+        allowed_tools: list = None,
+        permission_mode: str = "bypassPermissions",
+        session_id: str = "auto",
+        timeout: int = 600,
+    ):
+        self._model = model
+        self._max_turns = max_turns
+        self._system_prompt = system_prompt
+        self._allowed_tools = allowed_tools
+        self._permission_mode = permission_mode
+        self._timeout = timeout
+        self._turn_count = 0
+
+        # Session persistence
+        if session_id == "auto":
+            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+        else:
+            self._session_id = session_id  # None = stateless
+
+    def send(self, message: Message) -> str:
+        import subprocess
+        import os
+
+        text = self._extract_text(message)
+
+        cmd = ["claude", "--print", f"--permission-mode={self._permission_mode}"]
+
+        # Session persistence: resume on 2nd+ call
+        if self._session_id:
+            if self._turn_count > 0:
+                cmd.extend(["--resume", "--session-id", self._session_id])
+            else:
+                cmd.extend(["--session-id", self._session_id])
+
+        if self._model:
+            cmd.extend(["--model", self._model])
+        if self._max_turns:
+            cmd.extend(["--max-turns", str(self._max_turns)])
+        if self._system_prompt and self._turn_count == 0:
+            # System prompt only on first call (already in session after that)
+            cmd.extend(["--system-prompt", self._system_prompt])
+        if self._allowed_tools:
+            for tool in self._allowed_tools:
+                cmd.extend(["--allowedTools", tool])
+
+        cmd.extend(["--prompt", text])
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=self._timeout, env=os.environ,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Claude Code failed (exit {result.returncode}): {result.stderr[:500]}"
+            )
+
+        self._turn_count += 1
+        return result.stdout.strip()
+
+    def reset(self):
+        """Start a new session (new session ID)."""
+        self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+        self._turn_count = 0
+
+    @property
+    def history_length(self) -> int:
+        return self._turn_count
+
+    @staticmethod
+    def _extract_text(message: Message) -> str:
+        if isinstance(message, str):
+            return message
+        if isinstance(message, dict):
+            return message.get("text", str(message))
+        if isinstance(message, list):
+            texts = [p.get("text", "") for p in message
+                     if isinstance(p, dict) and p.get("type") == "text"]
+            return "\n".join(texts) if texts else str(message)
+        return str(message)
+
+
+class CodexSession(Session):
+    """
+    OpenAI Codex CLI session with conversation persistence.
+
+    Uses --session-id to maintain a persistent conversation across calls.
+
+    Two modes:
+        - Persistent (default): uses --session-id to continue conversations
+        - Stateless: each send() is independent (set session_id=None)
+
+    Args:
+        model:      Model override
+        provider:   Provider (openai, anthropic, etc.)
+        quiet:      Suppress non-essential output (default: True)
+        session_id: Session ID for persistence (auto-generated if not set)
+        timeout:    Seconds to wait for completion (default: 600)
+    """
+
+    def __init__(
+        self,
+        model: str = None,
+        provider: str = None,
+        quiet: bool = True,
+        session_id: str = "auto",
+        timeout: int = 600,
+    ):
+        self._model = model
+        self._provider = provider
+        self._quiet = quiet
+        self._timeout = timeout
+        self._turn_count = 0
+
+        if session_id == "auto":
+            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+        else:
+            self._session_id = session_id
+
+    def send(self, message: Message) -> str:
+        import subprocess
+        import os
+
+        text = self._extract_text(message)
+
+        cmd = ["codex", "--approval-mode", "full-auto"]
+
+        if self._quiet:
+            cmd.append("--quiet")
+        if self._model:
+            cmd.extend(["--model", self._model])
+        if self._provider:
+            cmd.extend(["--provider", self._provider])
+
+        # Session persistence
+        if self._session_id:
+            cmd.extend(["--session-id", self._session_id])
+
+        cmd.append(text)
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True,
+            timeout=self._timeout, env=os.environ,
+        )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Codex failed (exit {result.returncode}): {result.stderr[:500]}"
+            )
+
+        self._turn_count += 1
+        return result.stdout.strip()
+
+    def reset(self):
+        """Start a new session."""
+        self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+        self._turn_count = 0
+
+    @property
+    def history_length(self) -> int:
+        return self._turn_count
+
+    @staticmethod
+    def _extract_text(message: Message) -> str:
+        if isinstance(message, str):
+            return message
+        if isinstance(message, dict):
+            return message.get("text", str(message))
+        if isinstance(message, list):
+            texts = [p.get("text", "") for p in message
+                     if isinstance(p, dict) and p.get("type") == "text"]
+            return "\n".join(texts) if texts else str(message)
+        return str(message)
+
+
+# ==================================================================
+# Generic CLI Session
+# ==================================================================
 
 class CLISession(Session):
     """
     Generic CLI agent session via subprocess.
 
-    Wraps any command-line agent. Each send() runs the command as a subprocess.
+    Each send() runs the command. Stateless by default — no history.
 
     Args:
-        command:    Command template. Use {message} for the input placeholder.
-                    If no {message}, input is passed via stdin.
-        timeout:    Seconds to wait for completion
+        command:    Command template. Use {message} for input placeholder.
+        timeout:    Seconds to wait
         env:        Additional environment variables
-
-    Examples:
-        CLISession(command='my-agent --prompt "{message}"')
-        CLISession(command='my-agent --stdin')
     """
 
-    def __init__(
-        self,
-        command: str,
-        timeout: int = 300,
-        env: dict = None,
-    ):
+    def __init__(self, command: str, timeout: int = 300, env: dict = None):
         self._command = command
         self._timeout = timeout
         self._env = env
@@ -295,9 +475,7 @@ class CLISession(Session):
         import subprocess
         import os
 
-        # CLI sessions use text only — extract text from multimodal input
         text = self._extract_text(message)
-
         env = dict(os.environ)
         if self._env:
             env.update(self._env)
@@ -317,7 +495,7 @@ class CLISession(Session):
 
         if result.returncode != 0:
             raise RuntimeError(
-                f"CLI command failed (exit {result.returncode}): {result.stderr[:500]}"
+                f"CLI failed (exit {result.returncode}): {result.stderr[:500]}"
             )
         return result.stdout.strip()
 
@@ -328,153 +506,42 @@ class CLISession(Session):
         if isinstance(message, dict):
             return message.get("text", str(message))
         if isinstance(message, list):
-            texts = [p.get("text", "") for p in message if isinstance(p, dict) and p.get("type") == "text"]
+            texts = [p.get("text", "") for p in message
+                     if isinstance(p, dict) and p.get("type") == "text"]
             return "\n".join(texts) if texts else str(message)
         return str(message)
 
 
-class ClaudeCodeSession(Session):
-    """
-    Claude Code CLI session (--print mode, non-interactive).
-
-    Each send() is an independent invocation with full tool access.
-
-    Args:
-        model:              Model override
-        max_turns:          Max agent turns per invocation
-        system_prompt:      System prompt override
-        allowed_tools:      List of allowed tools
-        permission_mode:    Permission mode (default: bypassPermissions)
-    """
-
-    def __init__(
-        self,
-        model: str = None,
-        max_turns: int = None,
-        system_prompt: str = None,
-        allowed_tools: list = None,
-        permission_mode: str = "bypassPermissions",
-    ):
-        self._model = model
-        self._max_turns = max_turns
-        self._system_prompt = system_prompt
-        self._allowed_tools = allowed_tools
-        self._permission_mode = permission_mode
-
-    def send(self, message: Message) -> str:
-        import subprocess
-        import os
-
-        text = message if isinstance(message, str) else self._extract_text(message)
-
-        cmd = ["claude", "--print", f"--permission-mode={self._permission_mode}"]
-
-        if self._model:
-            cmd.extend(["--model", self._model])
-        if self._max_turns:
-            cmd.extend(["--max-turns", str(self._max_turns)])
-        if self._system_prompt:
-            cmd.extend(["--system-prompt", self._system_prompt])
-        if self._allowed_tools:
-            for tool in self._allowed_tools:
-                cmd.extend(["--allowedTools", tool])
-
-        cmd.extend(["--prompt", text])
-
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, env=os.environ,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Claude Code failed (exit {result.returncode}): {result.stderr[:500]}"
-            )
-        return result.stdout.strip()
-
-    @staticmethod
-    def _extract_text(message: Message) -> str:
-        if isinstance(message, dict):
-            return message.get("text", str(message))
-        if isinstance(message, list):
-            texts = [p.get("text", "") for p in message if isinstance(p, dict) and p.get("type") == "text"]
-            return "\n".join(texts) if texts else str(message)
-        return str(message)
-
-
-class CodexSession(Session):
-    """
-    OpenAI Codex CLI session (full-auto mode).
-
-    Each send() is an independent invocation.
-
-    Args:
-        model:      Model override
-        provider:   Provider (openai, anthropic, etc.)
-        quiet:      Suppress non-essential output (default: True)
-    """
-
-    def __init__(
-        self,
-        model: str = None,
-        provider: str = None,
-        quiet: bool = True,
-    ):
-        self._model = model
-        self._provider = provider
-        self._quiet = quiet
-
-    def send(self, message: Message) -> str:
-        import subprocess
-        import os
-
-        text = message if isinstance(message, str) else (
-            message.get("text", str(message)) if isinstance(message, dict) else str(message)
-        )
-
-        cmd = ["codex", "--approval-mode", "full-auto"]
-
-        if self._quiet:
-            cmd.append("--quiet")
-        if self._model:
-            cmd.extend(["--model", self._model])
-        if self._provider:
-            cmd.extend(["--provider", self._provider])
-
-        cmd.append(text)
-
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=600, env=os.environ,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Codex failed (exit {result.returncode}): {result.stderr[:500]}"
-            )
-        return result.stdout.strip()
-
-
-# ------------------------------------------------------------------
-# Gateway Sessions
-# ------------------------------------------------------------------
+# ==================================================================
+# Gateway Session
+# ==================================================================
 
 class OpenClawSession(Session):
     """
     Routes messages through an OpenClaw gateway.
 
-    Benefits from OpenClaw's persistent memory, tools, and context.
+    Persistent by default — uses session_id to maintain conversation.
 
     Args:
         gateway_url:    OpenClaw gateway URL
-        session_id:     Session identifier for message routing
+        session_id:     Session identifier (auto-generated if "auto")
+        timeout:        Request timeout in seconds
     """
 
     def __init__(
         self,
         gateway_url: str = "http://localhost:18789",
-        session_id: str = "default",
+        session_id: str = "auto",
+        timeout: float = 120.0,
     ):
         self._gateway_url = gateway_url
-        self._session_id = session_id
+        self._timeout = timeout
+        self._turn_count = 0
+
+        if session_id == "auto":
+            self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+        else:
+            self._session_id = session_id
 
     def send(self, message: Message) -> str:
         try:
@@ -482,16 +549,27 @@ class OpenClawSession(Session):
         except ImportError:
             raise ImportError("httpx package required: pip install httpx")
 
-        # Send text or structured content
-        if isinstance(message, str):
-            payload = {"message": message, "session_id": self._session_id}
-        else:
-            payload = {"message": message, "session_id": self._session_id}
+        text = message if isinstance(message, str) else (
+            message.get("text", str(message)) if isinstance(message, dict) else str(message)
+        )
+
+        payload = {"message": text, "session_id": self._session_id}
 
         response = httpx.post(
             f"{self._gateway_url}/message",
             json=payload,
-            timeout=120.0,
+            timeout=self._timeout,
         )
         response.raise_for_status()
+
+        self._turn_count += 1
         return response.json()["reply"]
+
+    def reset(self):
+        """Start a new session."""
+        self._session_id = f"harness-{uuid.uuid4().hex[:12]}"
+        self._turn_count = 0
+
+    @property
+    def history_length(self) -> int:
+        return self._turn_count
