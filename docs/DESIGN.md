@@ -172,23 +172,31 @@ logs/run_20260401_130000_abc123/
 
 ---
 
-## 6. Programmer (Future)
+## 6. Programmer
 
-The planning agent. Uses LLM to decide what functions to call.
+The planning agent. Uses an LLM to decide what functions to call and in what order.
 
 ```python
-# Not yet implemented — design concept:
-programmer = Programmer(session=planning_session)
+programmer = Programmer(session=AnthropicSession(model="claude-sonnet"))
 programmer.register(observe, click, verify)
 programmer.run("Open Safari and search for hello world")
 ```
 
 The Programmer:
-- Has a persistent Session (remembers across decisions)
-- Sees available functions and their signatures
-- Decides what to call next
-- Can create new functions dynamically
-- Only sees structured results from function calls
+- Has a **persistent Session** (remembers across decisions)
+- Sees available functions and their **docstrings** (= capabilities)
+- Decides what to call next, with what arguments
+- Can **create new functions** dynamically (by writing new docstrings)
+- Only sees **structured results** from function calls — never execution details
+- Is itself just another LLM Session — no special mechanism
+
+**Programmer vs MCP / tool-calling:**
+Both let an LLM decide what to call. The difference: MCP tools are Python code
+executed by a CPU. Our functions are natural language executed by an LLM.
+A Programmer could be implemented on top of MCP by registering functions as tools.
+
+**Status:** Design finalized. Implementation deferred — the function layer
+comes first, Programmer builds on top of it.
 
 ---
 
