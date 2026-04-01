@@ -4,6 +4,43 @@ A programming paradigm where LLM and Python co-execute functions.
 
 ---
 
+## Why Agentic Programming?
+
+### 🔄 Automatic Prompt Engineering
+Prompts are docstrings. Every function call runs the prompt, returns structured results, and can be iterated programmatically. No more copy-pasting into ChatGPT — optimize prompts in a loop:
+```python
+for version in prompt_variants:
+    fn.__doc__ = version            # change the prompt
+    result = fn(session, task=test) # run it
+    score = evaluate(result)        # measure
+    # pick the best version automatically
+```
+
+### 🧬 Self-Evolving Agents
+Agents can create new Agentic Functions at runtime. Encounter a new task → write a new function → reuse it next time. The function library grows, the agent gets smarter:
+```python
+create_function(
+    name="check_email",
+    docstring="Open the inbox, count unread emails, report senders and subjects",
+    return_fields={"unread_count": "int", "emails": "list[dict]"}
+)
+# Now the agent can call check_email() forever
+```
+
+### 🧠 Agentic Context Engineering
+Context is controlled by code, not by luck. Each function decides what the LLM sees through Scope and the two-layer Session design:
+- **Programmer Session**: only sees result summaries (grows slowly)
+- **Worker Sessions**: have full data (destroyed after each call)
+- **Scope**: controls call stack visibility, peer access, compaction
+
+### 🔌 Drop-in Replacement
+Works with existing ecosystems — no need to switch platforms:
+- **MCP compatible**: register as MCP Server → any MCP client can call our functions
+- **Skill compatible**: SKILL.md works with Claude Code, OpenClaw, etc.
+- **CLI compatible**: every function callable from command line
+
+---
+
 ## Architecture
 
 ```
