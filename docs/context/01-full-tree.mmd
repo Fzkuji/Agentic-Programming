@@ -1,0 +1,20 @@
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#e8f4fd', 'primaryTextColor': '#1a1a1a', 'primaryBorderColor': '#4a90d9', 'lineColor': '#666', 'secondaryColor': '#f0f0f0'}}}%%
+graph TD
+    classDef active fill:#4a90d9,stroke:#2c6fad,color:#fff,stroke-width:2px
+    classDef normal fill:#e8f4fd,stroke:#4a90d9,color:#1a1a1a
+    classDef dim fill:#f5f5f5,stroke:#ccc,color:#999
+
+    root["🌳 root"]:::normal
+    nav["navigate('login')"]:::normal
+    obs["observe('find login')"]:::normal
+    ocr["run_ocr(img)"]:::normal
+    det["detect_all(img)"]:::normal
+    act["act('login', [347,291])"]:::normal
+    verify["verify('login')"]:::normal
+
+    root --> nav
+    nav --> obs
+    nav --> act
+    nav --> verify
+    obs --> ocr
+    obs --> det
