@@ -1,6 +1,6 @@
 # Agentic Context
 
-> 每个 Agentic Function 用 `with agentic()` 声明自己。层级由嵌套自动决定，不需要手动传 ctx。
+> 用 `@agentic_function` 装饰器自动追踪调用栈。层级由 Python 调用关系强制决定，不可能传错。
 
 ---
 
@@ -11,136 +11,181 @@
 ```python
 @dataclass
 class Context:
-    name: str               # 函数名
-    prompt: str = ""        # docstring
-    input: dict = None      # 发给 LLM 的数据
-    output: Any = None      # LLM 返回的结果
-    error: str = ""         # 错误信息
-    children: list = None   # 子函数的 Context
-    parent: Context = None  # 父 Context
-    level: str = "summary"  # 对外暴露粒度：trace / detail / summary / result
+    name: str                    # 函数名（自动从 __name__ 取）
+    prompt: str = ""             # docstring（自动从 __doc__ 取）
+    input: dict = None           # 发给 LLM 的数据（用户手动设置）
+    output: Any = None           # 返回值（自动记录）
+    error: str = ""              # 错误信息（自动捕获）
+    status: str = "running"      # running / success / error（自动管理）
+    children: list = None        # 子函数的 Context（自动挂载）
+    parent: Context = None       # 父 Context（自动设置）
+    expose: str = "summary"      # 对外暴露粒度（用户可配置）
+    start_time: float = 0        # 开始时间（自动记录）
+    end_time: float = 0          # 结束时间（自动记录）
 ```
 
 ---
 
-## 核心机制：`with agentic()`
+## @agentic_function
 
-用 Python 的 context manager + `contextvars` 自动追踪调用层级。**用户不需要手动传 ctx。**
+装饰器自动做五件事：
+1. 从 `__name__` 取函数名，从 `__doc__` 取 prompt
+2. 创建 Context 节点，挂到当前父节点的 children
+3. 设为当前活跃 Context（子函数自动成为 child）
+4. 函数结束后记录 output / error / 耗时
+5. 恢复父节点为当前活跃 Context
 
 ```python
-from agentic import agentic
+from agentic import agentic_function, get_context
 
-def navigate(target):
-    with agentic("navigate") as ctx:
-        obs = observe(task=f"find {target}")     # 自动是 navigate 的 child
-        result = act(target=target, loc=obs["location"])  # 自动是 navigate 的 child
-        ctx.output = {"success": True}
-        return ctx.output
-
+@agentic_function
 def observe(task):
-    with agentic("observe", prompt="Look at the screen...") as ctx:
-        ctx.input = {"task": task}
-        
-        img = take_screenshot()
-        ocr = run_ocr(img)           # 自动是 observe 的 child
-        elements = detect_all(img)    # 自动是 observe 的 child
-        
-        # LLM 调用时读取兄弟摘要
-        siblings = ctx.sibling_summaries()
-        reply = llm_call(prompt=ctx.prompt, input=ctx.input, context=siblings)
-        
-        ctx.output = parse(reply)
-        return ctx.output
-
-def act(target, loc):
-    with agentic("act", prompt="Click the target...") as ctx:
-        ctx.input = {"target": target, "location": loc}
-        
-        # act 能看到 observe 的摘要
-        siblings = ctx.sibling_summaries()
-        # → ["observe: {target_visible: true, location: [347, 291]}"]
-        
-        click(loc)
-        ctx.output = {"clicked": True}
-        return ctx.output
+    """Look at the screen and find all visible UI elements.
+    Check if the target described in task is visible."""
+    
+    ctx = get_context()              # 需要时才取
+    ctx.input = {"task": task}       # 手动设置输入
+    
+    img = take_screenshot()
+    ocr = run_ocr(img)               # 自动成为 observe 的 child
+    elements = detect_all(img)        # 自动成为 observe 的 child
+    
+    reply = llm_call(
+        prompt=ctx.prompt,            # = observe.__doc__
+        input=ctx.input,
+        context=ctx.sibling_summaries(),
+    )
+    return parse(reply)               # 自动记录为 ctx.output
 ```
 
----
-
-## 规则
-
-1. **每个函数用 `with agentic(name)` 声明自己**
-2. **层级由 `with` 嵌套自动决定**（不需要手动传 ctx）
-3. **在 `with` 内调用的子函数，自动成为 children**
-4. **`sibling_summaries()` 返回同层前面兄弟的摘要**
-5. **异常自动捕获到 `ctx.error`**
+**用户不需要传 ctx 参数。层级由 Python 调用关系强制决定。**
 
 ---
 
-## 为什么不需要手动传 ctx
+## expose（暴露粒度）
 
-Python 的 `contextvars` 自动追踪当前在哪一层：
+控制 `sibling_summaries()` 返回这个函数时的粒度。通过 decorator 参数设置：
 
 ```python
-with agentic("navigate"):        # 当前层 = navigate
-    with agentic("observe"):      # 当前层 = observe，parent = navigate
-        with agentic("run_ocr"):  # 当前层 = run_ocr，parent = observe
-            ...
-    # 退出 observe，当前层回到 navigate
-    with agentic("act"):          # 当前层 = act，parent = navigate
-        ...
+@agentic_function                      # 默认 expose="summary"
+def observe(task):
+    ...
+
+@agentic_function(expose="detail")     # 兄弟能看到完整输入输出
+def observe(task):
+    ...
+
+@agentic_function(expose="silent")     # 兄弟完全看不到
+def internal_helper(x):
+    ...
 ```
 
-**不可能传错。层级由代码结构强制决定。**
+| expose | `sibling_summaries()` 返回的内容 |
+|--------|--------------------------------|
+| `"trace"` | prompt + 完整输入输出 + LLM 原始回复 |
+| `"detail"` | 完整输入和输出 |
+| `"summary"` | 一句话摘要（默认） |
+| `"result"` | 只有返回值 |
+| `"silent"` | 不出现在兄弟摘要中 |
 
 ---
 
-## 调用栈
+## get_context()
 
-执行后 Context 形成树：
+在函数内部获取当前 Context。用于：
+- 设置 `ctx.input`（告诉 Context 你发了什么给 LLM）
+- 读取 `ctx.sibling_summaries()`（获取前面兄弟的信息）
+- 读取 `ctx.prompt`（= 函数的 docstring）
 
+```python
+@agentic_function
+def act(target, location):
+    """Click the specified target at the given location."""
+    ctx = get_context()
+    ctx.input = {"target": target, "location": location}
+    
+    # 能看到前面 observe 的摘要
+    siblings = ctx.sibling_summaries()
+    # → ["observe: found login button at (347, 291)"]
+    
+    click(location)
+    return {"clicked": True}
 ```
-root
-└── navigate
-    ├── observe
-    │   ├── run_ocr
-    │   └── detect_all
-    └── act
-```
+
+**不调 `get_context()` 也完全没问题** — Context 照样自动追踪，只是你没手动设置 input。
 
 ---
 
-## Level（暴露粒度）
+## 完整示例
 
-子函数的信息传给兄弟时，按 level 裁剪：
+```python
+from agentic import agentic_function, get_context
 
-| Level | 内容 | 示例 |
-|-------|------|------|
-| `trace` | 所有细节 | prompt + 原始 OCR 数据 + LLM 原始回复 |
-| `detail` | 输入输出 | input: 77 OCR items, output: {found: true} |
-| `summary` | 一句话 | "observe: found login button at (347, 291)" |
-| `result` | 只有返回值 | {target_visible: true} |
+@agentic_function
+def run_ocr(img):
+    """Extract text from screenshot using OCR."""
+    return {"texts": ["Login", "Password", "Submit"], "count": 3}
 
-默认 `summary`。
+@agentic_function
+def detect_all(img):
+    """Detect all UI elements in screenshot."""
+    return {"elements": ["button", "input", "link"], "count": 3}
+
+@agentic_function
+def observe(task):
+    """Look at the screen and find all visible UI elements."""
+    ctx = get_context()
+    ctx.input = {"task": task}
+    
+    img = take_screenshot()
+    ocr = run_ocr(img)           # 自动是 observe 的 child
+    elements = detect_all(img)    # 自动是 observe 的 child
+    
+    reply = llm_call(ctx.prompt, input=ctx.input)
+    return parse(reply)
+
+@agentic_function
+def act(target, location):
+    """Click the specified target at the given location."""
+    ctx = get_context()
+    ctx.input = {"target": target, "location": location}
+    click(location)
+    return {"clicked": True}
+
+@agentic_function
+def navigate(target):
+    """Navigate to the target by observing and acting."""
+    obs = observe(task=f"find {target}")
+    if obs["target_visible"]:
+        result = act(target=target, location=obs["location"])
+        return {"success": True}
+    return {"success": False}
+
+# 运行
+navigate("login")
+```
+
+执行后 Context 树：
+
+```
+navigate ✓ 3200ms → {success: True}
+├── observe ✓ 1200ms → {target_visible: True, location: [347, 291]}
+│   ├── run_ocr ✓ 50ms → {texts: [...], count: 3}
+│   └── detect_all ✓ 80ms → {elements: [...], count: 3}
+└── act ✓ 820ms → {clicked: True}
+```
 
 ---
 
 ## Traceback
 
-报错时：
+报错时自动生成调用链：
+
 ```
 Agentic Traceback:
-  navigate(target="login") → error
+  navigate(target="login") → error, 4523ms
     observe(task="find login") → success, 1200ms
-    act(target="login") → error: "element not interactable"
-```
-
-正常时：
-```
-navigate ✓ 3200ms
-├── observe ✓ 1200ms → found 156 elements
-├── act ✓ 820ms → clicked login
-└── verify ✓ 650ms → verified
+    act(target="login") → error, 820ms: "element not interactable"
 ```
 
 ---
@@ -148,14 +193,14 @@ navigate ✓ 3200ms
 ## 持久化
 
 ```python
-root.save("logs/run.jsonl")    # 机器可读
-root.save("logs/run.md")       # 人类可读
+root_ctx.save("logs/run.jsonl")    # 机器可读
+root_ctx.save("logs/run.md")       # 人类可读
 ```
 
 ---
 
 ## 核心就三件事
 
-1. **`with agentic()` 自动管理层级**（不可能传错）
-2. **Level 控制暴露粒度**（兄弟只看摘要）
-3. **LLM 调用时从 Context 读取上下文**（`sibling_summaries()`）
+1. **`@agentic_function` 自动追踪调用栈**（层级由 Python 调用关系强制决定）
+2. **`expose` 控制对外暴露粒度**（默认 summary）
+3. **`get_context()` 按需获取当前 Context**（设置 input、读取 siblings）
