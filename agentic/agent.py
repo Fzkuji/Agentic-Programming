@@ -1,9 +1,24 @@
 """
-llm_call — LLM API call with automatic context recording.
+agent — wraps any LLM call with automatic context recording.
 
 Automatically:
 1. Generates context summary from the current Context tree (if not provided)
 2. Records input, media, and raw_reply to the current Context
+
+Usage:
+    # Wrap your own LLM call:
+    reply = agent.invoke(
+        call=lambda msgs: session.send(msgs),
+        prompt="Look at the screen...",
+        input={"task": task},
+    )
+    
+    # Or use the convenience function:
+    reply = agent.invoke(
+        prompt="Look at the screen...",
+        input={"task": task},
+        model="sonnet",
+    )
 """
 
 from __future__ import annotations
@@ -14,17 +29,17 @@ from typing import Any, Optional
 from agentic.context import _current_ctx
 
 
-def llm_call(
+def invoke(
     prompt: str,
     input: dict = None,
     images: list[str] = None,
     context: str = None,
     schema: dict = None,
     model: str = "sonnet",
-    _api_fn=None,
+    call: Any = None,
 ) -> str:
     """
-    Call an LLM and auto-record to the current Context.
+    Invoke an LLM and auto-record to the current Context.
     
     Args:
         prompt:   Instructions (usually the docstring)
@@ -33,7 +48,8 @@ def llm_call(
         context:  Context summary (auto-generated from ctx.summarize() if None)
         schema:   Expected output JSON schema
         model:    Model name
-        _api_fn:  Override API function (for testing)
+        call:     Custom LLM call function: fn(messages, model) -> str
+                  If None, uses default (raises NotImplementedError)
     
     Returns:
         LLM reply as string
@@ -53,8 +69,8 @@ def llm_call(
     messages = _build_messages(prompt, input, images, context, schema)
 
     # Call API
-    if _api_fn is not None:
-        reply = _api_fn(messages, model=model)
+    if call is not None:
+        reply = call(messages, model=model)
     else:
         reply = _default_api_call(messages, model=model)
 
