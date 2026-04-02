@@ -11,11 +11,11 @@ Core exports:
 
 from agentic.context import Context, get_context, get_root_context, init_root
 from agentic.function import agentic_function
-from agentic.agent import invoke
+from agentic.runtime import run
 
 __all__ = [
     "agentic_function",
-    "invoke",
+    "run",
     "Context",
     "get_context",
     "get_root_context",
