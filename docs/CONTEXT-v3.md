@@ -25,9 +25,9 @@ class Context:
 ## 规则
 
 1. **每个函数创建自己的 Context**
-2. **调用子函数时，把自己的 Context 传入**
-3. **子函数完成后，自动挂到父 Context 的 children**
-4. **LLM 调用时，从父 Context 读取之前兄弟的摘要**
+2. **调用子函数时，把自己的 Context 传入**（引用传递，同一个对象）
+3. **子函数完成后，记录自动挂到父 Context 的 children**（后续兄弟函数能看到）
+4. **LLM 调用时，从父 Context 读取之前兄弟的摘要**（`ctx.sibling_summaries()`）
 
 ---
 
