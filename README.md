@@ -1,334 +1,178 @@
 # Agentic Programming
 
-A programming paradigm where LLM and Python co-execute functions.
+> A programming paradigm where Python and LLM co-execute functions.
+
+![Role Reversal — from LLM-as-controller to Python+LLM cooperation](docs/images/role_reversal.png)
+
+**Traditional approach**: LLM calls tools one by one (slow, fragile, context-heavy).  
+**Agentic Programming**: Python functions bundle deterministic code + LLM reasoning together. The LLM works *inside* the function, not outside it.
 
 ---
 
-## Why Agentic Programming?
+## How It Works
 
-### 🔄 Automatic Prompt Engineering
-Prompts are docstrings. Every function call runs the prompt, returns structured results, and can be iterated programmatically:
-```python
-for version in prompt_variants:
-    fn.__doc__ = version            # change the prompt
-    result = fn(session, task=test) # run it
-    score = evaluate(result)        # measure
-    # pick the best version automatically
-```
+Every Agentic Function has two runtimes cooperating:
 
-### 🧬 Self-Evolving Agents
-The **Meta Agentic Function** creates new Agentic Functions at runtime. Encounter a new task → create a new function → reuse it forever. The function library grows, the agent gets smarter:
-```python
-# Human or LLM calls this via MCP:
-meta_create(
-    name="check_email",
-    docstring="Open the inbox, count unread emails, report senders and subjects",
-    return_fields={"unread_count": "int", "emails": "list[dict]"}
-)
-# check_email() is now available as an MCP tool
-```
-
-### 🧠 Agentic Context Engineering
-Context is controlled by code, not by luck. Each function decides what the LLM sees through Scope and the two-layer Session design:
-- **Programmer Session**: only sees result summaries (grows slowly)
-- **Worker Sessions**: have full data (destroyed after each call)
-- **Scope**: controls call stack visibility, peer access, compaction
-
-### 🔌 Drop-in Replacement
-Works with existing ecosystems — no need to switch platforms:
-- **MCP compatible**: register as MCP Server → any MCP client can call our functions
-- **CLI compatible**: every function callable from command line
-
----
-
-## Core Concepts
-
-The entire framework has only two concepts:
-
-```
-Agentic Function        — executes a task (Python + LLM cooperate)
-Meta Agentic Function   — creates new Agentic Functions (is itself an Agentic Function)
-```
-
-Everything else is infrastructure that supports these two.
-
-### Agentic Function
-
-A function whose logic is split between Python Runtime (deterministic code) and Agentic Runtime (LLM reasoning). The docstring IS the LLM prompt.
+![Dual Runtime — Python handles deterministic work, LLM handles reasoning](docs/images/dual_runtime_detail.png)
 
 ```python
-@function(return_type=ObserveResult)
-def observe(session: Session, task: str) -> ObserveResult:
+from agentic import agentic_function, runtime
+
+@agentic_function
+def observe(task):
     """Look at the screen and find all visible UI elements.
-    Check if the target described in 'task' is visible."""
-
-# Change the docstring → change the behavior.
-# Call it → Python does OCR/detection, LLM does reasoning.
+    Check if the target described in task is visible."""
+    
+    # ── Python Runtime (deterministic) ──
+    img = take_screenshot()
+    ocr = run_ocr(img)
+    elements = detect_all(img)
+    
+    # ── Agentic Runtime (LLM reasoning) ──
+    reply = runtime.exec(
+        prompt=observe.__doc__,
+        input={"task": task, "ocr": ocr, "elements": elements},
+        images=[img],
+    )
+    return parse(reply)
 ```
 
-### Meta Agentic Function
-
-The only "hardcoded" function. Creates all other Agentic Functions. Human or LLM calls it via MCP. The entire system bootstraps from this one function.
-
-```python
-# The Meta Agentic Function itself:
-@mcp.tool()
-def meta_create(name: str, docstring: str, params: dict, returns: dict) -> str:
-    """Create a new Agentic Function and register it as an MCP tool."""
-
-# Everything starts from here:
-#   meta_create → Agentic Function A
-#   meta_create → Agentic Function B
-#   meta_create → Agentic Function C
-#   ...
-```
+**Docstring = Prompt.** Change the docstring → change the LLM behavior. Everything else is normal Python.
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────────────────────┐
-│       Human  or  LLM Agent          │
-│    (Claude Code, Codex, OpenClaw)   │
-└──────────────┬──────────────────────┘
-               │ MCP (JSON-RPC)
-               ▼
-┌─────────────────────────────────────┐
-│           MCP Server                │
-│  ┌─────────────────────────────┐    │
-│  │   Meta Agentic Function     │    │  ← creates other functions
-│  ├─────────────────────────────┤    │
-│  │   Agentic Function A        │    │  ← observe, act, verify...
-│  │   Agentic Function B        │    │
-│  │   Agentic Function C        │    │
-│  │   ...                       │    │
-│  └──────────┬──────────────────┘    │
-└─────────────┼───────────────────────┘
-              │
-    ┌─────────┴─────────┐
-    ▼                   ▼
-┌──────────────┐ ┌──────────────────┐
-│Python Runtime│ │ Agentic Runtime   │
-│              │ │                   │
-│ Deterministic│ │ LLM reasoning     │
-│ code (OCR,   │ │ via Agentic       │
-│ click, etc.) │ │ Session           │
-└──────────────┘ └────────┬─────────┘
-                          ▼
-                 ┌──────────────────┐
-                 │  Agentic Session  │
-                 │  (history, scope, │
-                 │   images, state)  │
-                 └────────┬─────────┘
-                          ▼
-                 ┌──────────────────┐
-                 │       LLM        │
-                 │ Claude / GPT /   │
-                 │ Gemini / local   │
-                 └──────────────────┘
-```
-
-The **MCP Server** is the single entry point. Everything is called via MCP — by humans or LLMs.
+![Full Architecture](docs/images/full_architecture.png)
 
 ---
 
-## How Agentic Functions Execute
+## Core Components
 
-Both Runtimes cooperate inside every function:
+### `@agentic_function` — Auto-Tracking Decorator
+
+Wraps any function to automatically record execution: name, params, output, errors, timing, and call hierarchy.
 
 ```python
-def observe(programmer, task: str) -> ObserveResult:
-    """Look at the screen and find all visible UI elements."""
-
-    # ── Python Runtime (deterministic) ──
-    screenshot = take_screenshot()
-    ocr_data = run_ocr(screenshot.path)
-    elements = detect_all(screenshot.path)
-
-    # ── Agentic Runtime (reasoning via Agentic Session) ──
-    worker = create_session(model="sonnet")
-    reply = worker.send({
-        "text": f"Analyze this screen. Task: {task}\nOCR: {ocr_data}\nElements: {elements}",
-        "images": [screenshot.path]
-    })
-
-    # ── Python Runtime (parse + validate) ──
-    result = ObserveResult.parse(reply)
-    return result
+@agentic_function
+def navigate(target):
+    """Navigate to the target by observing and acting."""
+    obs = observe(task=f"find {target}")      # auto-tracked as child
+    if obs["target_visible"]:
+        act(target=target, location=obs["location"])  # auto-tracked as child
+        return {"success": True}
+    return {"success": False}
 ```
 
----
-
-## Two-Layer Session Design
-
+Produces a Context tree:
 ```
-Caller's Session (sees only summaries, grows slowly)
-  │
-  │ "observe → {app: Discord, target: found}"     ← summary
-  │ "act → {clicked: login, success: true}"        ← summary
-  │
-  ├── observe() → Worker Session A (destroyed after)
-  │     Full OCR data, 156 detected elements, screenshot
-  │
-  ├── act() → Worker Session B (destroyed after)
-  │     Coordinate matching, template match, click execution
-  │
-  └── verify() → Worker Session C (destroyed after)
-        Screenshot + OCR, success judgment
+navigate ✓ 3200ms → {success: True}
+├── observe ✓ 1200ms → {target_visible: True, location: [347, 291]}
+│   ├── run_ocr ✓ 50ms → {texts: [...], count: 3}
+│   └── detect_all ✓ 80ms → {elements: [...], count: 3}
+└── act ✓ 820ms → {clicked: True}
 ```
 
-Worker Sessions have full data but are destroyed after each call. Only the return value survives.
+### `runtime.exec()` — Agentic Runtime Call
 
----
-
-## Definitions
-
-| Concept | Definition |
-|---------|-----------|
-| **Agentic Function** | A function executed by Python Runtime + Agentic Runtime together. Docstring = prompt. |
-| **Meta Agentic Function** | An Agentic Function that creates other Agentic Functions. The bootstrap point. |
-| **Python Runtime** | The Python interpreter. Executes deterministic code: OCR, detection, clicking, file I/O. |
-| **Agentic Runtime** | The LLM execution engine. Handles reasoning, accessed through Agentic Session. |
-| **Agentic Session** | Interface to the Agentic Runtime. Manages history, context, multimodal input. |
-| **Agentic Scope** | Intent declaration for context visibility. Controls what a Session can see. |
-| **Agentic Memory** | Persistent execution log. Records calls, results, decisions, media. |
-| **Agentic Type** | Pydantic model that guarantees output format. |
-| **MCP Server** | The single entry point. All functions registered as MCP tools. |
-
----
-
-## Quick Start
-
-### Define an Agentic Function
+Sends prompt + data to any LLM. Auto-records input, media, and reply to the Context.
 
 ```python
-from harness import function, Session
-from pydantic import BaseModel
+from agentic import runtime
 
-class ObserveResult(BaseModel):
-    elements: list[str]
-    target_visible: bool
-
-@function(return_type=ObserveResult)
-def observe(session: Session, task: str) -> ObserveResult:
-    """Look at the screen and find all visible UI elements.
-    Check if the target described in 'task' is visible.
-    List every element you can see."""
-```
-
-### Call it from Python
-
-```python
-from harness.session import AnthropicSession
-
-session = AnthropicSession(model="sonnet")
-result = observe(session, task="find the login button")
-print(result.target_visible)  # True
-```
-
-### Call it from MCP (any LLM agent)
-
-```json
-// .mcp.json
-{
-  "mcpServers": {
-    "my-functions": {
-      "command": "python3",
-      "args": ["mcp_server.py"]
-    }
-  }
-}
-```
-
-Then any MCP client (Claude Code, Codex, OpenClaw) can call `observe(task="find the login button")` directly.
-
-### Built-in Functions
-
-```python
-from harness import ask, extract, summarize, classify, decide
-
-answer = ask(session, "What is the capital of France?")
-info = extract(session, "John is 30 years old", PersonInfo)
-summary = summarize(session, long_text, max_length=50)
-sentiment = classify(session, "I love this!", ["positive", "negative"])
-choice = decide(session, "Which approach?", ["Option A", "Option B"])
-```
-
----
-
-## Agentic Session
-
-| Session | Backend | Images | History | Auth |
-|---------|---------|--------|---------|------|
-| AnthropicSession | Anthropic API | ✅ | We manage `_history` | API key |
-| OpenAISession | OpenAI API | ✅ | We manage `_history` | API key |
-| ClaudeCodeSession | Claude Code CLI | ✅ | `--session-id` | Subscription |
-| CodexSession | Codex CLI | ✅ | `--session-id` | Subscription |
-| OpenClawSession | OpenClaw gateway | ✅ | Server-side | Gateway token |
-| CLISession | Any CLI | ❌ | None | Depends |
-
----
-
-## Agentic Scope
-
-Controls what an Agentic Session can see. All parameters optional:
-
-```python
-from harness import Scope
-
-Scope(
-    depth=None,      # Call stack: 0=none, 1=caller, -1=all
-    detail=None,     # Per layer: "io" or "full"
-    peer=None,       # Siblings: "none", "io", "full"
-    compact=None,    # Compress after execution
+# Use any LLM provider
+reply = runtime.exec(
+    prompt="Analyze this screen...",
+    input={"task": task, "elements": elements},
+    images=["screenshot.png"],
+    model="sonnet",
+    call=lambda msgs, model: my_llm_api(msgs),  # plug in your own
 )
-
-# Presets
-Scope.isolated()   # No context
-Scope.chained()    # Sees sibling I/O
-Scope.full()       # Sees everything
 ```
+
+### `Context` — Execution Record
+
+Every function call creates a Context node. The tree is inspectable, serializable, and debuggable.
+
+```python
+from agentic import get_root_context
+
+root = get_root_context()
+print(root.tree())          # human-readable tree
+print(root.traceback())     # error chain (like Python traceback)
+root.save("logs/run.jsonl")  # machine-readable
+root.save("logs/run.md")     # human-readable
+```
+
+### `expose` — Visibility Control
+
+Control how much of a function's data is visible to sibling functions:
+
+```python
+@agentic_function                      # default: summary
+def observe(task): ...
+
+@agentic_function(expose="detail")     # siblings see full input/output
+def observe(task): ...
+
+@agentic_function(expose="silent")     # invisible to siblings
+def internal_helper(x): ...
+```
+
+| Level | What siblings see |
+|-------|-------------------|
+| `trace` | prompt + full I/O + raw LLM reply |
+| `detail` | full input and output |
+| `summary` | one-line summary (default) |
+| `result` | return value only |
+| `silent` | nothing |
+
+---
+
+## Meta Agentic Function
+
+![Meta Function — self-evolving function creation](docs/images/meta_bootstrap.png)
+
+The system can grow itself: LLM encounters an unknown task → creates a new function → reuses it next time.
 
 ---
 
 ## Comparison
 
-| | MCP / Tool Calling | Agentic Programming |
-|---|---|---|
-| **Direction** | LLM → Python (give LLM hands) | Python + LLM cooperate (give Python a brain) |
-| **Functions contain** | Python code (CPU executes) | Docstring (Python + LLM execute) |
+|  | Tool-Calling / MCP | Agentic Programming |
+|--|---------------------|---------------------|
+| **Direction** | LLM → calls tools (give LLM hands) | Python + LLM cooperate (give Python a brain) |
+| **Functions contain** | Python code only | Python code + LLM reasoning |
 | **Execution** | Single runtime (CPU) | Dual runtime (Python + LLM) |
-| **Context** | Implicit (one conversation) | Explicit (Agentic Scope) |
-| **Self-evolving** | No | Yes (Meta Agentic Function) |
+| **Context** | Implicit (one conversation) | Explicit (Context tree + expose) |
+| **Prompt** | Hardcoded in agent | Docstring = prompt (iterable) |
 
-MCP is the **transport protocol** (how to call). Agentic Programming is the **execution model** (how functions run). They are orthogonal — our functions are exposed via MCP.
+MCP is the **transport** (how to call). Agentic Programming is the **execution model** (how functions run). They are orthogonal.
 
 ---
+
+## Install
+
+```bash
+pip install -e .
+```
 
 ## Project Structure
 
 ```
-harness/
-├── __init__.py      Exports: function, ask, extract, classify, ...
-├── function/        @function decorator + built-in Agentic Functions
-├── session/         Agentic Session interface + 6 implementations
-├── scope/           Agentic Scope: context visibility rules
-└── memory/          Agentic Memory: persistent execution log
+agentic/
+├── __init__.py      # Exports: agentic_function, runtime, Context, ...
+├── context.py       # Context tree: tracking, summarize, tree/traceback, save
+├── function.py      # @agentic_function decorator
+└── runtime.py       # runtime.exec() — LLM call + auto recording
 
-tests/               53 tests
 docs/
-└── DESIGN.md        Full specification with diagrams
-```
-
-## Install & Test
-
-```bash
-pip install -e .
-pytest tests/ -v   # 53 tests
+├── DESIGN.md        # Architecture specification
+├── CONTEXT-v3.md    # Context system design
+└── REVIEW-v4.md     # External review (GPT-5.4)
 ```
 
 ## Links
 
-- **Design Specification**: [docs/DESIGN.md](docs/DESIGN.md)
-- **GitHub**: [Fzkuji/Agentic-Programming](https://github.com/Fzkuji/Agentic-Programming)
+- **Design Docs**: [docs/DESIGN.md](docs/DESIGN.md) · [docs/CONTEXT-v3.md](docs/CONTEXT-v3.md)
+- **External Review**: [docs/REVIEW-v4.md](docs/REVIEW-v4.md)
