@@ -11,17 +11,48 @@
 ```python
 @dataclass
 class Context:
+    # === 自动管理（用户不需要动） ===
     name: str                    # 函数名（自动从 __name__ 取）
     prompt: str = ""             # docstring（自动从 __doc__ 取）
-    input: dict = None           # 发给 LLM 的数据（用户手动设置）
+    params: dict = None          # 函数调用参数（自动从 *args/**kwargs 记录）
     output: Any = None           # 返回值（自动记录）
     error: str = ""              # 错误信息（自动捕获）
     status: str = "running"      # running / success / error（自动管理）
     children: list = None        # 子函数的 Context（自动挂载）
     parent: Context = None       # 父 Context（自动设置）
-    expose: str = "summary"      # 对外暴露粒度（用户可配置）
     start_time: float = 0        # 开始时间（自动记录）
     end_time: float = 0          # 结束时间（自动记录）
+    
+    # === 用户可设置 ===
+    input: dict = None           # 发给 LLM 的数据（用户手动设置）
+    media: list[str] = None      # 媒体文件路径（截图等，存引用不存内容）
+    expose: str = "summary"      # 对外暴露粒度（可通过 decorator 或运行时设置）
+    summary_fn: Callable = None  # 自定义摘要生成函数（可选）
+    
+    # === 方法 ===
+    
+    def summarize(
+        self,
+        level: str = None,       # 覆盖默认粒度（trace/detail/summary/result）
+        max_tokens: int = None,  # token 预算限制
+        max_siblings: int = None,# 最多包含几个兄弟的信息
+        include_parent: bool = True,  # 是否包含父节点信息
+    ) -> str:
+        """
+        生成到目前为止的上下文摘要。
+        
+        包含：
+        - 父节点信息（谁调用了我）
+        - 之前兄弟的结果（按兄弟的 expose level 裁剪）
+        - 当前函数的 prompt 和 input
+        
+        参数可以覆盖默认行为：
+        - level: 强制指定粒度（忽略兄弟的 expose 设置）
+        - max_tokens: 限制总 token 数（超出时截断最早的兄弟）
+        - max_siblings: 只看最近 N 个兄弟
+        - include_parent: 是否包含父节点
+        """
+        ...
 ```
 
 ---
