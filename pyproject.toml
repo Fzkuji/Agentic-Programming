@@ -8,12 +8,50 @@ version = "0.3.0"
 description = "Agentic Programming — Python functions that call LLMs with automatic context tracking."
 readme = "README.md"
 requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "Fzkuji"},
+]
+keywords = ["llm", "agentic", "ai", "function", "decorator", "context"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = []
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
 ]
+anthropic = [
+    "anthropic>=0.30.0",
+]
+openai = [
+    "openai>=1.30.0",
+]
+gemini = [
+    "google-genai>=1.0.0",
+]
+all = [
+    "anthropic>=0.30.0",
+    "openai>=1.30.0",
+    "google-genai>=1.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Fzkuji/Agentic-Programming"
+Repository = "https://github.com/Fzkuji/Agentic-Programming"
+Documentation = "https://github.com/Fzkuji/Agentic-Programming/tree/main/docs"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
