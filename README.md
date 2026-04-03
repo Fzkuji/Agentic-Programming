@@ -178,6 +178,32 @@ def internal_helper(x): ...
 
 ---
 
+### `create()` — Meta Function
+
+Generate new agentic functions from natural language at runtime:
+
+```python
+from agentic import Runtime
+from agentic.meta import create
+
+runtime = Runtime(call=my_llm, model="gemini-2.5-flash")
+
+# Create a function from description
+summarize = create(
+    "Summarize text into 3 bullet points",
+    runtime=runtime,
+)
+
+# Use it like any other agentic function
+result = summarize(text="Long article here...")
+```
+
+The generated function is a real `@agentic_function` — it has Context tracking, can call `runtime.exec()`, and can be nested inside other agentic functions.
+
+Safety: generated code runs in a sandbox with restricted builtins (no imports, no file I/O, no eval).
+
+---
+
 ## Comparison
 
 |  | Tool-Calling / MCP | Agentic Programming |
@@ -202,13 +228,16 @@ pip install -e .
 
 ```
 agentic/
-├── __init__.py      # Exports: agentic_function, Runtime, Context, ...
+├── __init__.py      # Exports: agentic_function, Runtime, Context, create
 ├── context.py       # Context tree: tracking, summarize, tree/traceback, save
 ├── function.py      # @agentic_function decorator
-└── runtime.py       # Runtime class — exec() + _call()
+├── runtime.py       # Runtime class — exec() + _call()
+└── meta.py          # Meta function — create() for code generation
 
 examples/
-└── main.py          # Entry point example
+├── main.py          # Basic entry point (Gemini)
+├── claude_demo.py   # End-to-end demo (Claude Code CLI)
+└── meta_demo.py     # Meta function demo
 
 docs/
 ├── API.md           # API overview
