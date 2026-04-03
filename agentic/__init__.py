@@ -11,12 +11,12 @@ Quick start:
 
     from agentic import agentic_function, Runtime
 
-    rt = Runtime(call=my_llm_func, model="gpt-4o")
+    runtime = Runtime(call=my_llm_func, model="gpt-4o")
 
     @agentic_function
     def observe(task):
         '''Look at the screen and describe what you see.'''
-        return rt.exec(content=[
+        return runtime.exec(content=[
             {"type": "text", "text": "Find the login button."},
             {"type": "image", "path": "screenshot.png"},
         ])

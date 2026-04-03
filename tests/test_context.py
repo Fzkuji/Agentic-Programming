@@ -17,7 +17,7 @@ def mock_call(content, model="test", response_format=None):
     return "ok"
 
 
-rt = Runtime(call=mock_call)
+runtime = Runtime(call=mock_call)
 
 
 def test_tree_output():
@@ -47,11 +47,11 @@ def test_summarize_default():
 
     @agentic_function
     def inner_a():
-        return rt.exec(content=[{"type": "text", "text": "result_a"}])
+        return runtime.exec(content=[{"type": "text", "text": "result_a"}])
 
     @agentic_function
     def inner_b():
-        return rt.exec(content=[{"type": "text", "text": "result_b"}])
+        return runtime.exec(content=[{"type": "text", "text": "result_b"}])
 
     outer()
     root = get_root_context()
@@ -67,7 +67,7 @@ def test_summarize_depth_0():
 
     @agentic_function(summarize={"depth": 0, "siblings": 0})
     def inner():
-        return rt.exec(content=[{"type": "text", "text": "isolated"}])
+        return runtime.exec(content=[{"type": "text", "text": "isolated"}])
 
     outer()
     # Should still work, just less context
@@ -93,7 +93,7 @@ def test_compress_hides_children():
 
     @agentic_function
     def check():
-        return rt.exec(content=[{"type": "text", "text": "checking"}])
+        return runtime.exec(content=[{"type": "text", "text": "checking"}])
 
     outer()
     root = get_root_context()

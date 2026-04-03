@@ -30,7 +30,7 @@ Runtime(call=None, model="default")
 **1. Pass a call function:**
 
 ```python
-rt = Runtime(call=my_func, model="gemini-2.5-flash")
+runtime = Runtime(call=my_func, model="gemini-2.5-flash")
 ```
 
 **2. Subclass and override `_call()`:**
@@ -115,12 +115,12 @@ def gemini_call(content, model="gemini-2.5-flash", response_format=None):
     response = genai.GenerativeModel(model).generate_content("\n".join(text_parts))
     return response.text
 
-rt = Runtime(call=gemini_call, model="gemini-2.5-flash")
+runtime = Runtime(call=gemini_call, model="gemini-2.5-flash")
 
 @agentic_function
 def observe(task):
     """Look at the screen and describe what you see."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Find: {task}"},
         {"type": "image", "path": "screenshot.png"},
     ])

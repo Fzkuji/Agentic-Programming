@@ -18,7 +18,7 @@ Every Agentic Function has two runtimes cooperating:
 ```python
 from agentic import agentic_function, Runtime
 
-rt = Runtime(call=my_llm, model="gemini-2.5-flash")
+runtime = Runtime(call=my_llm, model="gemini-2.5-flash")
 
 @agentic_function
 def observe(task):
@@ -31,7 +31,7 @@ def observe(task):
     elements = detect_all(img)
     
     # ── LLM Runtime (reasoning) ──
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Task: {task}\nOCR: {ocr}\nElements: {elements}"},
         {"type": "image", "path": img},
     ])
@@ -47,20 +47,20 @@ def observe(task):
 from agentic import agentic_function, Runtime, get_root_context
 
 # 1. Create a Runtime (once)
-rt = Runtime(call=my_llm_func, model="gemini-2.5-flash")
+runtime = Runtime(call=my_llm_func, model="gemini-2.5-flash")
 
 # 2. Define functions
 @agentic_function
 def observe(task):
     """Look at the screen."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Find: {task}"},
     ])
 
 @agentic_function
 def click(element):
     """Click an element."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Click: {element}"},
     ])
 
@@ -102,7 +102,7 @@ A class that wraps your LLM provider. Create once, use everywhere.
 
 ```python
 # Option 1: pass a call function
-rt = Runtime(call=my_func, model="gemini-2.5-flash")
+runtime = Runtime(call=my_func, model="gemini-2.5-flash")
 
 # Option 2: subclass
 class GeminiRuntime(Runtime):
@@ -114,7 +114,7 @@ class GeminiRuntime(Runtime):
 `exec()` takes a unified content list — text, images, audio, files all in one format:
 
 ```python
-rt.exec(content=[
+runtime.exec(content=[
     {"type": "text", "text": "Analyze this screenshot."},
     {"type": "image", "path": "screenshot.png"},
 ])

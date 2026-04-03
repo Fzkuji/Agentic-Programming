@@ -34,7 +34,7 @@ def gemini_call(content, model="gemini-2.5-flash", response_format=None):
 
 # ── Runtime ─────────────────────────────────────────────────────
 
-rt = Runtime(call=gemini_call, model="gemini-2.5-flash")
+runtime = Runtime(call=gemini_call, model="gemini-2.5-flash")
 
 
 # ── Agentic Functions ──────────────────────────────────────────
@@ -42,7 +42,7 @@ rt = Runtime(call=gemini_call, model="gemini-2.5-flash")
 @agentic_function
 def observe(task):
     """Look at the screen and describe what you see."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Describe what you see. Task: {task}"},
     ])
 
@@ -50,7 +50,7 @@ def observe(task):
 @agentic_function
 def click(element):
     """Click an element on the screen."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Click the element: {element}. Describe the result."},
     ])
 
@@ -58,7 +58,7 @@ def click(element):
 @agentic_function
 def verify(expected):
     """Verify the current state matches expectations."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Verify: are we on the {expected} page? Answer yes or no with reason."},
     ])
 

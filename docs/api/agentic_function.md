@@ -45,13 +45,13 @@ Every decorated function is unconditionally recorded. On entry, a new [Context](
 ```python
 from agentic import agentic_function, Runtime
 
-rt = Runtime(call=my_llm, model="gemini-2.5-flash")
+runtime = Runtime(call=my_llm, model="gemini-2.5-flash")
 
 # Simplest usage: all defaults.
 @agentic_function
 def observe(task):
     """Look at the screen and describe what you see."""
-    return rt.exec(content=[
+    return runtime.exec(content=[
         {"type": "text", "text": f"Find: {task}"},
     ])
 

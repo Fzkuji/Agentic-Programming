@@ -23,12 +23,12 @@ def echo_call(content, model="test", response_format=None):
 
 def test_runtime_basic():
     """Runtime.exec() calls the provider and returns reply."""
-    rt = Runtime(call=echo_call)
+    runtime = Runtime(call=echo_call)
 
     @agentic_function
     def simple():
         """Simple function."""
-        return rt.exec(content=[
+        return runtime.exec(content=[
             {"type": "text", "text": "hello world"},
         ])
 
@@ -38,12 +38,12 @@ def test_runtime_basic():
 
 def test_runtime_records_raw_reply():
     """Runtime records raw_reply on Context."""
-    rt = Runtime(call=echo_call)
+    runtime = Runtime(call=echo_call)
 
     @agentic_function
     def func():
         """Test."""
-        return rt.exec(content=[
+        return runtime.exec(content=[
             {"type": "text", "text": "test reply"},
         ])
 
@@ -60,7 +60,7 @@ def test_runtime_context_injection():
         received.extend(content)
         return "ok"
 
-    rt = Runtime(call=capture_call)
+    runtime = Runtime(call=capture_call)
 
     @agentic_function
     def parent():
@@ -70,7 +70,7 @@ def test_runtime_context_injection():
     @agentic_function
     def child():
         """Child function."""
-        return rt.exec(content=[
+        return runtime.exec(content=[
             {"type": "text", "text": "user prompt"},
         ])
 
@@ -90,8 +90,8 @@ def test_runtime_no_context_outside_function():
         received.extend(content)
         return "ok"
 
-    rt = Runtime(call=capture_call)
-    result = rt.exec(content=[{"type": "text", "text": "bare call"}])
+    runtime = Runtime(call=capture_call)
+    result = runtime.exec(content=[{"type": "text", "text": "bare call"}])
     assert result == "ok"
     assert len(received) == 1  # no context prepended
     assert received[0]["text"] == "bare call"
@@ -133,11 +133,11 @@ def test_runtime_model_override():
         models_used.append(model)
         return "ok"
 
-    rt = Runtime(call=track_model, model="base-model")
+    runtime = Runtime(call=track_model, model="base-model")
 
     @agentic_function
     def func():
-        return rt.exec(content=[{"type": "text", "text": "test"}], model="override-model")
+        return runtime.exec(content=[{"type": "text", "text": "test"}], model="override-model")
 
     func()
     assert models_used[-1] == "override-model"
@@ -151,11 +151,11 @@ def test_runtime_default_model():
         models_used.append(model)
         return "ok"
 
-    rt = Runtime(call=track_model, model="my-model")
+    runtime = Runtime(call=track_model, model="my-model")
 
     @agentic_function
     def func():
-        return rt.exec(content=[{"type": "text", "text": "test"}])
+        return runtime.exec(content=[{"type": "text", "text": "test"}])
 
     func()
     assert models_used[-1] == "my-model"
@@ -169,12 +169,12 @@ def test_runtime_response_format_passed():
         formats_received.append(response_format)
         return '{"ok": true}'
 
-    rt = Runtime(call=track_format)
+    runtime = Runtime(call=track_format)
     schema = {"type": "object", "properties": {"ok": {"type": "boolean"}}}
 
     @agentic_function
     def func():
-        return rt.exec(
+        return runtime.exec(
             content=[{"type": "text", "text": "test"}],
             response_format=schema,
         )
@@ -185,11 +185,11 @@ def test_runtime_response_format_passed():
 
 def test_runtime_no_call_raises():
     """Runtime without call function raises NotImplementedError."""
-    rt = Runtime()
+    runtime = Runtime()
 
     @agentic_function
     def func():
-        return rt.exec(content=[{"type": "text", "text": "test"}])
+        return runtime.exec(content=[{"type": "text", "text": "test"}])
 
     with pytest.raises(NotImplementedError):
         func()
@@ -201,11 +201,11 @@ def test_runtime_subclass():
         def _call(self, content, model="default", response_format=None):
             return "custom reply"
 
-    rt = CustomRuntime()
+    runtime = CustomRuntime()
 
     @agentic_function
     def func():
-        return rt.exec(content=[{"type": "text", "text": "test"}])
+        return runtime.exec(content=[{"type": "text", "text": "test"}])
 
     result = func()
     assert result == "custom reply"
@@ -243,11 +243,11 @@ def test_content_types():
         received.extend(content)
         return "ok"
 
-    rt = Runtime(call=capture)
+    runtime = Runtime(call=capture)
 
     @agentic_function
     def func():
-        return rt.exec(content=[
+        return runtime.exec(content=[
             {"type": "text", "text": "analyze this"},
             {"type": "image", "path": "screenshot.png"},
             {"type": "audio", "path": "recording.wav"},
