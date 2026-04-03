@@ -186,6 +186,10 @@ class Context:
             node = node.parent
         return d
 
+    def _indent(self) -> str:
+        """Indentation string for this node (4 spaces per level)."""
+        return "    " * self._depth()
+
     def _call_path(self) -> str:
         """Full call path like login_flow.navigate_to.observe_screen."""
         parts = []
@@ -275,6 +279,7 @@ class Context:
         lines = ["Execution Context (most recent call last):"]
 
         # --- Ancestors: root → ... → parent ---
+        # Collect ancestors from root to parent, each indented by depth
         if depth != 0 and self.parent and self.parent.name:
             ancestors = []
             node = self.parent
@@ -286,13 +291,11 @@ class Context:
             for a in reversed(ancestors):
                 if not _node_allowed(a, include, exclude):
                     continue
-                indent = "  " * (len(ancestors) - ancestors.index(a))
-                lines.append(a._render_traceback(indent, level))
+                lines.append(a._render_traceback("    " * a._depth(), level))
 
         # --- Siblings: previous same-level nodes ---
         if self.parent:
-            # Calculate indent for siblings (same level as self)
-            sibling_indent = "  " * self._depth()
+            sibling_indent = "    " * self._depth()
 
             sibling_parts = []
             for c in self.parent.children:
@@ -309,11 +312,10 @@ class Context:
 
                 rendered = c._render_traceback(sibling_indent, render_level)
 
-                # Expand children if requested via branch
                 if branch and c.name in branch:
                     if not (c.compress and c.status != "running"):
                         rendered += "\n" + c._render_branch_traceback(
-                            render_level, c._depth() + 1, include, exclude
+                            render_level, c._depth() + 1, include, exclude,
                         )
 
                 sibling_parts.append(rendered)
@@ -329,12 +331,12 @@ class Context:
 
             lines.extend(sibling_parts)
 
-        # --- Current call ---
-        self_indent = "  " * self._depth()
-        lines.append(f"{self_indent}in {self._call_path()}  <-- Current Call")
-        lines.append(f"{self_indent}  {self.name}({_fmt_params(self.params)})")
+        # --- Current call at its natural indent ---
+        self_indent = "    " * self._depth()
+        lines.append(f"{self_indent}- {self._call_path()}  <-- Current Call")
+        lines.append(f"{self_indent}    {self.name}({_fmt_params(self.params)})")
         if self.prompt:
-            lines.append(f"{self_indent}  Purpose: {self.prompt}")
+            lines.append(f'{self_indent}    """{self.prompt}"""')
 
         return "\n".join(lines)
 
@@ -359,30 +361,30 @@ class Context:
             return ""
 
         dur = f", {self.duration_ms:.0f}ms" if self.end_time else ""
-        lines = [f"{indent}in {self._call_path()}"]
-        lines.append(f"{indent}  {self.name}({_fmt_params(self.params)})")
+        lines = [f"{indent}- {self._call_path()}"]
+        lines.append(f"{indent}    {self.name}({_fmt_params(self.params)})")
 
         if level == "result":
             if self.output is not None:
-                lines.append(f"{indent}  Output: {_json(self.output, 200)}")
+                lines.append(f"{indent}    Output: {_json(self.output, 200)}")
             return "\n".join(lines)
 
-        # summary and detail both show these basics
+        # docstring as annotation (not "Purpose:")
         if self.prompt:
-            lines.append(f"{indent}  Purpose: {self.prompt}")
+            lines.append(f'{indent}    """{self.prompt}"""')
         if self.input:
-            lines.append(f"{indent}  Input: {_json(self.input, 300)}")
+            lines.append(f"{indent}    Input: {_json(self.input, 300)}")
         if self.media:
-            lines.append(f"{indent}  Media: {self.media}")
+            lines.append(f"{indent}    Media: {self.media}")
         if self.output is not None:
-            lines.append(f"{indent}  Output: {_json(self.output, 300)}")
+            lines.append(f"{indent}    Output: {_json(self.output, 300)}")
         if self.error:
-            lines.append(f"{indent}  Error: {self.error}")
-        lines.append(f"{indent}  Status: {self.status}{dur}")
+            lines.append(f"{indent}    Error: {self.error}")
+        lines.append(f"{indent}    Status: {self.status}{dur}")
 
         # detail adds LLM interaction
         if level == "detail" and self.raw_reply:
-            lines.append(f"{indent}  LLM reply: {self.raw_reply[:500]}")
+            lines.append(f"{indent}    LLM reply: {self.raw_reply[:500]}")
 
         return "\n".join(lines)
 

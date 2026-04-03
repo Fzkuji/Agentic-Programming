@@ -104,11 +104,13 @@ def exec(
         ctx.media = images
 
     # --- Build prompt ---
+    indent = "    " * (ctx._depth() + 1) if ctx else "    "
     full_prompt = _build_prompt(
         context=context,
         prompt=prompt,
         input=input,
         schema=schema,
+        indent=indent,
     )
 
     # --- Call the LLM ---
@@ -136,40 +138,42 @@ def _build_prompt(
     prompt: str = "",
     input: Optional[dict] = None,
     schema: Optional[dict] = None,
+    indent: str = "    ",
 ) -> str:
     """
     Build the final prompt for the LLM.
 
     The context string already contains the full execution context in
-    traceback format (from summarize()), including:
-    - Call stack with ancestors
-    - Sibling functions' name, purpose, input, output, status
-    - Current function marked with <-- Current Call
-
-    This function appends the task and output format.
+    traceback format (from summarize()), including the current call.
+    This function appends task instructions and input at the correct indent.
     """
-    sections = []
+    parts = []
 
-    # Execution context (already formatted by summarize)
     if context:
-        sections.append(context)
+        ctx_lines = [context]
+        if prompt:
+            ctx_lines.append(f"{indent}Task: {prompt}")
+        if input:
+            input_str = json.dumps(input, ensure_ascii=False, default=str)
+            ctx_lines.append(f"{indent}Input: {input_str}")
+        if schema:
+            schema_str = json.dumps(schema, indent=2)
+            ctx_lines.append(f"{indent}Output Format: Return ONLY valid JSON matching this schema:")
+            for line in schema_str.split("\n"):
+                ctx_lines.append(f"{indent}{line}")
+        parts.append("\n".join(ctx_lines))
+    else:
+        # No context (called outside @agentic_function)
+        if prompt:
+            parts.append(prompt)
+        if input:
+            input_str = json.dumps(input, ensure_ascii=False, default=str, indent=2)
+            parts.append(f"Input:\n{input_str}")
+        if schema:
+            schema_str = json.dumps(schema, indent=2)
+            parts.append(f"Output Format:\nReturn ONLY valid JSON matching this schema:\n{schema_str}")
 
-    # Task
-    task_parts = [f"Task: {prompt}"]
-    if input:
-        input_str = json.dumps(input, ensure_ascii=False, default=str, indent=2)
-        task_parts.append(f"\nInput:\n{input_str}")
-    sections.append("\n".join(task_parts))
-
-    # Output format
-    if schema:
-        schema_str = json.dumps(schema, indent=2)
-        sections.append(
-            f"Output Format:\n"
-            f"Return ONLY valid JSON matching this schema:\n{schema_str}"
-        )
-
-    return "\n\n".join(sections)
+    return "\n".join(parts)
 
 
 async def async_exec(
@@ -206,11 +210,13 @@ async def async_exec(
         ctx.input = input
         ctx.media = images
 
+    indent = "    " * (ctx._depth() + 1) if ctx else "    "
     full_prompt = _build_prompt(
         context=context,
         prompt=prompt,
         input=input,
         schema=schema,
+        indent=indent,
     )
 
     if call is not None:
