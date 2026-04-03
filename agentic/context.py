@@ -333,8 +333,7 @@ class Context:
 
         # --- Current call at its natural indent ---
         self_indent = "    " * self._depth()
-        lines.append(f"{self_indent}- {self._call_path()}  <-- Current Call")
-        lines.append(f"{self_indent}    {self.name}({_fmt_params(self.params)})")
+        lines.append(f"{self_indent}- {self._call_path()}({_fmt_params(self.params)})  <-- Current Call")
         if self.prompt:
             lines.append(f'{self_indent}    """{self.prompt}"""')
         if self.input:
@@ -365,8 +364,7 @@ class Context:
             return ""
 
         dur = f", {self.duration_ms:.0f}ms" if self.end_time else ""
-        lines = [f"{indent}- {self._call_path()}"]
-        lines.append(f"{indent}    {self.name}({_fmt_params(self.params)})")
+        lines = [f"{indent}- {self._call_path()}({_fmt_params(self.params)})"]
 
         if level == "result":
             if self.output is not None:
