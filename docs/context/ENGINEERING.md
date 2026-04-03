@@ -1,86 +1,168 @@
-# Context Engineering
+# Context API Reference
 
-> `agentic/` — Context system API reference.
+> `agentic/` — the complete API for Context recording and reading.
 
 ---
 
-## `agentic_function`
+## @agentic_function
 
 ```python
-agentic.agentic_function(fn=None, *, expose="summary", context="auto", context_policy=None)
+from agentic import agentic_function
+
+@agentic_function(render="summary", summarize=None, compress=False)
+def my_function(...): ...
 ```
 
-Decorator that automatically records function execution into the Context tree.
+Decorator. Every decorated function is unconditionally recorded into the Context tree.
 
-**Parameters:**
+### Parameters
 
-- **expose** (`str`, default `"summary"`) — How this function's results appear to other functions.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `render` | `str` | `"summary"` | How others see my results via summarize() |
+| `summarize` | `dict \| None` | `None` | What context I see when calling the LLM |
+| `compress` | `bool` | `False` | After completion, hide my children from summarize() |
 
-  | Value | Output |
-  |-------|--------|
-  | `"trace"` | Prompt + full I/O + raw LLM reply + error |
-  | `"detail"` | `name(params) → status \| input \| output` |
-  | `"summary"` | `name: output_snippet duration` |
-  | `"result"` | Return value only (JSON) |
-  | `"silent"` | Not shown |
+### render
 
-- **context** (`str`, default `"auto"`) — How this function attaches to the Context tree.
+Controls the default detail level when OTHER functions view this node through `summarize()`.
 
-  | Value | Behavior |
-  |-------|----------|
-  | `"auto"` | Attach to parent if exists, create root if none |
-  | `"inherit"` | Must have parent; raises `RuntimeError` if called standalone |
-  | `"new"` | Always create an independent tree |
-  | `"none"` | No Context tracking at all |
+| Value | What it shows | Example output |
+|-------|---------------|----------------|
+| `"trace"` | Everything: prompt, I/O, raw LLM reply | Multi-line with all fields |
+| `"detail"` | Signature + I/O on one line | `observe(task="login") → success 1200ms \| input: {...} \| output: {...}` |
+| `"summary"` | Name + output snippet | `observe: {"found": true} 1200ms` |
+| `"result"` | Return value only | `{"found": true}` |
+| `"silent"` | Not shown | *(empty)* |
 
-- **context_policy** (`ContextPolicy` or `None`, default `None`) — Controls what context gets injected when `runtime.exec()` is called inside this function. If `None`, uses default `ctx.summarize()` (all ancestors + all siblings). See [ContextPolicy](#contextpolicy).
+This is a default. Callers can override it: `ctx.summarize(level="detail")` forces all nodes to render as "detail".
 
-**Example:**
+### summarize
+
+Dict of keyword arguments passed to `ctx.summarize()` when `runtime.exec()` auto-generates context.
+
+```python
+# See everything (default when summarize=None)
+@agentic_function
+def plan(task): ...
+
+# Only parent + last 3 siblings
+@agentic_function(summarize={"depth": 1, "siblings": 3})
+def observe(task): ...
+
+# Isolated: see nothing from the tree
+@agentic_function(summarize={"depth": 0, "siblings": 0})
+def run_ocr(img): ...
+```
+
+Allowed keys: `depth`, `siblings`, `level`, `include`, `exclude`, `branch`, `max_tokens`.
+See [Context.summarize()](#contextsummarize) for details on each.
+
+### compress
+
+When `True`, after this function completes, `summarize()` renders only this node's own result — children are NOT expanded, even if `branch=` is used.
+
+```python
+@agentic_function(compress=True)
+def navigate(target):
+    observe(...)    # child — hidden after navigate completes
+    act(...)        # child — hidden after navigate completes
+    return {"success": True}
+
+# Later, another function sees:
+#   navigate: {"success": true} 3200ms
+# NOT:
+#   navigate: {"success": true} 3200ms
+#     observe: {"found": true} 1200ms
+#     act: {"clicked": true} 820ms
+```
+
+The children are still fully recorded. `tree()` and `save()` always show everything.
+
+### Example
 
 ```python
 from agentic import agentic_function
 
 @agentic_function
-def navigate(target):
-    """Navigate to a target UI element."""
+def observe(task):
+    """Look at the screen and describe what you see."""
     ...
 
-@agentic_function(expose="detail", context="inherit")
-def observe(task):
-    """Look at the screen."""
+@agentic_function(render="detail", summarize={"depth": 1, "siblings": 1}, compress=True)
+def navigate(target):
+    """Navigate to a target UI element."""
     ...
 ```
 
 ---
 
-## `runtime.exec`
+## runtime.exec()
 
 ```python
-agentic.runtime.exec(prompt, input=None, images=None, context=None, schema=None, model="sonnet", call=None)
+from agentic import runtime
+
+reply = runtime.exec(
+    prompt="What do you see?",
+    input={"task": "find login"},
+    images=["/tmp/screenshot.png"],
+    call=my_llm_provider,
+)
 ```
 
-Call an LLM and auto-record to the current Context node.
+Calls an LLM and auto-records to the current Context node.
 
-**Parameters:**
+### Parameters
 
-- **prompt** (`str`) — Instructions for the LLM.
-- **input** (`dict`, optional) — Structured data to include.
-- **images** (`list[str]`, optional) — Image file paths.
-- **context** (`str`, optional) — Override the auto-generated context string. If provided, used as-is. If `None`, auto-generated:
-  1. From `context_policy.apply(ctx)` if the function has a policy
-  2. From `ctx.summarize()` otherwise
-- **schema** (`dict`, optional) — Expected JSON output schema.
-- **model** (`str`, default `"sonnet"`) — Model name or alias.
-- **call** (`Callable`, optional) — LLM provider function with signature `fn(messages, model) -> str`. If `None`, raises `NotImplementedError`.
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `prompt` | `str` | *(required)* | Instructions for the LLM |
+| `input` | `dict \| None` | `None` | Structured data (serialized as JSON) |
+| `images` | `list[str] \| None` | `None` | Image file paths |
+| `context` | `str \| None` | `None` | Override auto-generated context |
+| `schema` | `dict \| None` | `None` | Expected JSON output schema |
+| `model` | `str` | `"sonnet"` | Model name or alias |
+| `call` | `Callable \| None` | `None` | LLM provider: `fn(messages, model) -> str` |
 
-**Returns:** `str` — LLM reply.
+### Context injection
 
-**Example:**
+When `context=None` (default), runtime.exec() auto-generates context:
+
+```python
+# If the function has summarize config:
+context = ctx.summarize(**decorator_summarize_dict)
+
+# Otherwise:
+context = ctx.summarize()  # all ancestors + all siblings
+```
+
+To skip auto-injection, pass `context=""`.
+To use custom context, pass `context="your text here"`.
+
+### What gets recorded
+
+On the current Context node:
+- `input` ← the `input` parameter
+- `media` ← the `images` parameter
+- `raw_reply` ← the LLM's response
+
+### Message layout
+
+Messages are ordered for maximum prompt cache hit rate:
+
+```
+1. [Context]     ← stable prefix from summarize() (cached across calls)
+2. [Understood]  ← assistant ack (keeps prefix cacheable)
+3. Prompt+Input  ← new content (changes each call)
+4. Schema        ← JSON constraint (if any)
+```
+
+### Example
 
 ```python
 from agentic import agentic_function, runtime
 
-@agentic_function(context="inherit")
+@agentic_function(summarize={"depth": 1, "siblings": 1})
 def observe(task):
     """Look at the screen and describe what you see."""
     img = take_screenshot()
@@ -94,107 +176,13 @@ def observe(task):
 
 ---
 
-## `ContextPolicy`
+## Context
 
 ```python
-agentic.ContextPolicy(depth=-1, siblings=-1, level="summary", decay=False, decay_thresholds=None, decay_fallback_window=1, decay_fallback_level="result", progressive_detail=None, cache_stable=True, include=None, exclude=None, branch=None, max_tokens=None)
+from agentic import Context
 ```
 
-Controls what context gets injected into LLM calls for a function.
-
-**Parameters:**
-
-- **depth** (`int`, default `-1`) — How many ancestor levels to include.
-
-  | Value | Effect |
-  |-------|--------|
-  | `-1` | All ancestors from root to parent |
-  | `0` | No ancestors |
-  | `1` | Parent only |
-  | `N` | Up to N levels |
-
-- **siblings** (`int`, default `-1`) — How many previous siblings to include (most recent first). Overridden by `decay` when `decay=True`.
-
-  | Value | Effect |
-  |-------|--------|
-  | `-1` | All siblings |
-  | `0` | No siblings |
-  | `N` | Last N siblings |
-
-- **level** (`str`, default `"summary"`) — Default render level for siblings. Same values as `expose`.
-
-- **decay** (`bool`, default `False`) — Enable automatic recency decay. When `True`, the number of visible siblings and their render level change based on how many siblings exist.
-
-- **decay_thresholds** (`list[tuple]`, optional) — List of `(max_n_siblings, window, level)`. Checked in order; first match wins. Default:
-  ```python
-  [
-      (5,  -1, "detail"),     # <5 siblings: show all at detail
-      (15,  3, "summary"),    # 5-14 siblings: last 3 at summary
-  ]
-  ```
-
-- **decay_fallback_window** (`int`, default `1`) — Window when sibling count exceeds all thresholds.
-
-- **decay_fallback_level** (`str`, default `"result"`) — Level when sibling count exceeds all thresholds.
-
-- **progressive_detail** (`list[tuple]`, optional) — Vary render level by recency within the visible window. List of `(recency, level)` where recency=1 is the most recent sibling. Example:
-  ```python
-  [(1, "detail"), (3, "summary")]
-  # Most recent → detail, 2nd-3rd → summary, older → default level
-  ```
-
-- **cache_stable** (`bool`, default `True`) — Freeze each sibling's rendering after first render. Preserves prompt cache prefixes across calls.
-
-- **include** (`list[str]`, optional) — Path whitelist. Only show nodes matching these paths. Supports `*` wildcard.
-
-- **exclude** (`list[str]`, optional) — Path blacklist. Hide matching nodes.
-
-- **branch** (`list[str]`, optional) — Show entire subtree under nodes with these names.
-
-- **max_tokens** (`int`, optional) — Token budget. Drops oldest siblings first.
-
-**Example:**
-
-```python
-from agentic import agentic_function, ContextPolicy
-
-policy = ContextPolicy(
-    depth=1,
-    siblings=3,
-    level="summary",
-    max_tokens=500,
-)
-
-@agentic_function(context_policy=policy)
-def my_function(): ...
-```
-
-### Preset Policies
-
-| Preset | depth | siblings | level | decay | Description |
-|--------|-------|----------|-------|-------|-------------|
-| `ORCHESTRATOR` | `0` | `-1` (all) | `"result"` | No | Top-level loops |
-| `PLANNER` | `1` | `5` | `"summary"` | No | Decision-making, with progressive detail |
-| `WORKER` | `1` | (decay) | (decay) | **Yes** | Repeated calls in loops |
-| `LEAF` | `0` | `0` | `"result"` | No | Pure computation, zero overhead |
-| `FOCUSED` | `1` | `1` | `"detail"` | No | Only needs the previous sibling |
-
-```python
-from agentic import ORCHESTRATOR, PLANNER, WORKER, LEAF, FOCUSED
-
-@agentic_function(context_policy=WORKER)
-def observe(task): ...
-```
-
----
-
-## `Context`
-
-```python
-agentic.Context
-```
-
-Dataclass representing one function execution record. Managed automatically by `@agentic_function` and `runtime.exec()`.
+Dataclass. One instance per function call. Users never create these directly — `@agentic_function` handles it.
 
 ### Fields
 
@@ -204,62 +192,139 @@ Dataclass representing one function execution record. Managed automatically by `
 | `prompt` | `str` | decorator | Docstring |
 | `params` | `dict` | decorator | Call arguments |
 | `output` | `Any` | decorator | Return value |
-| `error` | `str` | decorator | Error message |
-| `status` | `str` | decorator | `"running"` / `"success"` / `"error"` |
-| `parent` | `Context` | decorator | Parent node |
+| `error` | `str` | decorator | Error message if failed |
+| `status` | `str` | decorator | `"running"` → `"success"` / `"error"` |
+| `parent` | `Context` | decorator | Parent node in the tree |
 | `children` | `list` | decorator | Child nodes |
-| `expose` | `str` | decorator | Render level hint |
+| `render` | `str` | decorator | Default render level |
+| `compress` | `bool` | decorator | Hide children after completion |
 | `start_time` | `float` | decorator | Start timestamp |
 | `end_time` | `float` | decorator | End timestamp |
-| `input` | `dict` | `runtime.exec()` | Data sent to LLM |
-| `media` | `list` | `runtime.exec()` | Media file paths |
-| `raw_reply` | `str` | `runtime.exec()` | LLM response text |
+| `input` | `dict` | runtime.exec() | Data sent to LLM |
+| `media` | `list` | runtime.exec() | Image/file paths sent to LLM |
+| `raw_reply` | `str` | runtime.exec() | LLM response text |
 
 ### Properties
 
-- **`path`** — Auto-computed address. Format: `parent_path/name_index`. Example: `"root/navigate_0/observe_1/run_ocr_0"`.
-- **`duration_ms`** — Execution duration in milliseconds.
+**`path`** — auto-computed tree address.
 
-### Methods
-
-#### `summarize`
-
-```python
-Context.summarize(level=None, max_tokens=None, max_siblings=None, depth=-1, siblings=-1, include=None, exclude=None, branch=None)
+```
+"root/navigate_0/observe_1/run_ocr_0"
 ```
 
-Query the Context tree and generate a text summary. Parameters match [ContextPolicy](#contextpolicy) fields.
+Format: `{parent_path}/{name}_{index}`. Index counts same-name siblings.
+
+**`duration_ms`** — execution time in milliseconds.
+
+---
+
+### Context.summarize()
 
 ```python
-ctx.summarize()                                    # all ancestors + all siblings
-ctx.summarize(depth=1, siblings=3)                 # parent + last 3
-ctx.summarize(depth=0, siblings=0)                 # empty (isolated)
-ctx.summarize(include=["root/nav_0/observe_1"])    # specific node
-ctx.summarize(branch=["observe"])                  # observe + its children
-ctx.summarize(level="trace")                       # override all expose levels
-ctx.summarize(max_tokens=1000)                     # with token budget
+ctx.summarize(
+    depth=-1, siblings=-1, level=None,
+    include=None, exclude=None, branch=None, max_tokens=None,
+)
 ```
 
-#### `tree`
+Query the tree. Returns a text string for LLM input.
+
+#### Parameters
+
+| Parameter | Type | Default | Effect |
+|-----------|------|---------|--------|
+| `depth` | `int` | `-1` | Ancestor levels. -1=all, 0=none, 1=parent only |
+| `siblings` | `int` | `-1` | Previous siblings. -1=all, 0=none, N=last N |
+| `level` | `str \| None` | `None` | Override render level for all nodes |
+| `include` | `list[str] \| None` | `None` | Path whitelist (supports `*` wildcard) |
+| `exclude` | `list[str] \| None` | `None` | Path blacklist (supports `*` wildcard) |
+| `branch` | `list[str] \| None` | `None` | Expand children of named nodes |
+| `max_tokens` | `int \| None` | `None` | Token budget (drops oldest siblings first) |
+
+#### Default behavior
+
+All ancestors + all same-level siblings. Siblings' children are NOT shown.
+
+This means every call sees the previous call's output as part of the prefix, plus new content at the end — maximizing prompt cache hits.
+
+#### Examples
 
 ```python
-Context.tree(indent=0) -> str
+# Default: everything (all ancestors + all siblings)
+ctx.summarize()
+
+# Parent + last 3 siblings
+ctx.summarize(depth=1, siblings=3)
+
+# Nothing (isolated)
+ctx.summarize(depth=0, siblings=0)
+
+# Force all nodes to render as detail
+ctx.summarize(level="detail")
+
+# Only nodes under navigate_0
+ctx.summarize(include=["root/navigate_0/*"])
+
+# Expand observe's children
+ctx.summarize(branch=["observe"])
+
+# With token budget
+ctx.summarize(max_tokens=1000)
 ```
 
-Human-readable tree view.
+#### Output examples
+
+Given this tree, with `verify` as the current node:
+
+```
+root
+└── navigate("login")
+    ├── observe("find login")   → {"found": true}   1200ms
+    ├── act("click login")      → {"clicked": true}  820ms
+    └── verify("check")         ← current
+```
+
+```python
+# ctx.summarize()  →
+[Ancestor: root()]
+[Ancestor: navigate(target="login")]
+observe: {"found": true} 1200ms
+act: {"clicked": true} 820ms
+
+# ctx.summarize(depth=0, siblings=1)  →
+act: {"clicked": true} 820ms
+
+# ctx.summarize(level="detail")  →
+[Ancestor: root()]
+[Ancestor: navigate(target="login")]
+observe(task="find login") → success 1200ms | input:  | output: {"found": true}
+act(target="click login") → success 820ms | input:  | output: {"clicked": true}
+```
+
+---
+
+### Context.tree()
+
+```python
+ctx.tree(indent=0) -> str
+```
+
+Full tree view for debugging. Shows ALL nodes regardless of render/compress settings.
 
 ```
 root …
   navigate ✓ 3200ms → {'success': True}
     observe ✓ 1200ms → {'found': True}
-      run_ocr ✓ 50ms → {'texts': ['Login']}
     act ✓ 820ms → {'clicked': True}
+    verify ✓ 200ms → {'passed': True}
 ```
 
-#### `traceback`
+---
+
+### Context.traceback()
 
 ```python
-Context.traceback() -> str
+ctx.traceback() -> str
 ```
 
 Error traceback, similar to Python's format.
@@ -272,32 +337,29 @@ Agentic Traceback:
       error: element not interactable
 ```
 
-#### `save`
+---
+
+### Context.save()
 
 ```python
-Context.save(path: str)
+ctx.save(path: str)
 ```
 
-Save tree to file. `.md` for human-readable, `.jsonl` for machine-readable.
+Save the tree to a file.
+
+- `.md` → human-readable tree (same as `tree()`)
+- `.jsonl` → one JSON object per node, with all fields
 
 ---
 
 ## Module Functions
 
 ```python
-agentic.get_context() -> Context | None
+from agentic import get_context, get_root_context, init_root
 ```
 
-Get the current Context node. Returns `None` if outside any `@agentic_function`.
-
-```python
-agentic.get_root_context() -> Context | None
-```
-
-Get the root of the Context tree. Walks up from current node.
-
-```python
-agentic.init_root(name="root") -> Context
-```
-
-Manually create a root node. Usually not needed — `context="auto"` handles this.
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `get_context()` | `Context \| None` | Current active node. `None` if outside any `@agentic_function`. |
+| `get_root_context()` | `Context \| None` | Root of the tree. Walks up from current node. |
+| `init_root(name="root")` | `Context` | Manually create a root. Usually not needed. |

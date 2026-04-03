@@ -1,63 +1,57 @@
 # Context System
 
-The Context tree is the execution record for Agentic Programming.
-One tree records everything. Queries select what to show.
+Every `@agentic_function` call creates a Context node.
+Nodes form a tree. The tree records everything — completely and permanently.
+
+When a function needs to call an LLM, `summarize()` reads the tree
+and returns only the relevant parts as text.
+
+**Recording** is automatic and unconditional.
+**Reading** is selective and configurable.
 
 ## Documents
 
-| File | Description |
+| File | What it covers |
 |---|---|
-| [ENGINEERING.md](ENGINEERING.md) | **Context Engineering** — how `summarize()` queries the tree. 6 scenarios with Mermaid diagrams: full tree, depth control, include/exclude paths, branch selection, isolated mode, independent trees, path addressing. |
-| [PRACTICE.md](PRACTICE.md) | **Context Practice** — strategies for API mode vs Session mode. Injection levels by tree position, recency decay, progressive detail, cache-aware layout (prompt caching cost optimization), Session compression/checkpoint, ContextPolicy design. |
-
-## Diagrams
-
-Mermaid diagrams for each visibility scenario:
-
-| File | Scenario |
-|---|---|
-| `01-full-tree.mmd` | Full tree — all ancestors + all siblings |
-| `02-depth-1.mmd` | Depth=1 — parent only |
-| `03-include-specific.mmd` | Include — path whitelist |
-| `04-branch-select.mmd` | Branch — subtree selection |
-| `05-isolated.mmd` | Isolated — depth=0, siblings=0 |
-| `06-new-tree.mmd` | New tree — context="new" |
-| `07-path-addressing.mmd` | Path addressing — precise node selection |
+| [ENGINEERING.md](ENGINEERING.md) | API reference — every class, parameter, method, with examples |
+| [PRACTICE.md](PRACTICE.md) | Usage strategies — when to use which settings, session management, cost optimization |
 
 ## Code
 
-The Context system is implemented in `agentic/`:
-
 | File | What it does |
 |---|---|
-| `context.py` | `Context` dataclass + `ContextPolicy` + presets + `summarize()` + tree ops |
-| `function.py` | `@agentic_function` decorator — auto-tracks in Context tree |
-| `runtime.py` | `runtime.exec()` — LLM call with auto context injection |
+| `agentic/context.py` | Context dataclass + summarize() + tree inspection + persistence |
+| `agentic/function.py` | @agentic_function decorator — creates nodes, manages the tree |
+| `agentic/runtime.py` | runtime.exec() — calls the LLM, reads from and writes to Context |
+| `agentic/__init__.py` | Public API exports |
 
 ## Quick Reference
 
 ```python
 from agentic import agentic_function, runtime
-from agentic import ORCHESTRATOR, PLANNER, WORKER, LEAF, FOCUSED
 
-# Preset policies control what context each function sees:
-@agentic_function(context_policy=WORKER)    # Recency decay, sees recent siblings
-def observe(task): ...
+# Minimal: just decorate. Records everything, sees everything.
+@agentic_function
+def observe(task):
+    """Look at the screen."""
+    return runtime.exec(prompt=observe.__doc__, call=my_llm)
 
-@agentic_function(context_policy=ORCHESTRATOR)  # Sees all results, no details
-def navigate(target): ...
-
-@agentic_function(context_policy=LEAF)      # Zero context, pure computation
-def run_ocr(img): ...
-
-@agentic_function(context_policy=FOCUSED)   # Only the most recent sibling
-def act(target, location): ...
+# Customized: limited context, compressed output.
+@agentic_function(
+    render="detail",                       # others see my full I/O
+    summarize={"depth": 1, "siblings": 3}, # I only see parent + last 3 siblings
+    compress=True,                         # after I finish, hide my children
+)
+def navigate(target):
+    """Navigate to target."""
+    observe(...)
+    act(...)
+    return verify(...)
 ```
 
 ## Design Principles
 
-1. **One tree, record everything.** Recording is never affected by queries.
-2. **Query selectively.** Each function controls its own view via ContextPolicy.
-3. **Cache stability.** Rendered text is frozen — never mutate old siblings.
-4. **Recency over completeness.** Old context decays. Recent context is detailed.
-5. **Cost awareness.** Prompt cache hits are 10x cheaper. Stable prefixes matter.
+1. **One tree, record everything.** Recording is unconditional and permanent.
+2. **Read selectively.** Each function configures what it sees via `summarize`.
+3. **Users write pure Python.** No `ctx` parameter, no manual tree management.
+4. **Compress at boundaries.** High-level functions hide their internals after completion.
