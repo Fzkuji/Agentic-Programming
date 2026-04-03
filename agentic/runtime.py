@@ -80,6 +80,14 @@ def exec(
     """
     ctx = _current_ctx.get(None)
 
+    # --- Guard: one runtime.exec() per function ---
+    if ctx is not None and ctx.raw_reply:
+        raise RuntimeError(
+            f"runtime.exec() called twice in {ctx.name}(). "
+            f"Each @agentic_function should call runtime.exec() at most once. "
+            f"Split into separate @agentic_function calls."
+        )
+
     # --- Read: auto-generate context from the tree ---
     if context is None and ctx is not None:
         if ctx._summarize_kwargs:

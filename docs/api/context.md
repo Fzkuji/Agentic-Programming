@@ -66,7 +66,7 @@ Query the Context tree and return a text string for LLM input. This is how Conte
 
 - **depth** (`int`, default `-1`) — How many ancestor levels to show. `-1` = all, `0` = none, `1` = parent only, `N` = up to N levels.
 
-- **siblings** (`int`, default `-1`) — How many previous siblings to show (most recent first). `-1` = all, `0` = none, `N` = last N.
+- **siblings** (`int`, default `-1`) — How many previous siblings to show. `-1` = all, `0` = none, `N` = last N (keeps the N closest to current, in chronological order).
 
 - **level** (`str | None`, default `None`) — Override render level for all nodes. If `None`, each node uses its own `render` setting. Values: `"trace"` / `"detail"` / `"summary"` / `"result"` / `"silent"`.
 

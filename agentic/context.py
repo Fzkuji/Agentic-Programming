@@ -42,6 +42,7 @@ See also:
 
 from __future__ import annotations
 
+import os
 import time
 import json
 from dataclasses import dataclass, field
@@ -217,8 +218,9 @@ class Context:
             depth:      How many ancestor levels to show.
                         -1 = all (default), 0 = none, 1 = parent only, N = up to N levels.
 
-            siblings:   How many previous siblings to show (most recent first).
+            siblings:   How many previous siblings to show.
                         -1 = all (default), 0 = none, N = last N siblings.
+                        When N is set, keeps the N most recent (closest to current).
 
             level:      Override render level for ALL nodes in the output.
                         If None, each node uses its own `render` setting.
@@ -288,7 +290,7 @@ class Context:
                 # Expand children if requested via branch — but not if compressed
                 if branch and c.name in branch:
                     if not (c.compress and c.status != "running"):
-                        rendered += "\n" + c._render_branch(level)
+                        rendered += "\n" + c._render_branch(level, include=include, exclude=exclude)
 
                 sibling_parts.append(rendered)
 
@@ -359,16 +361,21 @@ class Context:
         # "silent" or unknown → empty
         return ""
 
-    def _render_branch(self, level: Optional[str], indent: int = 1) -> str:
+    def _render_branch(
+        self, level: Optional[str], indent: int = 1,
+        include: Optional[list] = None, exclude: Optional[list] = None,
+    ) -> str:
         """Render children recursively (used by branch= in summarize)."""
         lines = []
         for c in self.children:
+            if not _node_allowed(c, include, exclude):
+                continue
             render_level = level or c.render
             if render_level != "silent":
                 prefix = "  " * indent
                 lines.append(f"{prefix}{c._render(render_level)}")
                 if c.children and not (c.compress and c.status != "running"):
-                    lines.append(c._render_branch(level, indent + 1))
+                    lines.append(c._render_branch(level, indent + 1, include, exclude))
         return "\n".join(lines)
 
     # ==================================================================
@@ -429,16 +436,23 @@ class Context:
         """
         Save the full tree to a file.
 
-        .md  → human-readable tree view (same as tree())
+        .md   → human-readable tree view (same as tree())
         .jsonl → one JSON object per node, machine-readable
+
+        Raises ValueError for unsupported extensions.
         """
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         if path.endswith(".md"):
             with open(path, "w") as f:
                 f.write(self.tree())
-        else:
+        elif path.endswith(".jsonl"):
             with open(path, "w") as f:
                 for record in self._to_records():
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        else:
+            raise ValueError(
+                f"Unsupported file extension: {path}. Use .md or .jsonl."
+            )
 
     def _to_records(self, tree_depth: int = 0) -> list[dict]:
         """Flatten the tree into a list of dicts for JSONL export."""

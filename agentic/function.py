@@ -114,6 +114,11 @@ class agentic_function:
         return functools.partial(self._wrapper, obj)
 
     def _make_wrapper(self, fn: Callable) -> Callable:
+        if inspect.iscoroutinefunction(fn):
+            raise TypeError(
+                f"@agentic_function does not support async functions. "
+                f"{fn.__name__} is async. Use a sync wrapper instead."
+            )
         sig = inspect.signature(fn)
         render = self.render
         compress = self.compress
@@ -121,18 +126,13 @@ class agentic_function:
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
-            # Capture call arguments
-            bound = sig.bind(*args, **kwargs)
-            bound.apply_defaults()
-            params = dict(bound.arguments)
-
             parent = _current_ctx.get(None)
 
-            # Create this call's node
+            # Create node BEFORE binding so even invalid calls are recorded
             ctx = Context(
                 name=fn.__name__,
                 prompt=fn.__doc__ or "",
-                params=params,
+                params={},
                 parent=parent,
                 render=render,
                 compress=compress,
@@ -145,6 +145,11 @@ class agentic_function:
             # Set as current context for the duration of the call
             token = _current_ctx.set(ctx)
             try:
+                # Bind arguments (inside try so binding errors are recorded)
+                bound = sig.bind(*args, **kwargs)
+                bound.apply_defaults()
+                ctx.params = dict(bound.arguments)
+
                 result = fn(*args, **kwargs)
                 ctx.output = result
                 ctx.status = "success"
