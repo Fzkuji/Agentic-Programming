@@ -33,11 +33,13 @@ Quick start:
 from agentic.context import Context, get_context, get_root_context, init_root
 from agentic.function import agentic_function
 from agentic.runtime import Runtime
+from agentic.meta import create
 
 __all__ = [
     "agentic_function",
     "Runtime",
     "Context",
+    "create",
     "get_context",
     "get_root_context",
     "init_root",
