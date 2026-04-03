@@ -9,7 +9,7 @@
 | [`agentic_function`](api/agentic_function.md) | `function.py` | 装饰器。把普通函数变成 Agentic Function，自动记录到 Context 树 |
 | [`Runtime`](api/runtime.md) | `runtime.py` | LLM 运行时类。处理 Context 注入、调用 LLM、记录回复 |
 | [`Context`](api/context.md) | `context.py` | 执行记录。每个函数调用一个节点，节点组成树 |
-| [`create`](api/meta.md) | `meta.py` | Meta function。用自然语言描述生成新的 @agentic_function |
+| [`create`](api/meta_function.md) | `meta_function.py` | Meta function。用自然语言描述生成新的 @agentic_function |
 
 ## 导入
 

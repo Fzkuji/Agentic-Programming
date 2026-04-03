@@ -184,7 +184,7 @@ Generate new agentic functions from natural language at runtime:
 
 ```python
 from agentic import Runtime
-from agentic.meta import create
+from agentic.meta_function import create
 
 runtime = Runtime(call=my_llm, model="gemini-2.5-flash")
 
@@ -232,7 +232,7 @@ agentic/
 ├── context.py       # Context tree: tracking, summarize, tree/traceback, save
 ├── function.py      # @agentic_function decorator
 ├── runtime.py       # Runtime class — exec() + _call()
-└── meta.py          # Meta function — create() for code generation
+└── meta_function.py          # Meta function — create() for code generation
 
 examples/
 ├── main.py          # Basic entry point (Gemini)

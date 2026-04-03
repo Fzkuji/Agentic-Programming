@@ -1,6 +1,6 @@
 # create
 
-> Source: [`agentic/meta.py`](../../agentic/meta.py)
+> Source: [`agentic/meta_function.py`](../../agentic/meta_function.py)
 
 Meta function。用自然语言描述生成新的 `@agentic_function`。
 
@@ -57,7 +57,7 @@ def create(description: str, runtime: Runtime, name: str = None) -> callable
 
 ```python
 from agentic import Runtime
-from agentic.meta import create
+from agentic.meta_function import create
 
 runtime = Runtime(call=my_llm, model="sonnet")
 
