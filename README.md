@@ -218,6 +218,37 @@ MCP is the **transport** (how to call). Agentic Programming is the **execution m
 
 ---
 
+## Built-in Providers
+
+内置了三个常用 LLM 的 Runtime 实现，每个都是可选依赖：
+
+```bash
+# 按需安装
+pip install anthropic   # for AnthropicRuntime
+pip install openai      # for OpenAIRuntime
+pip install google-genai # for GeminiRuntime
+```
+
+```python
+# Anthropic Claude
+from agentic.providers import AnthropicRuntime
+rt = AnthropicRuntime(api_key="sk-ant-...", model="claude-sonnet-4-20250514")
+
+# OpenAI GPT
+from agentic.providers import OpenAIRuntime
+rt = OpenAIRuntime(api_key="sk-...", model="gpt-4o")
+
+# Google Gemini
+from agentic.providers import GeminiRuntime
+rt = GeminiRuntime(api_key="...", model="gemini-2.5-flash")
+```
+
+所有 provider 支持 text + image content blocks。AnthropicRuntime 自动启用 prompt caching，OpenAIRuntime 支持 response_format。
+
+详见 [Provider 文档](docs/api/providers.md)。
+
+---
+
 ## Install
 
 ```bash
@@ -228,18 +259,30 @@ pip install -e .
 
 ```
 agentic/
-├── __init__.py      # Exports: agentic_function, Runtime, Context, create
-├── context.py       # Context tree: tracking, summarize, tree/traceback, save
-├── function.py      # @agentic_function decorator
-├── runtime.py       # Runtime class — exec() + _call()
-└── meta_function.py          # Meta function — create() for code generation
+├── __init__.py        # Exports: agentic_function, Runtime, Context, create, fix
+├── context.py         # Context tree: tracking, summarize, tree/traceback, save
+├── function.py        # @agentic_function decorator
+├── runtime.py         # Runtime class — exec() + _call() + retry
+├── meta_function.py   # Meta functions — create() + fix()
+└── providers/         # Built-in Runtime implementations
+    ├── anthropic.py   # AnthropicRuntime (Claude)
+    ├── openai.py      # OpenAIRuntime (GPT)
+    └── gemini.py      # GeminiRuntime (Gemini)
 
 examples/
-├── main.py          # Basic entry point (Gemini)
-├── claude_demo.py   # End-to-end demo (Claude Code CLI)
-└── meta_demo.py     # Meta function demo
+├── main.py            # Basic entry point (Gemini)
+├── claude_demo.py     # End-to-end demo (Claude Code CLI)
+├── meta_demo.py       # Meta function demo
+├── code_review.py     # Code review pipeline
+├── data_analysis.py   # Data analysis with render levels
+└── meta_chain.py      # Dynamic function chain with create()
 
 docs/
-├── API.md           # API overview
-└── api/             # Per-component API docs
+├── API.md             # API overview
+└── api/               # Per-component API docs
+    ├── agentic_function.md
+    ├── context.md
+    ├── meta_function.md   # create() + fix()
+    ├── runtime.md         # exec() + retry
+    └── providers.md       # Provider 配置指南
 ```

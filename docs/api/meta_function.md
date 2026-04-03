@@ -1,8 +1,8 @@
-# create
+# create & fix
 
 > Source: [`agentic/meta_function.py`](../../agentic/meta_function.py)
 
-Meta function。用自然语言描述生成新的 `@agentic_function`。
+Meta function。用自然语言描述生成新的 `@agentic_function`，以及修复失败的生成函数。
 
 `create()` 本身也是一个 `@agentic_function`——它用 Runtime 让 LLM 写代码，在沙箱中执行，返回一个可调用的函数。
 
@@ -122,4 +122,87 @@ def analyze_topic(topic):
     explanation = explain()
     criticism = critique()
     return f"Explanation: {explanation}\n\nCritique: {criticism}"
+```
+
+---
+
+## Function: `fix()`
+
+```python
+@agentic_function
+def fix(description: str, code: str, error_log: str, runtime: Runtime, name: str = None) -> callable
+```
+
+当 `create()` 生成的函数运行失败时，用 `fix()` 来修复。它把原始代码和错误日志发给 LLM，让 LLM 重写一个修复版本。
+
+### 参数
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `description` | `str` | *(必填)* | 原始任务描述（和 create 时相同） |
+| `code` | `str` | *(必填)* | 失败的生成代码 |
+| `error_log` | `str` | *(必填)* | 错误日志（包含失败尝试的错误信息） |
+| `runtime` | `Runtime` | *(必填)* | Runtime 实例 |
+| `name` | `str \| None` | `None` | 覆盖修复后函数的名称 |
+
+### 返回值
+
+`callable` — 修复后的 `@agentic_function`。
+
+### 异常
+
+| 异常 | 原因 |
+|------|------|
+| `SyntaxError` | 修复后的代码仍有语法错误 |
+| `ValueError` | 修复后的代码包含 import、async 等 |
+
+---
+
+### 使用方式
+
+```python
+from agentic.meta_function import create, fix
+
+runtime = Runtime(call=my_llm, model="sonnet")
+
+# 创建函数
+analyze = create("Analyze sentiment of text", runtime=runtime)
+
+# 尝试运行
+try:
+    result = analyze(text="This is great!")
+except Exception as e:
+    # 如果失败，用 fix() 修复
+    analyze = fix(
+        description="Analyze sentiment of text",
+        code="<the generated code>",
+        error_log=str(e),
+        runtime=runtime,
+    )
+    result = analyze(text="This is great!")
+```
+
+### create + fix 自动重试模式
+
+```python
+def create_with_retry(description, runtime, max_attempts=3):
+    """Create a function, auto-fix if it fails."""
+    fn = create(description, runtime=runtime)
+    errors = []
+    
+    for attempt in range(max_attempts):
+        try:
+            # Test with a sample input
+            fn(text="test")
+            return fn
+        except Exception as e:
+            errors.append(f"Attempt {attempt + 1}: {e}")
+            fn = fix(
+                description=description,
+                code="<source>",
+                error_log="\n".join(errors),
+                runtime=runtime,
+            )
+    
+    return fn  # Best effort
 ```

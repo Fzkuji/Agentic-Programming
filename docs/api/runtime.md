@@ -18,6 +18,7 @@ class Runtime(call=None, model="default")
 |------|------|--------|------|
 | `call` | `Callable \| None` | `None` | LLM provider 函数。签名：`fn(content: list[dict], model: str, response_format: dict) -> str`。如果不传，需要子类化并重写 `_call()` |
 | `model` | `str` | `"default"` | 默认模型名称，每次调用可覆盖 |
+| `max_retries` | `int` | `2` | exec() 最大尝试次数（包含首次调用） |
 
 ### 属性
 
@@ -182,3 +183,44 @@ def plan(goal):
     """Complex planning with strong model."""
     return strong.exec(content=[...])
 ```
+
+---
+
+## Retry 机制
+
+`exec()` 和 `async_exec()` 内置自动重试，用于处理 LLM API 的临时性错误（网络超时、速率限制、服务器错误等）。
+
+### 配置
+
+```python
+# 默认：最多尝试 2 次（失败 1 次后重试 1 次）
+rt = Runtime(call=my_llm, max_retries=2)
+
+# 不重试（失败即抛异常）
+rt = Runtime(call=my_llm, max_retries=1)
+
+# 多次重试（适用于不稳定的 API）
+rt = Runtime(call=my_llm, max_retries=5)
+```
+
+### 行为规则
+
+| 情况 | 处理 |
+|------|------|
+| API 调用成功 | 返回结果，记录到 Context |
+| API 抛出异常（非 TypeError/NotImplementedError） | 重试，直到 max_retries 次 |
+| TypeError 或 NotImplementedError | 立即抛出，不重试（编程错误） |
+| 所有重试均失败 | 抛出 RuntimeError，包含所有尝试的错误报告 |
+
+### 错误报告格式
+
+当所有重试耗尽时，抛出的 `RuntimeError` 包含每次尝试的错误信息：
+
+```
+RuntimeError: exec() failed after 3 attempts in observe():
+Attempt 1: ConnectionError: timeout
+Attempt 2: RateLimitError: 429 Too Many Requests
+Attempt 3: ConnectionError: timeout
+```
+
+这样可以在 Context 树中看到完整的失败史，方便调试。
