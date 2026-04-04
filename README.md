@@ -34,7 +34,13 @@ The core issue: **the LLM controls the flow.** You're asking a reasoning engine 
   <img src="docs/images/the_idea.png" alt="The Idea: Python controls flow, LLM reasons" width="800">
 </p>
 
-**Give the flow back to Python. Let the LLM focus on reasoning.** Python handles scheduling, loops, error handling, and data flow. The LLM only answers questions.
+**Give the flow back to Python. Let the LLM focus on reasoning.**
+
+Python handles scheduling, loops, error handling, and data flow. The LLM only answers questions — when asked, where asked.
+
+- **Deterministic flow** — Python controls `if/else/for/while`. The execution path is guaranteed, not suggested.
+- **Minimal LLM calls** — The LLM is called only when reasoning is needed. 2 calls instead of 10.
+- **Docstring = Prompt** — Change the function's docstring, change the LLM's behavior. No separate prompt files.
 
 ```python
 @agentic_function
