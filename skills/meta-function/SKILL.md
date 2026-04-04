@@ -5,32 +5,18 @@ description: "Create, fix, or publish Python functions using Agentic Programming
 
 # Meta Function
 
-Create, fix, and publish functions via CLI.
-
 ## Create a new function
 
 ```bash
 agentic create "<DESCRIPTION>" --name <NAME>
 ```
 
-Add `--as-skill` to also generate a SKILL.md.
+Add `--as-skill` to also generate a SKILL.md for agent discovery.
 
 ## Fix a function
 
 ```bash
 agentic fix <NAME> --instruction "<WHAT_TO_CHANGE>"
-```
-
-## Run a function
-
-```bash
-agentic run <NAME> --arg key=value
-```
-
-## List all functions
-
-```bash
-agentic list
 ```
 
 ## Publish as skill
