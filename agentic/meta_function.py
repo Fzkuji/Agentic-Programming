@@ -44,13 +44,28 @@ Rules:
    Content is a list of dicts: [{{"type": "text", "text": "..."}}]
 2. If the task is purely deterministic (file operations, math, data processing),
    write a normal Python function WITHOUT @agentic_function and WITHOUT runtime.exec().
-3. Write a clear docstring describing what the function does.
-4. Return a meaningful result (string or dict).
-5. Standard library imports are allowed (os, json, re, pathlib, etc.).
-6. Do NOT use async/await.
+3. Standard library imports are allowed (os, json, re, pathlib, etc.).
+4. Do NOT use async/await.
+5. `agentic_function` and `runtime` are available in scope if needed.
 
-`agentic_function` and `runtime` are available in scope if needed.
+Code style (MUST follow):
+- Type hints on all parameters and return type.
+- Google-style docstring with: one-line summary, Args section, Returns section.
+- If calling other agentic functions, import them from agentic.functions.
+- Example docstring format:
+  def my_func(text: str, count: int = 3) -> str:
+      \"\"\"Summarize text into bullet points.
 
+      Args:
+          text: The text to summarize.
+          count: Number of bullet points.
+
+      Returns:
+          A string with bullet-point summary.
+
+      Dependencies:
+          None (or list functions this calls).
+      \"\"\"\n
 Write ONLY the function definition. No extra imports at top level, no examples, no explanation.
 """
 
