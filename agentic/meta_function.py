@@ -377,6 +377,19 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
                 Number of words.
             \"\"\"\n            return len(text.split())
 
+    Robustness rules:
+    - If the task has a specific output format, define it precisely in the
+      docstring (e.g., "Return format: 'Lec 2 (12:00-14:00)'"). Don't let
+      the LLM guess the format.
+    - If the function involves text input/typing, handle special characters,
+      escaping, and edge cases (empty input, very long input, etc.).
+    - If the function depends on external state (files, UI, APIs), validate
+      inputs and handle errors with clear messages.
+    - Prefer returning structured data (dict/JSON) over free-form text when
+      the result will be used by other functions.
+    - If exact formatting matters, include an example in the docstring:
+      e.g., "Example output: {'time': '12:00-14:00', 'type': 'Lecture'}"
+
     Write ONLY the function definition. No extra imports, no explanation.
 
     Args:
@@ -423,6 +436,10 @@ def fix(
     - Type hints, Google-style docstring, standard library imports allowed.
     - No async/await.
     - The fixed function will overwrite the original in agentic/functions/.
+    - Fix the root cause, not just the symptom. If the error is a format mismatch,
+      make the format explicit in the docstring. If it's a type error, add validation.
+    - If the error involves text input/typing, handle special characters and edge cases.
+    - If output format matters, define it precisely in the docstring with examples.
 
     If unsure about what to fix, respond with ONLY "QUESTION: <your question>".
     Otherwise, respond with ONLY the fixed function definition (no explanation).
