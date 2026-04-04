@@ -23,7 +23,7 @@
 ## The Problem
 
 <p align="center">
-  <img src="docs/images/the_problem.svg" alt="The Problem: LLM as Scheduler" width="800">
+  <img src="docs/images/the_problem.png" alt="The Problem: LLM as Scheduler" width="800">
 </p>
 
 The core issue: **the LLM controls the flow.** You're asking a reasoning engine to also be a scheduler, a state machine, and a format enforcer. That's not what it's good at.
