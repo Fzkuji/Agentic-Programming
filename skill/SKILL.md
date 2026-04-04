@@ -1,70 +1,50 @@
 ---
 name: agentic-programming
-description: "Create, run, and fix LLM-powered Python functions using Agentic Programming. Use when: (1) you need to create a new function that calls an LLM, (2) a function failed and needs fixing, (3) you want to run a multi-step task with deterministic Python flow + LLM reasoning. Triggers: 'create a function', 'agentic function', 'fix this function', 'run with agentic'."
+description: "Create, run, and fix Python functions using Agentic Programming. Has two capabilities: (1) meta functions — create() to generate new functions, fix() to repair broken ones; (2) ready-made functions in agentic/functions/. Use when you need a new function, need to fix one, or want to run an existing agentic function."
 ---
 
 # Agentic Programming Skill
 
-## What This Does
-
-Agentic Programming lets you create Python functions that combine deterministic code with LLM reasoning. Python controls the flow, LLM only handles thinking.
-
-## Installation
-
-```bash
-cd ~/.openclaw/workspace
-git clone https://github.com/Fzkuji/Agentic-Programming.git skills/agentic-programming
-pip install -e skills/agentic-programming
-```
-
-## How to Use
+## Available Commands
 
 ### Create a new function
 
-Tell your OpenClaw agent:
-> "Create an agentic function that summarizes text into 3 bullet points"
-
-The agent runs:
 ```bash
 python -c "
 from agentic.meta_function import create
 from agentic.providers import ClaudeCodeRuntime
 runtime = ClaudeCodeRuntime()
-fn = create('Summarize text into 3 bullet points', runtime=runtime)
-print(fn(text='Your text here'))
+fn = create('YOUR DESCRIPTION HERE', runtime=runtime, name='YOUR_NAME')
+print(fn(YOUR_PARAMS))
 "
 ```
 
-### Run a multi-step task
+The function is automatically saved to `agentic/functions/YOUR_NAME.py`.
 
-Tell your agent:
-> "Use agentic-programming to analyze this code: [paste code]"
+### Fix an existing function
 
-The agent writes a Python script using `@agentic_function` decorators, runs it, and returns the result.
-
-### Fix a broken function
-
-Tell your agent:
-> "Fix the summarize function, it's returning numbered lists instead of bullet points"
-
-The agent runs:
 ```bash
 python -c "
 from agentic.meta_function import fix
 from agentic.providers import ClaudeCodeRuntime
+from agentic.functions.FUNCTION_NAME import FUNCTION_NAME
 runtime = ClaudeCodeRuntime()
-fixed = fix(fn=original_fn, runtime=runtime, instruction='Use bullet points not numbered lists')
+fixed = fix(fn=FUNCTION_NAME, runtime=runtime, instruction='WHAT TO CHANGE')
 "
 ```
 
-## Key Concepts
+### Run an existing function
 
-- `@agentic_function` — Decorator that auto-tracks execution into a Context tree
-- `Runtime` — LLM connection (`ClaudeCodeRuntime` needs no API key)
-- `create(description, runtime)` — Generate new functions from natural language
-- `fix(fn, runtime, instruction)` — Fix broken functions with LLM analysis
-- `fn.context.tree()` — View the execution trace
+```bash
+python -c "
+from agentic.functions.FUNCTION_NAME import FUNCTION_NAME
+print(FUNCTION_NAME(PARAMS))
+"
+```
 
-## Examples
+## Available Functions
 
-See `skills/agentic-programming/examples/` for runnable demos.
+Check `agentic/functions/` for all saved functions. Current examples:
+
+- `list_files(path)` — List files and folders in a directory (pure Python)
+- `sentiment(text)` — Analyze text sentiment: positive/negative/neutral (uses LLM)
