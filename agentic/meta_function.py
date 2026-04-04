@@ -224,6 +224,56 @@ def _save_function(code: str, fn_name: str, description: str = None) -> str:
     return filepath
 
 
+def _save_skill(fn_name: str, description: str, code: str) -> str:
+    """Create a SKILL.md for the function in skills/{fn_name}/."""
+    import os
+    # skills/ is at repo root, parallel to agentic/
+    repo_root = os.path.dirname(os.path.dirname(__file__))
+    skill_dir = os.path.join(repo_root, "skills", fn_name)
+    os.makedirs(skill_dir, exist_ok=True)
+
+    # Detect if function uses runtime.exec() (agentic) or not (pure Python)
+    is_agentic = "runtime.exec" in code
+
+    # Extract parameters from code
+    import re as _re
+    param_match = _re.search(r"def\s+\w+\(([^)]*)", code)
+    params = param_match.group(1).strip() if param_match else ""
+    # Remove type hints and defaults for display
+    param_names = [p.strip().split(":")[0].split("=")[0].strip() for p in params.split(",") if p.strip() and p.strip() != "self"]
+
+    skill_md = f"""---
+name: {fn_name}
+description: "{description}"
+---
+
+# {fn_name}
+
+{description}
+
+## Setup
+
+```bash
+pip install -e /path/to/Agentic-Programming
+```
+{chr(10) + 'Requires Claude Code CLI (`claude`) for LLM calls.' + chr(10) if is_agentic else ''}
+## Usage
+
+```python
+from agentic.functions.{fn_name} import {fn_name}
+{'from agentic.providers import ClaudeCodeRuntime' + chr(10) + fn_name + "._fn.__globals__['runtime'] = ClaudeCodeRuntime()" + chr(10) if is_agentic else ''}
+result = {fn_name}({', '.join(f'{p}=...' for p in param_names)})
+print(result)
+```
+"""
+
+    filepath = os.path.join(skill_dir, "SKILL.md")
+    with open(filepath, "w") as f:
+        f.write(skill_md)
+
+    return filepath
+
+
 def _guess_name(code: str) -> Optional[str]:
     """Guess function name from generated code."""
     match = re.search(r"def\s+(\w+)\s*\(", code)
@@ -289,16 +339,20 @@ def _collect_attempt_info(ctx, lines: list, depth: int = 0):
 # ── Core: create() ──────────────────────────────────────────────
 
 @agentic_function
-def create(description: str, runtime: Runtime, name: str = None) -> callable:
-    """Create a new @agentic_function from a natural language description.
+def create(description: str, runtime: Runtime, name: str = None, as_skill: bool = False) -> callable:
+    """Create a new function from a natural language description.
 
     Args:
         description:  What the function should do.
         runtime:      Runtime instance for LLM calls.
         name:         Optional name override for the generated function.
+        as_skill:     If True, also create a SKILL.md in skills/{name}/
+                      so the function is discoverable by LLM agents.
+                      Use for top-level entry-point functions.
+                      Don't use for internal helper functions.
 
     Returns:
-        A callable @agentic_function ready to use.
+        A callable function (agentic or regular, LLM decides).
     """
     response = runtime.exec(content=[
         {"type": "text", "text": _GENERATE_PROMPT.format(description=description)},
@@ -307,7 +361,9 @@ def create(description: str, runtime: Runtime, name: str = None) -> callable:
     fn_name = name or _guess_name(code) or "generated"
 
     # Save first, then validate and compile
-    saved_path = _save_function(code, fn_name, description)
+    _save_function(code, fn_name, description)
+    if as_skill:
+        _save_skill(fn_name, description, code)
     _validate_code(code, response)
     return _compile_function(code, runtime, name)
 

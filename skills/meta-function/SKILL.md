@@ -27,6 +27,15 @@ result = fn(<PARAMS>)
 - Deterministic tasks → generates pure Python
 - Reasoning tasks → generates `@agentic_function` with `runtime.exec()`
 - Auto-saved to `agentic/functions/<NAME>.py`
+- Add `as_skill=True` to also create a `skills/<NAME>/SKILL.md` for agent discovery:
+
+```python
+fn = create("...", runtime=runtime, name="my_tool", as_skill=True)
+# Now skills/my_tool/SKILL.md exists and agents can find it
+```
+
+Use `as_skill=True` for top-level entry-point functions.
+Don't use it for internal helpers that other functions call.
 
 ## Fix a function
 
