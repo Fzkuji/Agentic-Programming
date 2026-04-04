@@ -11,6 +11,10 @@
     <a href="docs/API.md">Docs</a> •
     <a href="examples/">Examples</a>
   </p>
+  <p align="center">
+    <a href="docs/README_CN.md">🇨🇳 中文</a> •
+    <a href="docs/README_JA.md">🇯🇵 日本語</a>
+  </p>
 </p>
 
 > 🚀 **This is a paradigm proposal.** We're sharing a new way to think about LLM-powered programming. The code here is a reference implementation — we'd love to see you take these ideas and build your own version, in any language, for any use case.
