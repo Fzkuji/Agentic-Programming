@@ -33,34 +33,7 @@ from agentic.runtime import Runtime
 
 # ── Prompts ─────────────────────────────────────────────────────
 
-_FIX_PROMPT = """\
-Fix the following agentic function.
-
-Function description: {description}
-
-Current code:
-```python
-{code}
-```
-{error_section}
-{instruction_section}
-Rewrite the function to fix the issues.
-
-Rules:
-1. Decorate with @agentic_function
-2. Write a clear docstring
-3. Use runtime.exec() to call the LLM when reasoning is needed
-4. Content is a list of dicts: [{{"type": "text", "text": "..."}}]
-5. Return a meaningful result (string or dict)
-6. Use only standard Python — no imports needed
-7. Do NOT use async/await
-
-`agentic_function` and `runtime` are already available in scope.
-
-If you are unsure about anything and need clarification, respond with
-ONLY a question starting with "QUESTION:" (no code). Otherwise, respond
-with ONLY the fixed function definition (no explanation).
-"""
+# _FIX_PROMPT removed — rules are in fix() docstring, data passed via content
 
 
 # ── Safety ──────────────────────────────────────────────────────
@@ -203,47 +176,7 @@ def _save_function(code: str, fn_name: str, description: str = None) -> str:
     return filepath
 
 
-_CREATE_SKILL_PROMPT = """\
-Write a SKILL.md file for an OpenClaw skill. This file tells an LLM agent what this function does and when to use it.
-
-Function name: {fn_name}
-Description: {description}
-Source code:
-```python
-{code}
-```
-
-The SKILL.md must have this exact format:
-
----
-name: {fn_name}
-description: "<one-line description for agent discovery, include trigger words>"
----
-
-# <Title>
-
-<Brief description>
-
-## Setup
-
-<How to install>
-
-## Usage
-
-<Code example showing how to import and call the function>
-
-## Parameters
-
-<Table of parameters>
-
-Rules:
-1. The description in the frontmatter must include trigger words (when should an agent use this?)
-2. Usage example must be correct Python that actually works
-3. If the function uses runtime.exec(), mention that Claude Code CLI is needed
-4. Keep it concise — agents read this every message, so shorter is better
-
-Write ONLY the SKILL.md content. No explanation.
-"""
+# _CREATE_SKILL_PROMPT removed — rules are in create_skill() docstring, data passed via content
 
 
 def _save_skill_template(fn_name: str, description: str, code: str) -> str:
@@ -279,7 +212,21 @@ result = {fn_name}(...)
 
 @agentic_function
 def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) -> str:
-    """Create a SKILL.md for a function, using LLM to write a good description.
+    """Write a SKILL.md for an OpenClaw skill based on the given function.
+
+    The SKILL.md format:
+    ---
+    name: <fn_name>
+    description: "<one-line with trigger words>"
+    ---
+    # <Title>
+    ## Usage
+    <CLI or code example>
+    ## Parameters
+    <Table>
+
+    Rules: include trigger words, keep concise, correct usage examples.
+    Write ONLY the SKILL.md content.
 
     Args:
         fn_name:      Function name.
@@ -293,9 +240,7 @@ def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) ->
     import os
 
     response = runtime.exec(content=[
-        {"type": "text", "text": _CREATE_SKILL_PROMPT.format(
-            fn_name=fn_name, description=description, code=code,
-        )},
+        {"type": "text", "text": f"Function: {fn_name}\nSource:\n```python\n{code}\n```"},
     ])
 
     # Extract content (strip markdown fences if any)
@@ -428,24 +373,27 @@ def fix(
     on_question: Callable[[str], str] = None,
     max_rounds: int = 5,
 ) -> callable:
-    """Fix an existing @agentic_function by letting LLM analyze and rewrite it.
+    """Rewrite and fix the given function based on its code, errors, and optional instruction.
 
-    Automatically extracts source code, docstring, and error context from fn.
-    Supports interactive mode: if LLM has questions, it calls on_question.
+    Rules for the rewritten function:
+    - If it needs LLM reasoning, use @agentic_function + runtime.exec().
+    - If purely deterministic, write a normal function.
+    - Type hints, Google-style docstring, standard library imports allowed.
+    - No async/await.
+
+    If unsure, respond with ONLY "QUESTION: <your question>" (no code).
+    Otherwise, respond with ONLY the fixed function definition.
 
     Args:
         fn:           The function to fix.
         runtime:      Runtime instance for LLM calls.
         instruction:  Optional manual instruction ("change X to Y").
-                      If None, LLM auto-analyzes errors from fn.context.
-        name:         Optional name override for the fixed function.
-        on_question:  Optional callback for interactive fixing.
-                      Signature: fn(question: str) -> str (your answer).
-                      If None, LLM must produce code without asking.
+        name:         Optional name override.
+        on_question:  Callback for interactive fixing. fn(question) -> answer.
         max_rounds:   Maximum interaction rounds (default 5).
 
     Returns:
-        A new callable @agentic_function with fixes applied.
+        A new callable function with fixes applied.
     """
     # Auto-extract everything from fn
     description = getattr(fn, '__doc__', '') or getattr(fn, '__name__', 'unknown')
@@ -453,24 +401,19 @@ def fix(
     error_log = _get_error_log(fn)
     fn_name = name or getattr(fn, '__name__', 'fixed')
 
-    # Build prompt sections
-    error_section = ""
+    # Build data for LLM (rules are in docstring, only pass data here)
+    data_parts = [f"Current code:\n```python\n{code}\n```"]
     if error_log:
-        error_section = f"\nError log from previous execution:\n{error_log}\n"
-
-    instruction_section = ""
+        data_parts.append(f"Error log:\n{error_log}")
     if instruction:
-        instruction_section = f"\nUser instruction: {instruction}\n"
+        data_parts.append(f"Instruction: {instruction}")
 
     # Interaction loop
     extra_context = ""
     for round_num in range(max_rounds):
-        prompt = _FIX_PROMPT.format(
-            description=description,
-            code=code,
-            error_section=error_section,
-            instruction_section=instruction_section + extra_context,
-        )
+        prompt = "\n\n".join(data_parts)
+        if extra_context:
+            prompt += extra_context
 
         # Only the first round uses runtime.exec() (one exec per agentic_function)
         # Subsequent rounds use runtime._call() directly since we need multiple LLM calls
