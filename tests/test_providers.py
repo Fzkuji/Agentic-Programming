@@ -225,6 +225,76 @@ class TestAnthropicRuntime:
         call_kwargs = self.mock_client.messages.create.call_args[1]
         assert call_kwargs["model"] == "claude-opus"
 
+    def test_file_pdf_from_base64(self):
+        """File block with data is converted to Anthropic document type."""
+        rt = self._make_runtime()
+        rt._call(
+            [{"type": "file", "data": "abc123", "mime_type": "application/pdf"}],
+            model="claude-sonnet-4-20250514",
+        )
+        call_kwargs = self.mock_client.messages.create.call_args[1]
+        content = call_kwargs["messages"][0]["content"]
+        assert content[0]["type"] == "document"
+        assert content[0]["source"]["type"] == "base64"
+        assert content[0]["source"]["data"] == "abc123"
+        assert content[0]["source"]["media_type"] == "application/pdf"
+
+    def test_file_pdf_from_path(self, tmp_path):
+        """File block with path reads and base64-encodes the PDF."""
+        pdf_path = tmp_path / "test.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call(
+            [{"type": "file", "path": str(pdf_path)}],
+            model="claude-sonnet-4-20250514",
+        )
+        call_kwargs = self.mock_client.messages.create.call_args[1]
+        content = call_kwargs["messages"][0]["content"]
+        assert content[0]["type"] == "document"
+        assert content[0]["source"]["type"] == "base64"
+        assert content[0]["source"]["media_type"] == "application/pdf"
+
+    def test_audio_block_warns(self):
+        """Audio blocks emit a warning and are skipped."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call(
+                [
+                    {"type": "text", "text": "hello"},
+                    {"type": "audio", "path": "test.wav"},
+                ],
+                model="claude-sonnet-4-20250514",
+            )
+            audio_warnings = [x for x in w if "audio" in str(x.message).lower()]
+            assert len(audio_warnings) == 1
+        call_kwargs = self.mock_client.messages.create.call_args[1]
+        content = call_kwargs["messages"][0]["content"]
+        assert len(content) == 1
+        assert content[0]["type"] == "text"
+
+    def test_video_block_warns(self):
+        """Video blocks emit a warning and are skipped."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call(
+                [
+                    {"type": "text", "text": "hello"},
+                    {"type": "video", "path": "test.mp4"},
+                ],
+                model="claude-sonnet-4-20250514",
+            )
+            video_warnings = [x for x in w if "video" in str(x.message).lower()]
+            assert len(video_warnings) == 1
+        call_kwargs = self.mock_client.messages.create.call_args[1]
+        content = call_kwargs["messages"][0]["content"]
+        assert len(content) == 1
+        assert content[0]["type"] == "text"
+
 
 # ══════════════════════════════════════════════════════════════
 # OpenAIRuntime tests
@@ -377,6 +447,80 @@ class TestOpenAIRuntime:
         with pytest.raises(RuntimeError, match="failed after"):
             failing()
 
+    def test_audio_from_base64(self):
+        """Audio block with data → input_audio format."""
+        rt = self._make_runtime()
+        rt._call([{"type": "audio", "data": "audiodata123", "format": "wav"}])
+        call_kwargs = self.mock_client.chat.completions.create.call_args[1]
+        content = call_kwargs["messages"][-1]["content"]
+        assert content[0]["type"] == "input_audio"
+        assert content[0]["input_audio"]["data"] == "audiodata123"
+        assert content[0]["input_audio"]["format"] == "wav"
+
+    def test_audio_from_file(self, tmp_path):
+        """Audio block with path → read + base64 + input_audio."""
+        audio_path = tmp_path / "test.wav"
+        audio_path.write_bytes(b"RIFF" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "audio", "path": str(audio_path)}])
+        call_kwargs = self.mock_client.chat.completions.create.call_args[1]
+        content = call_kwargs["messages"][-1]["content"]
+        assert content[0]["type"] == "input_audio"
+        assert content[0]["input_audio"]["format"] == "wav"
+
+    def test_audio_mp3_format(self, tmp_path):
+        """Audio with .mp3 extension uses mp3 format."""
+        audio_path = tmp_path / "test.mp3"
+        audio_path.write_bytes(b"\xff\xfb" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "audio", "path": str(audio_path)}])
+        call_kwargs = self.mock_client.chat.completions.create.call_args[1]
+        content = call_kwargs["messages"][-1]["content"]
+        assert content[0]["input_audio"]["format"] == "mp3"
+
+    def test_file_pdf_from_base64(self):
+        """File block with data → OpenAI file format."""
+        rt = self._make_runtime()
+        rt._call([{"type": "file", "data": "pdfdata123", "mime_type": "application/pdf"}])
+        call_kwargs = self.mock_client.chat.completions.create.call_args[1]
+        content = call_kwargs["messages"][-1]["content"]
+        assert content[0]["type"] == "file"
+        assert "data:application/pdf;base64,pdfdata123" in content[0]["file"]["file_data"]
+
+    def test_file_pdf_from_path(self, tmp_path):
+        """File block with path → read + base64 + file format."""
+        pdf_path = tmp_path / "doc.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "file", "path": str(pdf_path)}])
+        call_kwargs = self.mock_client.chat.completions.create.call_args[1]
+        content = call_kwargs["messages"][-1]["content"]
+        assert content[0]["type"] == "file"
+        assert content[0]["file"]["filename"] == "doc.pdf"
+        assert "data:application/pdf;base64," in content[0]["file"]["file_data"]
+
+    def test_video_block_warns(self):
+        """Video blocks emit a warning and are skipped."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call(
+                [
+                    {"type": "text", "text": "hello"},
+                    {"type": "video", "path": "test.mp4"},
+                ],
+            )
+            video_warnings = [x for x in w if "video" in str(x.message).lower()]
+            assert len(video_warnings) == 1
+        call_kwargs = self.mock_client.chat.completions.create.call_args[1]
+        content = call_kwargs["messages"][-1]["content"]
+        assert len(content) == 1
+        assert content[0]["type"] == "text"
+
 
 # ══════════════════════════════════════════════════════════════
 # GeminiRuntime tests
@@ -510,6 +654,63 @@ class TestGeminiRuntime:
         rt._call([{"type": "text", "text": "hi"}])
         config_call = self.mock_types.GenerateContentConfig.call_args[1]
         assert config_call["temperature"] == 0.7
+
+    def test_audio_from_base64(self):
+        """Audio with data → types.Part.from_bytes() with audio mime."""
+        rt = self._make_runtime()
+        rt._call([{"type": "audio", "data": base64.b64encode(b"audiodata").decode(), "media_type": "audio/wav"}])
+        self.mock_types.Part.from_bytes.assert_called_once()
+        call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
+        assert call_kwargs["mime_type"] == "audio/wav"
+
+    def test_audio_from_file(self, tmp_path):
+        """Audio with path → read file + from_bytes()."""
+        audio_path = tmp_path / "test.wav"
+        audio_path.write_bytes(b"RIFF" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "audio", "path": str(audio_path)}])
+        self.mock_types.Part.from_bytes.assert_called_once()
+        call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
+        assert "audio" in call_kwargs["mime_type"]
+
+    def test_video_from_base64(self):
+        """Video with data → types.Part.from_bytes() with video mime."""
+        rt = self._make_runtime()
+        rt._call([{"type": "video", "data": base64.b64encode(b"videodata").decode(), "media_type": "video/mp4"}])
+        self.mock_types.Part.from_bytes.assert_called_once()
+        call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
+        assert call_kwargs["mime_type"] == "video/mp4"
+
+    def test_video_from_file(self, tmp_path):
+        """Video with path → read file + from_bytes()."""
+        video_path = tmp_path / "test.mp4"
+        video_path.write_bytes(b"\x00\x00\x00\x1cftyp" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "video", "path": str(video_path)}])
+        self.mock_types.Part.from_bytes.assert_called_once()
+        call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
+        assert "video" in call_kwargs["mime_type"]
+
+    def test_file_pdf_from_base64(self):
+        """File/PDF with data → types.Part.from_bytes() with pdf mime."""
+        rt = self._make_runtime()
+        rt._call([{"type": "file", "data": base64.b64encode(b"pdfdata").decode(), "mime_type": "application/pdf"}])
+        self.mock_types.Part.from_bytes.assert_called_once()
+        call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
+        assert call_kwargs["mime_type"] == "application/pdf"
+
+    def test_file_pdf_from_path(self, tmp_path):
+        """File/PDF with path → read file + from_bytes()."""
+        pdf_path = tmp_path / "test.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4" + b"\x00" * 10)
+
+        rt = self._make_runtime()
+        rt._call([{"type": "file", "path": str(pdf_path)}])
+        self.mock_types.Part.from_bytes.assert_called_once()
+        call_kwargs = self.mock_types.Part.from_bytes.call_args[1]
+        assert call_kwargs["mime_type"] == "application/pdf"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -705,6 +906,93 @@ class TestCodexRuntime:
         assert "--full-auto" not in cmd
         idx = cmd.index("--sandbox")
         assert cmd[idx + 1] == "read-only"
+
+    def test_audio_block_warns(self):
+        """Audio blocks emit a warning and are skipped."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call([{"type": "text", "text": "hi"}, {"type": "audio", "path": "test.wav"}])
+            audio_warnings = [x for x in w if "audio" in str(x.message).lower()]
+            assert len(audio_warnings) == 1
+
+    def test_video_block_warns(self):
+        """Video blocks emit a warning and are skipped."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call([{"type": "text", "text": "hi"}, {"type": "video", "path": "test.mp4"}])
+            video_warnings = [x for x in w if "video" in str(x.message).lower()]
+            assert len(video_warnings) == 1
+
+    def test_file_block_warns(self):
+        """File/PDF blocks emit a warning and are skipped."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call([{"type": "text", "text": "hi"}, {"type": "file", "path": "test.pdf"}])
+            file_warnings = [x for x in w if "file" in str(x.message).lower()]
+            assert len(file_warnings) == 1
+
+
+# ══════════════════════════════════════════════════════════════
+# ClaudeCodeRuntime unsupported modality tests
+# ══════════════════════════════════════════════════════════════
+
+class TestClaudeCodeRuntimeUnsupported:
+    """Tests that ClaudeCodeRuntime warns on unsupported modalities."""
+
+    @pytest.fixture(autouse=True)
+    def setup_mock(self, monkeypatch):
+        """Mock shutil.which and subprocess."""
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "mock reply"
+            result.stderr = ""
+            return result
+
+        self._mock_run = MagicMock(side_effect=mock_run)
+        monkeypatch.setattr("subprocess.run", self._mock_run)
+
+    def _make_runtime(self, **kwargs):
+        from agentic.providers.claude_code import ClaudeCodeRuntime
+        return ClaudeCodeRuntime(cli_path="/usr/bin/claude", **kwargs)
+
+    def test_audio_block_warns(self):
+        """Audio blocks emit a warning and are filtered out."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call([{"type": "text", "text": "hi"}, {"type": "audio", "path": "test.wav"}])
+            audio_warnings = [x for x in w if "audio" in str(x.message).lower()]
+            assert len(audio_warnings) == 1
+
+    def test_video_block_warns(self):
+        """Video blocks emit a warning and are filtered out."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call([{"type": "text", "text": "hi"}, {"type": "video", "path": "test.mp4"}])
+            video_warnings = [x for x in w if "video" in str(x.message).lower()]
+            assert len(video_warnings) == 1
+
+    def test_file_block_warns(self):
+        """File/PDF blocks emit a warning and are filtered out."""
+        rt = self._make_runtime()
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            rt._call([{"type": "text", "text": "hi"}, {"type": "file", "path": "test.pdf"}])
+            file_warnings = [x for x in w if "file" in str(x.message).lower()]
+            assert len(file_warnings) == 1
 
 
 # ══════════════════════════════════════════════════════════════

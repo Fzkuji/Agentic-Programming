@@ -3,6 +3,8 @@ OpenAIRuntime — Runtime subclass for OpenAI API.
 
 Supports:
     - Text and image (base64 / URL) content blocks
+    - Audio input content blocks (for gpt-4o-audio-preview models)
+    - File/PDF content blocks (base64 encoded)
     - response_format (JSON mode / structured output)
     - System prompts
     - Max tokens configuration
@@ -27,6 +29,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import warnings
 from typing import Optional
 
 from agentic.runtime import Runtime
@@ -171,6 +174,73 @@ class OpenAIRuntime(Runtime):
                     "type": "image_url",
                     "image_url": {"url": data_url},
                 }
+
+        if block_type == "audio":
+            # Audio input support for gpt-4o-audio-preview and similar models.
+            # Uses OpenAI's input_audio content part format.
+            if "data" in block:
+                audio_format = block.get("format", "wav")
+                return {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": block["data"],
+                        "format": audio_format,
+                    },
+                }
+
+            if "path" in block:
+                path = block["path"]
+                # Determine audio format from extension
+                ext = os.path.splitext(path)[1].lower().lstrip(".")
+                audio_format = ext if ext in ("wav", "mp3") else "wav"
+                with open(path, "rb") as f:
+                    data = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "input_audio",
+                    "input_audio": {
+                        "data": data,
+                        "format": audio_format,
+                    },
+                }
+
+        if block_type == "file":
+            # File/PDF support: encode as base64 and send via OpenAI's file content part.
+            # Works with models that support document/file understanding.
+            mime_type = block.get("mime_type", "application/pdf")
+
+            if "data" in block:
+                filename = block.get("filename", "document.pdf")
+                return {
+                    "type": "file",
+                    "file": {
+                        "filename": filename,
+                        "file_data": f"data:{mime_type};base64,{block['data']}",
+                    },
+                }
+
+            if "path" in block:
+                path = block["path"]
+                detected_mime = mimetypes.guess_type(path)[0] or mime_type
+                filename = os.path.basename(path)
+                with open(path, "rb") as f:
+                    data = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "file",
+                    "file": {
+                        "filename": filename,
+                        "file_data": f"data:{detected_mime};base64,{data}",
+                    },
+                }
+
+        if block_type == "video":
+            import warnings
+            warnings.warn(
+                "OpenAIRuntime does not support video content blocks. "
+                "Video block will be skipped. Consider using GeminiRuntime for video.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
 
         # Unknown block type — pass text representation
         if "text" in block:

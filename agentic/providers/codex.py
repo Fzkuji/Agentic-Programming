@@ -9,6 +9,11 @@ Supports:
 - Image content blocks (via -i flag for file paths, temp files for base64)
 - Session continuity (via `codex exec resume <session_id>`)
 
+Unsupported (with warnings):
+- Audio content blocks (Codex CLI does not support audio input)
+- Video content blocks (Codex CLI does not support video input)
+- File/PDF content blocks (Codex CLI does not support document input)
+
 Usage:
     from agentic.providers.codex import CodexRuntime
 
@@ -96,7 +101,11 @@ class CodexRuntime(Runtime):
         Images are passed via -i flag (file paths). Base64 data is
         written to temp files first. URL images are skipped with a
         text note (Codex CLI only supports local files).
+
+        Unsupported block types (audio, video, file) emit warnings and are skipped.
         """
+        import warnings
+
         # Collect text parts and image paths
         text_parts = []
         image_paths = []
@@ -116,6 +125,30 @@ class CodexRuntime(Runtime):
                     elif "url" in block:
                         # Codex CLI doesn't support URLs — add as text note
                         text_parts.append(f"[Image URL: {block['url']}]")
+
+                elif btype == "audio":
+                    warnings.warn(
+                        "CodexRuntime does not support audio content blocks. "
+                        "Audio block will be skipped. Consider using OpenAIRuntime API for audio support.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+
+                elif btype == "video":
+                    warnings.warn(
+                        "CodexRuntime does not support video content blocks. "
+                        "Video block will be skipped. Consider using GeminiRuntime for video.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
+
+                elif btype == "file":
+                    warnings.warn(
+                        "CodexRuntime does not support file/PDF content blocks. "
+                        "File block will be skipped. Consider using OpenAIRuntime API for file support.",
+                        UserWarning,
+                        stacklevel=3,
+                    )
 
                 elif "text" in block:
                     text_parts.append(block["text"])

@@ -3,6 +3,7 @@ AnthropicRuntime — Runtime subclass for Anthropic Claude API.
 
 Supports:
     - Text and image content blocks
+    - PDF/document content blocks (Anthropic document type)
     - Prompt caching via cache_control
     - System prompts
     - Max tokens configuration
@@ -177,6 +178,54 @@ class AnthropicRuntime(Runtime):
                         "url": block["url"],
                     },
                 }
+
+        if block_type == "file":
+            # PDF/document support via Anthropic's document content type
+            mime_type = block.get("mime_type", "application/pdf")
+
+            if "data" in block:
+                return {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": mime_type,
+                        "data": block["data"],
+                    },
+                }
+
+            if "path" in block:
+                path = block["path"]
+                detected_mime = mimetypes.guess_type(path)[0] or mime_type
+                with open(path, "rb") as f:
+                    data = base64.b64encode(f.read()).decode("utf-8")
+                return {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": detected_mime,
+                        "data": data,
+                    },
+                }
+
+        if block_type == "audio":
+            import warnings
+            warnings.warn(
+                "AnthropicRuntime does not support audio content blocks. "
+                "Audio block will be skipped. Consider using GeminiRuntime or OpenAIRuntime for audio.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
+
+        if block_type == "video":
+            import warnings
+            warnings.warn(
+                "AnthropicRuntime does not support video content blocks. "
+                "Video block will be skipped. Consider using GeminiRuntime for video.",
+                UserWarning,
+                stacklevel=3,
+            )
+            return None
 
         # Unknown block type — pass text representation
         if "text" in block:

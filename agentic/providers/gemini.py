@@ -3,6 +3,9 @@ GeminiRuntime — Runtime subclass for Google Gemini API.
 
 Supports:
     - Text and image (file / base64 / URL) content blocks
+    - Audio content blocks (wav, mp3, etc.)
+    - Video content blocks (mp4, webm, etc.)
+    - PDF/document content blocks
     - System instructions
     - Max tokens configuration
     - Safety settings
@@ -157,6 +160,49 @@ class GeminiRuntime(Runtime):
                     data = resp.read()
                     media_type = resp.headers.get_content_type() or "image/png"
                 return types.Part.from_bytes(data=data, mime_type=media_type)
+
+        if block_type == "audio":
+            # Gemini natively supports audio input (wav, mp3, aac, flac, ogg, etc.)
+            if "data" in block:
+                media_type = block.get("media_type", "audio/wav")
+                data = base64.b64decode(block["data"])
+                return types.Part.from_bytes(data=data, mime_type=media_type)
+
+            if "path" in block:
+                path = block["path"]
+                media_type = mimetypes.guess_type(path)[0] or "audio/wav"
+                with open(path, "rb") as f:
+                    data = f.read()
+                return types.Part.from_bytes(data=data, mime_type=media_type)
+
+        if block_type == "video":
+            # Gemini natively supports video input (mp4, webm, mov, avi, etc.)
+            if "data" in block:
+                media_type = block.get("media_type", "video/mp4")
+                data = base64.b64decode(block["data"])
+                return types.Part.from_bytes(data=data, mime_type=media_type)
+
+            if "path" in block:
+                path = block["path"]
+                media_type = mimetypes.guess_type(path)[0] or "video/mp4"
+                with open(path, "rb") as f:
+                    data = f.read()
+                return types.Part.from_bytes(data=data, mime_type=media_type)
+
+        if block_type == "file":
+            # PDF/document support — Gemini supports PDF natively
+            mime_type = block.get("mime_type", "application/pdf")
+
+            if "data" in block:
+                data = base64.b64decode(block["data"])
+                return types.Part.from_bytes(data=data, mime_type=mime_type)
+
+            if "path" in block:
+                path = block["path"]
+                detected_mime = mimetypes.guess_type(path)[0] or mime_type
+                with open(path, "rb") as f:
+                    data = f.read()
+                return types.Part.from_bytes(data=data, mime_type=detected_mime)
 
         # Unknown block type — pass as text
         if "text" in block:

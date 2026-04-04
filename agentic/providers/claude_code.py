@@ -9,6 +9,11 @@ Supports:
 - Image content blocks (via --input-format stream-json with base64)
 - Session continuity (via --session-id + --resume)
 
+Unsupported (with warnings):
+- Audio content blocks (Claude CLI does not support audio input)
+- Video content blocks (Claude CLI does not support video input)
+- File/PDF content blocks (Claude CLI does not support document input)
+
 Usage:
     from agentic.providers.claude_code import ClaudeCodeRuntime
 
@@ -83,7 +88,40 @@ class ClaudeCodeRuntime(Runtime):
 
         If content contains image blocks, uses stream-json input format
         to pass base64-encoded images. Otherwise uses plain text mode.
+
+        Unsupported block types (audio, video, file) emit warnings and are skipped.
         """
+        # Warn and filter unsupported block types
+        import warnings
+        filtered_content = []
+        for block in content:
+            btype = block.get("type", "text")
+            if btype == "audio":
+                warnings.warn(
+                    "ClaudeCodeRuntime does not support audio content blocks. "
+                    "Audio block will be skipped. Use AnthropicRuntime API directly for full multimodal support.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            elif btype == "video":
+                warnings.warn(
+                    "ClaudeCodeRuntime does not support video content blocks. "
+                    "Video block will be skipped. Consider using GeminiRuntime for video.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            elif btype == "file":
+                warnings.warn(
+                    "ClaudeCodeRuntime does not support file/PDF content blocks. "
+                    "File block will be skipped. Use AnthropicRuntime API directly for PDF support.",
+                    UserWarning,
+                    stacklevel=3,
+                )
+            else:
+                filtered_content.append(block)
+
+        content = filtered_content
+
         has_images = any(
             b.get("type") == "image" and (b.get("path") or b.get("data"))
             for b in content
