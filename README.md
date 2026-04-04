@@ -13,6 +13,8 @@
   </p>
 </p>
 
+> ⚠️ **This is a paradigm proposal, not a production framework.** We're proposing a new way to think about LLM-powered programming — where Python controls the flow and LLMs handle the reasoning. The reference implementation here demonstrates the core ideas. We encourage you to build your own implementation based on these concepts.
+
 ---
 
 ## The Problem
@@ -178,6 +180,17 @@ examples/                # 5 runnable demos
 docs/api/                # API reference
 tests/                   # 161 tests
 ```
+
+## Contributing
+
+This project is a **paradigm proposal** with a reference implementation. We welcome:
+
+- 🧠 **Discussions** on the programming model
+- 🔧 **Alternative implementations** in other languages or frameworks
+- 📝 **Use cases** that validate or challenge the approach
+- 🐛 **Bug reports** on the reference implementation
+
+If you build something based on Agentic Programming, let us know!
 
 ## License
 
