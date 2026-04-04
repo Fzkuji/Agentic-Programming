@@ -27,10 +27,14 @@
 
 ---
 
-## The Problem
+## Motivation
+
+While building a [GUI Agent](https://github.com/Fzkuji/GUI-Agent-Harness) that operates desktop apps, we ran into a recurring problem: no matter how carefully we designed the Skills and Prompts, the LLM kept deviating from the intended workflow. It would skip steps, repeat actions, invent new steps, or produce outputs in unexpected formats.
+
+The root cause wasn't the prompt — it was the architecture. When the LLM is the scheduler, every instruction is a suggestion, not a guarantee.
 
 <p align="center">
-  <img src="docs/images/the_problem.png" alt="The Problem: LLM as Scheduler" width="800">
+  <img src="docs/images/the_problem.png" alt="Motivation: LLM as Scheduler" width="800">
 </p>
 
 The core issue: **the LLM controls the flow.** You're asking a reasoning engine to also be a scheduler, a state machine, and a format enforcer. That's not what it's good at.
