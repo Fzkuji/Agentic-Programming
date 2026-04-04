@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 680" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+  <!-- Background -->
+  <rect width="880" height="680" fill="#fefefe" rx="12"/>
+  
+  <!-- Title -->
+  <text x="440" y="36" text-anchor="middle" font-size="20" font-weight="bold" fill="#333">The Problem: LLM as Scheduler</text>
+  <line x1="140" y1="48" x2="740" y2="48" stroke="#ff6b6b" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- ============ Conversation Flow ============ -->
+
+  <!-- Round 1 -->
+  <rect x="60" y="70" width="340" height="36" rx="18" fill="#fff0f0" stroke="#ffaaaa"/>
+  <text x="80" y="93" font-size="13" fill="#cc3333">🧠 "I need to find the login button"</text>
+  
+  <line x1="230" y1="106" x2="230" y2="122" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="170" y="122" width="120" height="26" rx="5" fill="#f5f5f5" stroke="#ccc"/>
+  <text x="230" y="140" text-anchor="middle" font-size="11" fill="#666">📸 screenshot tool</text>
+
+  <!-- Round 2 -->
+  <rect x="60" y="162" width="380" height="36" rx="18" fill="#fff0f0" stroke="#ffaaaa"/>
+  <text x="80" y="185" font-size="13" fill="#cc3333">🧠 "I see a button at (200,300). Let me click"</text>
+  
+  <line x1="230" y1="198" x2="230" y2="214" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="180" y="214" width="100" height="26" rx="5" fill="#f5f5f5" stroke="#ccc"/>
+  <text x="230" y="232" text-anchor="middle" font-size="11" fill="#666">🖱️ click tool</text>
+
+  <!-- Round 3 -->
+  <rect x="60" y="254" width="300" height="36" rx="18" fill="#fff0f0" stroke="#ffaaaa"/>
+  <text x="80" y="277" font-size="13" fill="#cc3333">🧠 "Did it work? Let me check..."</text>
+  
+  <line x1="230" y1="290" x2="230" y2="306" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="170" y="306" width="120" height="26" rx="5" fill="#f5f5f5" stroke="#ccc"/>
+  <text x="230" y="324" text-anchor="middle" font-size="11" fill="#666">📸 screenshot tool</text>
+
+  <!-- Round 4 -->
+  <rect x="60" y="346" width="370" height="36" rx="18" fill="#fff0f0" stroke="#ffaaaa"/>
+  <text x="80" y="369" font-size="13" fill="#cc3333">🧠 "Nothing happened. Maybe try different..."</text>
+  
+  <line x1="230" y1="382" x2="230" y2="398" stroke="#ff6b6b" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="180" y="398" width="100" height="26" rx="5" fill="#f5f5f5" stroke="#ccc"/>
+  <text x="230" y="416" text-anchor="middle" font-size="11" fill="#666">🖱️ click tool</text>
+
+  <!-- More rounds indicator -->
+  <text x="230" y="450" text-anchor="middle" font-size="16" fill="#999">⋮</text>
+  <text x="230" y="472" text-anchor="middle" font-size="13" fill="#cc6666" font-style="italic">...×10 more rounds</text>
+
+  <!-- ============ Growing Context Bar ============ -->
+  <rect x="500" y="70" width="30" height="30" rx="3" fill="#ffdddd" stroke="#ffaaaa"/>
+  <rect x="540" y="70" width="30" height="60" rx="3" fill="#ffcccc" stroke="#ffaaaa"/>
+  <rect x="580" y="70" width="30" height="100" rx="3" fill="#ffbbbb" stroke="#ff9999"/>
+  <rect x="620" y="70" width="30" height="150" rx="3" fill="#ffaaaa" stroke="#ff8888"/>
+  <rect x="660" y="70" width="30" height="210" rx="3" fill="#ff9999" stroke="#ff7777"/>
+  <rect x="700" y="70" width="30" height="280" rx="3" fill="#ff8888" stroke="#ff6666"/>
+  <rect x="740" y="70" width="30" height="360" rx="3" fill="#ff7777" stroke="#ff5555"/>
+  <rect x="780" y="70" width="30" height="410" rx="3" fill="#ff6b6b" stroke="#ff4444"/>
+  
+  <text x="655" y="500" text-anchor="middle" font-size="12" fill="#cc3333" font-weight="bold">📈 Context keeps growing</text>
+  <text x="655" y="518" text-anchor="middle" font-size="11" fill="#999">each round adds to the conversation</text>
+
+  <!-- ============ Three Problems ============ -->
+  <line x1="40" y1="545" x2="840" y2="545" stroke="#eee" stroke-width="1"/>
+
+  <!-- Problem 1 -->
+  <rect x="40" y="560" width="250" height="100" rx="10" fill="#fff5f5" stroke="#ffcccc"/>
+  <text x="165" y="585" text-anchor="middle" font-size="24">🎰</text>
+  <text x="165" y="608" text-anchor="middle" font-size="14" font-weight="bold" fill="#cc3333">Unpredictable</text>
+  <text x="165" y="626" text-anchor="middle" font-size="11" fill="#888">You design A→B→C</text>
+  <text x="165" y="642" text-anchor="middle" font-size="11" fill="#888">LLM does A→D→A→B</text>
+
+  <!-- Problem 2 -->
+  <rect x="315" y="560" width="250" height="100" rx="10" fill="#fff5f5" stroke="#ffcccc"/>
+  <text x="440" y="585" text-anchor="middle" font-size="24">📈</text>
+  <text x="440" y="608" text-anchor="middle" font-size="14" font-weight="bold" fill="#cc3333">Context Explosion</text>
+  <text x="440" y="626" text-anchor="middle" font-size="11" fill="#888">Step 10: reading 50K tokens</text>
+  <text x="440" y="642" text-anchor="middle" font-size="11" fill="#888">just to decide the next click</text>
+
+  <!-- Problem 3 -->
+  <rect x="590" y="560" width="250" height="100" rx="10" fill="#fff5f5" stroke="#ffcccc"/>
+  <text x="715" y="585" text-anchor="middle" font-size="24">🎯</text>
+  <text x="715" y="608" text-anchor="middle" font-size="14" font-weight="bold" fill="#cc3333">No Guarantees</text>
+  <text x="715" y="626" text-anchor="middle" font-size="11" fill="#888">Need JSON? Might get markdown</text>
+  <text x="715" y="642" text-anchor="middle" font-size="11" fill="#888">Need 3 steps? Might do 7</text>
+
+  <!-- Arrow marker -->
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#ff6b6b"/>
+    </marker>
+  </defs>
+</svg>

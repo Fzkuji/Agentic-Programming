@@ -23,28 +23,8 @@
 ## The Problem
 
 <p align="center">
-  <img src="docs/images/problem_comparison.svg" alt="Traditional vs Agentic Programming" width="800">
+  <img src="docs/images/the_problem.svg" alt="The Problem: LLM as Scheduler" width="800">
 </p>
-
-Today's LLM agents work like this:
-
-```
-🧠 LLM: "I need to find the login button"
-   ↓ calls screenshot tool
-🧠 LLM: "I see a button at (200, 300). Let me click it"
-   ↓ calls click tool
-🧠 LLM: "Did it work? Let me check"
-   ↓ calls screenshot tool again
-🧠 LLM: "Hmm, nothing happened. Maybe I should try..."
-   ↓ calls click tool with different coordinates
-   ... (10 more rounds)
-```
-
-**The LLM is the scheduler.** It decides what to do, when, and how. This creates real problems:
-
-- 🎰 **Unpredictable** — You design a workflow (A → B → C), but the LLM might skip B, repeat A, or invent step D. Skills, prompts, and system messages can't *force* it to follow a path.
-- 📈 **Context explosion** — Every round-trip adds to the conversation. By step 10, the LLM is reading 50K tokens of history just to decide the next click.
-- 🎯 **No guarantees** — Need JSON output? The LLM might add markdown. Need exactly 3 steps? It might do 7. The LLM *interprets* your instructions, it doesn't *execute* them.
 
 The core issue: **the LLM controls the flow.** You're asking a reasoning engine to also be a scheduler, a state machine, and a format enforcer. That's not what it's good at.
 
