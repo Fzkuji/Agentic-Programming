@@ -214,19 +214,23 @@ result = {fn_name}(...)
 def create_skill(fn_name: str, description: str, code: str, runtime: Runtime) -> str:
     """Write a SKILL.md for an OpenClaw skill based on the given function.
 
-    The SKILL.md format:
+    The SKILL.md must follow this exact format:
     ---
     name: <fn_name>
-    description: "<one-line with trigger words>"
+    description: "<one-line for agent discovery, include trigger words>"
     ---
     # <Title>
     ## Usage
-    <CLI or code example>
+    agentic run <fn_name> --arg key=value
     ## Parameters
-    <Table>
+    <Table of parameters>
 
-    Rules: include trigger words, keep concise, correct usage examples.
-    Write ONLY the SKILL.md content.
+    Rules:
+    - Description must include trigger words (when should an agent use this?).
+    - Usage must use `agentic run` CLI command, not Python code.
+    - If the function uses LLM (runtime.exec), note that Claude Code CLI is needed.
+    - Keep concise — agents read this every message.
+    - Write ONLY the SKILL.md content, no explanation.
 
     Args:
         fn_name:      Function name.
@@ -330,14 +334,19 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
 
     Rules:
     - If the task requires LLM reasoning, use @agentic_function + runtime.exec().
-    - If the task is purely deterministic, write a normal Python function.
-    - Standard library imports allowed (os, json, re, pathlib, etc.).
+      Content is a list of dicts: [{"type": "text", "text": "..."}].
+      `agentic_function` and `runtime` are already available in scope.
+    - If the task is purely deterministic, write a normal Python function
+      WITHOUT @agentic_function and WITHOUT runtime.exec().
+    - Standard library imports allowed (os, json, re, pathlib, math, etc.).
     - No async/await.
     - Type hints on all parameters and return type.
-    - Google-style docstring: one-line summary, Args, Returns, Dependencies.
-    - If calling other functions, import from agentic.functions.
+    - Google-style docstring with: one-line summary, Args, Returns, Dependencies.
+    - If calling other agentic functions, import from agentic.functions.
+    - The function will be saved to agentic/functions/ for reuse.
 
-    Write ONLY the function definition. No extra imports, no examples.
+    Write ONLY the function definition. No extra imports at top level,
+    no examples, no explanation. Start with def or @agentic_function.
 
     Args:
         description:  What the function should do.
@@ -377,12 +386,15 @@ def fix(
 
     Rules for the rewritten function:
     - If it needs LLM reasoning, use @agentic_function + runtime.exec().
+      Content is a list of dicts: [{"type": "text", "text": "..."}].
+      `agentic_function` and `runtime` are already available in scope.
     - If purely deterministic, write a normal function.
     - Type hints, Google-style docstring, standard library imports allowed.
     - No async/await.
+    - The fixed function will overwrite the original in agentic/functions/.
 
-    If unsure, respond with ONLY "QUESTION: <your question>" (no code).
-    Otherwise, respond with ONLY the fixed function definition.
+    If unsure about what to fix, respond with ONLY "QUESTION: <your question>".
+    Otherwise, respond with ONLY the fixed function definition (no explanation).
 
     Args:
         fn:           The function to fix.
