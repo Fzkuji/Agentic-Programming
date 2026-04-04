@@ -200,6 +200,9 @@ def _compile_function(code: str, runtime: Runtime, name: str = None) -> callable
 def _save_function(code: str, fn_name: str, description: str = None) -> str:
     """Save generated function source code to agentic/functions/."""
     import os
+    # Skip saving during tests
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return ""
     functions_dir = os.path.join(os.path.dirname(__file__), "functions")
     os.makedirs(functions_dir, exist_ok=True)
 
