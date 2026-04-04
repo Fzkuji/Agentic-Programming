@@ -185,6 +185,15 @@ def _compile_function(code: str, runtime: Runtime, name: str = None) -> callable
     if name:
         fn.__name__ = name
         fn.__qualname__ = name
+
+    # Bind runtime into the function's globals so it can access it
+    if hasattr(fn, '__wrapped__'):
+        fn.__wrapped__.__globals__['runtime'] = runtime
+    elif hasattr(fn, '_fn') and fn._fn:
+        fn._fn.__globals__['runtime'] = runtime
+    elif hasattr(fn, '__globals__'):
+        fn.__globals__['runtime'] = runtime
+
     return fn
 
 
