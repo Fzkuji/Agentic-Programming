@@ -301,6 +301,18 @@ class TestAsyncExec:
         with pytest.raises(NotImplementedError):
             asyncio.run(func())
 
+    def test_async_exec_retry_error_report_outside_function(self):
+        """Retry errors outside @agentic_function still include attempt history."""
+        async def always_fail(content, model="test", response_format=None):
+            raise ConnectionError("offline")
+
+        runtime = Runtime(call=always_fail, max_retries=2)
+
+        with pytest.raises(RuntimeError, match="Attempt 1: ConnectionError: offline") as exc_info:
+            asyncio.run(runtime.async_exec(content=[{"type": "text", "text": "bare call"}]))
+
+        assert "Attempt 2: ConnectionError: offline" in str(exc_info.value)
+
 
 # ══════════════════════════════════════════════════════════════
 # Mixed sync/async
