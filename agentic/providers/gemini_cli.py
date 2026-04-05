@@ -66,11 +66,13 @@ class GeminiCLIRuntime(Runtime):
         """Call Gemini CLI with the content list."""
         # Build prompt from content blocks
         parts = []
-        has_unsupported = False
         for block in content:
-            if block["type"] == "text":
-                parts.append(block["text"])
-            elif block["type"] == "image":
+            block_type = block.get("type", "text")
+
+            if block_type == "text":
+                if "text" in block:
+                    parts.append(block["text"])
+            elif block_type == "image":
                 warnings.warn(
                     "GeminiCLIRuntime: image blocks not supported in CLI mode, "
                     "passing as text placeholder. Use GeminiRuntime (API) for image support.",
@@ -78,14 +80,16 @@ class GeminiCLIRuntime(Runtime):
                     stacklevel=2,
                 )
                 parts.append(f"[Image: {block.get('path', block.get('url', 'unknown'))}]")
-            elif block["type"] in ("audio", "video", "file"):
+            elif block_type in ("audio", "video", "file"):
                 warnings.warn(
-                    f"GeminiCLIRuntime: '{block['type']}' blocks not supported in CLI mode. "
+                    f"GeminiCLIRuntime: '{block_type}' blocks not supported in CLI mode. "
                     f"Use GeminiRuntime (API) for full multimodal support.",
                     UserWarning,
                     stacklevel=2,
                 )
-                parts.append(f"[{block['type'].title()}: {block.get('path', 'unknown')}]")
+                parts.append(f"[{block_type.title()}: {block.get('path', 'unknown')}]")
+            elif "text" in block:
+                parts.append(block["text"])
 
         prompt = "\n".join(parts)
 

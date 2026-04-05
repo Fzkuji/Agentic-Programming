@@ -1033,6 +1033,45 @@ class TestClaudeCodeRuntimeUnsupported:
 # Provider lazy import tests
 # ══════════════════════════════════════════════════════════════
 
+class TestGeminiCLIRuntime:
+    """Tests for GeminiCLIRuntime with mocked subprocess."""
+
+    @pytest.fixture(autouse=True)
+    def setup_mock(self, monkeypatch):
+        """Mock shutil.which and subprocess.run."""
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/gemini" if name == "gemini" else None)
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "mock gemini reply"
+            result.stderr = ""
+            return result
+
+        self._mock_run = MagicMock(side_effect=mock_run)
+        monkeypatch.setattr("subprocess.run", self._mock_run)
+
+    def _make_runtime(self, **kwargs):
+        from agentic.providers.gemini_cli import GeminiCLIRuntime
+        return GeminiCLIRuntime(cli_path="/usr/bin/gemini", **kwargs)
+
+    def test_unknown_block_with_text_fallback(self):
+        """Unknown blocks with text fall back to plain text."""
+        rt = self._make_runtime()
+        result = rt._call([{"type": "custom", "text": "fallback text"}])
+        assert result == "mock gemini reply"
+        cmd = self._mock_run.call_args[0][0]
+        assert cmd[2] == "fallback text"
+
+    def test_missing_type_defaults_to_text(self):
+        """Blocks without type default to text instead of raising KeyError."""
+        rt = self._make_runtime()
+        result = rt._call([{"text": "implicit text"}])
+        assert result == "mock gemini reply"
+        cmd = self._mock_run.call_args[0][0]
+        assert cmd[2] == "implicit text"
+
+
 class TestProviderLazyImport:
     """Test that providers/__init__.py lazy-loads correctly."""
 
