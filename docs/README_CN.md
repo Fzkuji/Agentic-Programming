@@ -85,7 +85,7 @@ pip install -e /path/to/Agentic-Programming
 ```python
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
-from agentic.meta_function import create
+from agentic.meta_functions import create
 
 runtime = ClaudeCodeRuntime()
 
@@ -141,7 +141,7 @@ login_flow ✓ 8.8s
 ### 3. 函数生成函数
 
 ```python
-from agentic.meta_function import create
+from agentic.meta_functions import create
 
 summarize = create("把文本总结成3个要点", runtime=runtime)
 result = summarize(text="很长的文章...")
@@ -155,7 +155,7 @@ LLM 写代码，框架验证并沙箱执行。你得到一个真正的 `@agentic
 runtime = Runtime(call=my_llm, max_retries=2)  # 失败自动重试
 
 # 或者修复损坏的函数：
-from agentic.meta_function import fix
+from agentic.meta_functions import fix
 fixed_fn = fix(fn=broken_fn, runtime=runtime, instruction="用 label 代替坐标")
 ```
 

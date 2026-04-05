@@ -4,7 +4,7 @@ Tests for error recovery: attempts tracking, fix() with new API.
 
 import pytest
 from agentic import agentic_function, Runtime
-from agentic.meta_function import fix
+from agentic.meta_functions import fix
 
 
 # ── attempts tracking ──────────────────────────────────────────

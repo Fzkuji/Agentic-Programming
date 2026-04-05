@@ -4,7 +4,8 @@ Tests for meta.create() — generating agentic functions from descriptions.
 
 import pytest
 from agentic import agentic_function, Runtime
-from agentic.meta_function import create, fix, _extract_code, _make_safe_builtins
+from agentic.meta_functions import create, fix
+from agentic.meta_functions._helpers import extract_code as _extract_code, _make_safe_builtins
 
 
 # ── _extract_code tests ────────────────────────────────────────

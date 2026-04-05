@@ -4,7 +4,7 @@ End-to-end tests for error recovery: create → fail → fix → succeed.
 
 import pytest
 from agentic import agentic_function, Runtime
-from agentic.meta_function import create, fix
+from agentic.meta_functions import create, fix
 
 
 class TestCreateFailFixSucceed:

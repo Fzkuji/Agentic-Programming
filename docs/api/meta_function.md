@@ -1,6 +1,6 @@
 # create & fix
 
-> Source: [`agentic/meta_function.py`](../../agentic/meta_function.py)
+> Source: [`agentic/meta_functions/`](../../agentic/meta_functions/)
 
 Meta function。用自然语言描述生成新的 `@agentic_function`，以及修复失败的生成函数。
 
@@ -62,7 +62,7 @@ def create(description: str, runtime: Runtime, name: str = None) -> callable
 
 ```python
 from agentic import Runtime
-from agentic.meta_function import create
+from agentic.meta_functions import create
 
 runtime = Runtime(call=my_llm, model="sonnet")
 
@@ -175,7 +175,7 @@ def fix(
 ### 基本用法
 
 ```python
-from agentic.meta_function import create, fix
+from agentic.meta_functions import create, fix
 
 runtime = Runtime(call=my_llm, model="sonnet")
 

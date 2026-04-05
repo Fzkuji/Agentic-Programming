@@ -16,7 +16,7 @@ Usage:
 """
 
 from agentic import agentic_function, Runtime
-from agentic.meta_function import create
+from agentic.meta_functions import create
 
 
 # ── Mock LLM that generates code ──────────────────────────────

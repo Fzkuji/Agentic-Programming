@@ -169,7 +169,7 @@ When `verify` calls the LLM, it automatically sees what `observe` and `click` re
 ### 3. Functions create functions
 
 ```python
-from agentic.meta_function import create
+from agentic.meta_functions import create
 
 summarize = create("Summarize text into 3 bullet points", runtime=runtime)
 result = summarize(text="Long article...")
@@ -183,7 +183,7 @@ LLM writes the code. Framework validates and sandboxes it. You get a real `@agen
 runtime = Runtime(call=my_llm, max_retries=2)  # try once + retry once
 
 # Or fix a broken function:
-from agentic.meta_function import fix
+from agentic.meta_functions import fix
 fixed_fn = fix(
     fn=broken_fn,
     runtime=runtime,
@@ -269,7 +269,7 @@ gemini_cli = GeminiCLIRuntime()
 
 ```python
 from agentic import agentic_function, Runtime
-from agentic.meta_function import create, fix
+from agentic.meta_functions import create, fix
 
 runtime = Runtime(call=my_llm, max_retries=3)
 extract = create(
