@@ -15,8 +15,8 @@
 
 ## Table of Contents
 
-- [Why](#why)
-- [The Paradigm](#the-paradigm)
+- [Motivation](#motivation)
+- [Core Idea](#core-idea)
 - [Quick Start](#quick-start)
 - [Usage](#usage)
   - [Python](#1-python--write-agentic-code)
@@ -43,7 +43,7 @@
 
 ---
 
-## Why
+## Motivation
 
 Current LLM agent frameworks place the LLM as the central scheduler — it decides what to do, when, and how. This creates three fundamental problems:
 
@@ -59,7 +59,7 @@ The core issue: **the LLM controls the flow, but nothing enforces it.** Skills, 
 
 ---
 
-## The Paradigm
+## Core Idea
 
 <p align="center">
   <img src="docs/images/the_idea.png" alt="The Paradigm: Python controls flow, LLM reasons" width="800">
