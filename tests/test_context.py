@@ -139,6 +139,46 @@ def test_save_md(tmp_path):
     assert "task" in content
 
 
+def test_save_accepts_pathlike_jsonl(tmp_path):
+    """save() accepts pathlib.Path for JSONL output."""
+    @agentic_function
+    def task():
+        return "done"
+
+    task()
+    path = tmp_path / "pathlike.jsonl"
+    task.context.save(path)
+
+    lines = path.read_text().strip().split("\n")
+    assert len(lines) == 1
+    assert json.loads(lines[0])["name"] == "task"
+
+
+def test_save_accepts_pathlike_md(tmp_path):
+    """save() accepts pathlib.Path for Markdown output."""
+    @agentic_function
+    def task():
+        return "done"
+
+    task()
+    path = tmp_path / "pathlike.md"
+    task.context.save(path)
+
+    assert "task" in path.read_text()
+
+
+def test_save_rejects_unsupported_extension(tmp_path):
+    """save() rejects unsupported file extensions with a clear error."""
+    @agentic_function
+    def task():
+        return "done"
+
+    task()
+    path = tmp_path / "bad.txt"
+    with pytest.raises(ValueError, match=r"Use \.md or \.jsonl"):
+        task.context.save(path)
+
+
 def test_traceback_on_error():
     """traceback() shows error chain."""
     @agentic_function

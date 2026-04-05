@@ -473,26 +473,28 @@ class Context:
     # PERSISTENCE — save the tree to disk
     # ==================================================================
 
-    def save(self, path: str):
+    def save(self, path: str | os.PathLike[str]):
         """
         Save the full tree to a file.
 
         .md   → human-readable tree view (same as tree())
         .jsonl → one JSON object per node, machine-readable
 
+        Accepts both plain strings and pathlib.Path / os.PathLike objects.
         Raises ValueError for unsupported extensions.
         """
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        if path.endswith(".md"):
-            with open(path, "w") as f:
+        path_str = os.fspath(path)
+        os.makedirs(os.path.dirname(os.path.abspath(path_str)), exist_ok=True)
+        if path_str.endswith(".md"):
+            with open(path_str, "w") as f:
                 f.write(self.tree())
-        elif path.endswith(".jsonl"):
-            with open(path, "w") as f:
+        elif path_str.endswith(".jsonl"):
+            with open(path_str, "w") as f:
                 for record in self._to_records():
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         else:
             raise ValueError(
-                f"Unsupported file extension: {path}. Use .md or .jsonl."
+                f"Unsupported file extension: {path_str}. Use .md or .jsonl."
             )
 
     def _to_records(self, tree_depth: int = 0) -> list[dict]:
