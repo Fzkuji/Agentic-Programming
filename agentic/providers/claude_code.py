@@ -4,10 +4,16 @@ Claude Code CLI provider — routes LLM calls through the Claude Code CLI.
 Uses `claude -p` (print mode) which is covered by Claude Code subscription.
 No API key needed — uses the logged-in Claude Code session.
 
+Architecture:
+  A single long-running `claude` process is kept alive for the entire runtime.
+  Messages are sent via stdin (stream-json format) and responses read from
+  stdout. This eliminates process startup overhead (~2-3s per call) and
+  enables natural KV cache reuse across turns.
+
 Supports:
 - Text content blocks
-- Image content blocks (via --input-format stream-json with base64)
-- Session continuity (via --session-id + --resume)
+- Image content blocks (base64 encoded via stream-json)
+- Session continuity (single persistent process)
 
 Unsupported (with warnings):
 - Audio content blocks (Claude CLI does not support audio input)
@@ -32,9 +38,14 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import os
 import shutil
 import subprocess
+import sys
+import threading
+import time
 import uuid
+import warnings
 from typing import Optional
 
 from agentic.runtime import Runtime
@@ -42,20 +53,21 @@ from agentic.runtime import Runtime
 
 class ClaudeCodeRuntime(Runtime):
     """
-    Runtime that routes LLM calls through the Claude Code CLI.
+    Runtime that routes LLM calls through a persistent Claude Code CLI process.
+
+    A single `claude -p` process is started on first call and kept alive.
+    All subsequent calls reuse the same process via stdin/stdout streaming,
+    eliminating the ~2-3s startup overhead per call.
 
     Requires `claude` CLI to be installed and logged in.
     Uses Claude Code subscription (no separate API key needed).
 
-    Supports images via stream-json input format (base64 encoded).
-    Supports session continuity via --session-id.
-
     Args:
         model:      Model to use (default: "sonnet"). Passed to --model flag.
-        timeout:    Max seconds per CLI call (default: 300).
+        timeout:    Max seconds per LLM call (default: 300).
         cli_path:   Path to claude CLI binary (auto-detected if not specified).
-        session_id: Session ID for continuity. "auto" = generate UUID.
-                    None = stateless (each call independent).
+        session_id: Kept for API compat. Ignored (persistent process manages
+                    its own session internally).
     """
 
     def __init__(
@@ -68,12 +80,9 @@ class ClaudeCodeRuntime(Runtime):
         super().__init__(model=model)
         self.timeout = timeout
         self.cli_path = cli_path or shutil.which("claude")
+        self._proc: Optional[subprocess.Popen] = None
+        self._lock = threading.Lock()
         self._turn_count = 0
-
-        if session_id == "auto":
-            self._session_id = str(uuid.uuid4())
-        else:
-            self._session_id = session_id
 
         if self.cli_path is None:
             raise FileNotFoundError(
@@ -83,16 +92,38 @@ class ClaudeCodeRuntime(Runtime):
                 "  claude login"
             )
 
-    def _call(self, content: list[dict], model: str = "sonnet", response_format: dict = None) -> str:
-        """Call Claude Code CLI with the content list.
+    def _ensure_process(self):
+        """Start the persistent claude process if not already running."""
+        if self._proc is not None and self._proc.poll() is None:
+            return  # Still alive
 
-        If content contains image blocks, uses stream-json input format
-        to pass base64-encoded images. Otherwise uses plain text mode.
+        cmd = [
+            self.cli_path, "-p",
+            "--permission-mode", "bypassPermissions",
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose",  # required for stream-json output in print mode
+        ]
+
+        if self.model and self.model != "sonnet":
+            cmd.extend(["--model", self.model])
+
+        self._proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,  # Line buffered
+        )
+        self._turn_count = 0
+
+    def _call(self, content: list[dict], model: str = "sonnet", response_format: dict = None) -> str:
+        """Send a message to the persistent claude process and read the response.
 
         Unsupported block types (audio, video, file) emit warnings and are skipped.
         """
-        # Warn and filter unsupported block types
-        import warnings
+        # Filter unsupported block types
         filtered_content = []
         for block in content:
             btype = block.get("type", "text")
@@ -122,129 +153,118 @@ class ClaudeCodeRuntime(Runtime):
 
         content = filtered_content
 
-        has_images = any(
-            b.get("type") == "image" and (b.get("path") or b.get("data"))
-            for b in content
-        )
+        with self._lock:
+            self._ensure_process()
 
-        if has_images:
-            return self._call_with_images(content, model, response_format)
-        return self._call_text_only(content, model, response_format)
+            # Build Anthropic-format content blocks
+            anthropic_content = []
+            for block in content:
+                if block.get("type") == "text":
+                    anthropic_content.append({"type": "text", "text": block["text"]})
+                elif block.get("type") == "image":
+                    img_block = self._encode_image(block)
+                    if img_block:
+                        anthropic_content.append(img_block)
+                elif "text" in block:
+                    anthropic_content.append({"type": "text", "text": block["text"]})
 
-    def _call_text_only(self, content: list[dict], model: str, response_format: dict = None) -> str:
-        """Plain text mode — fast path for text-only calls."""
-        parts = []
-        for block in content:
-            if block.get("type") == "text":
-                parts.append(block["text"])
-            elif "text" in block:
-                parts.append(block["text"])
+            if response_format:
+                anthropic_content.append({
+                    "type": "text",
+                    "text": f"\n\nRespond with ONLY valid JSON matching: {json.dumps(response_format)}",
+                })
 
-        prompt = "\n".join(parts)
-        if response_format:
-            prompt += f"\n\nRespond with ONLY valid JSON matching this schema: {json.dumps(response_format)}"
-
-        cmd = [self.cli_path, "-p", "--permission-mode", "bypassPermissions"]
-
-        if self._session_id:
-            if self._turn_count > 0:
-                cmd.extend(["--resume", "--session-id", self._session_id])
-            else:
-                cmd.extend(["--session-id", self._session_id])
-
-        if model and model != "sonnet":
-            cmd.extend(["--model", model])
-
-        cmd.append(prompt)
-
-        result = self._run_cli(cmd)
-        self._turn_count += 1
-        return result
-
-    def _call_with_images(self, content: list[dict], model: str, response_format: dict = None) -> str:
-        """Stream-json mode — supports images via base64."""
-        # Build Anthropic-format content blocks
-        anthropic_content = []
-        for block in content:
-            if block.get("type") == "text":
-                anthropic_content.append({"type": "text", "text": block["text"]})
-            elif block.get("type") == "image":
-                img_block = self._encode_image(block)
-                if img_block:
-                    anthropic_content.append(img_block)
-            elif "text" in block:
-                anthropic_content.append({"type": "text", "text": block["text"]})
-
-        if response_format:
-            anthropic_content.append({
-                "type": "text",
-                "text": f"\n\nRespond with ONLY valid JSON matching: {json.dumps(response_format)}",
+            # Build stream-json message
+            message = json.dumps({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": anthropic_content,
+                },
             })
 
-        # Build stream-json message
-        stream_msg = json.dumps({
-            "type": "user",
-            "message": {
-                "role": "user",
-                "content": anthropic_content,
-            },
-        })
+            try:
+                self._proc.stdin.write(message + "\n")
+                self._proc.stdin.flush()
+            except (BrokenPipeError, OSError):
+                # Process died — restart and retry
+                self._proc = None
+                self._ensure_process()
+                self._proc.stdin.write(message + "\n")
+                self._proc.stdin.flush()
 
-        cmd = [
-            self.cli_path, "-p",
-            "--permission-mode", "bypassPermissions",
-            "--input-format", "stream-json",
-            "--output-format", "stream-json",
-            "--verbose",  # required for stream-json output in print mode
-        ]
+            # Read response lines until we get a result
+            reply = self._read_response()
+            self._turn_count += 1
+            return reply
 
-        if self._session_id:
-            if self._turn_count > 0:
-                cmd.extend(["--resume", "--session-id", self._session_id])
-            else:
-                cmd.extend(["--session-id", self._session_id])
+    def _read_response(self) -> str:
+        """Read lines from stdout until we get a result message."""
+        deadline = time.time() + self.timeout
+        result_text = None
 
-        if model and model != "sonnet":
-            cmd.extend(["--model", model])
+        while time.time() < deadline:
+            # Check if process is still alive
+            if self._proc.poll() is not None:
+                stderr = self._proc.stderr.read() if self._proc.stderr else ""
+                raise RuntimeError(
+                    f"Claude Code CLI process exited unexpectedly "
+                    f"(code {self._proc.returncode}): {stderr[:500]}"
+                )
 
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=stream_msg,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-            )
-        except subprocess.TimeoutExpired:
-            raise TimeoutError(f"Claude Code CLI timed out after {self.timeout}s")
+            # Read one line with timeout
+            line = self._read_line_with_timeout(deadline - time.time())
+            if line is None:
+                continue
 
-        if proc.returncode != 0:
-            self._handle_error(proc)
-
-        self._turn_count += 1
-
-        # Parse stream-json output — find the result
-        for line in proc.stdout.strip().split("\n"):
             line = line.strip()
             if not line:
                 continue
+
             try:
                 data = json.loads(line)
-                if data.get("type") == "result":
-                    return data.get("result", "")
-                if data.get("type") == "assistant" and "message" in data:
-                    msg = data["message"]
-                    if isinstance(msg, dict) and "content" in msg:
-                        texts = [
-                            b["text"] for b in msg["content"]
-                            if isinstance(b, dict) and b.get("type") == "text"
-                        ]
-                        if texts:
-                            return "\n".join(texts)
             except json.JSONDecodeError:
                 continue
 
-        return proc.stdout.strip()
+            msg_type = data.get("type", "")
+
+            # "result" marks the end of a turn
+            if msg_type == "result":
+                result_text = data.get("result", "")
+                return result_text
+
+            # "assistant" message with content
+            if msg_type == "assistant" and "message" in data:
+                msg = data["message"]
+                if isinstance(msg, dict) and "content" in msg:
+                    texts = [
+                        b["text"] for b in msg["content"]
+                        if isinstance(b, dict) and b.get("type") == "text"
+                    ]
+                    if texts:
+                        result_text = "\n".join(texts)
+                        # Don't return yet — wait for "result" to mark end of turn
+
+        raise TimeoutError(f"Claude Code CLI timed out after {self.timeout}s")
+
+    def _read_line_with_timeout(self, remaining: float) -> Optional[str]:
+        """Read a single line from stdout with timeout using a thread."""
+        result = [None]
+        exc = [None]
+
+        def _read():
+            try:
+                result[0] = self._proc.stdout.readline()
+            except Exception as e:
+                exc[0] = e
+
+        thread = threading.Thread(target=_read, daemon=True)
+        thread.start()
+        thread.join(timeout=min(remaining, 5.0))
+
+        if exc[0]:
+            raise exc[0]
+        return result[0]
 
     def _encode_image(self, block: dict) -> Optional[dict]:
         """Convert an image content block to Anthropic base64 format."""
@@ -277,34 +297,20 @@ class ClaudeCodeRuntime(Runtime):
 
         return None
 
-    def _run_cli(self, cmd: list[str]) -> str:
-        """Run CLI command and return stdout."""
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-            )
-        except subprocess.TimeoutExpired:
-            raise TimeoutError(f"Claude Code CLI timed out after {self.timeout}s")
-
-        if result.returncode != 0:
-            self._handle_error(result)
-
-        return result.stdout.strip()
-
-    def _handle_error(self, result):
-        """Handle CLI errors."""
-        error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-        if "Not logged in" in error_msg or "login" in error_msg.lower():
-            raise ConnectionError(
-                f"Claude Code CLI not logged in. Run: claude login\n"
-                f"Error: {error_msg}"
-            )
-        raise RuntimeError(f"Claude Code CLI error (exit {result.returncode}): {error_msg}")
-
     def reset(self):
-        """Start a new session."""
-        self._session_id = str(uuid.uuid4())
+        """Kill the current process and start fresh on next call."""
+        if self._proc is not None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=5)
+            except Exception:
+                try:
+                    self._proc.kill()
+                except Exception:
+                    pass
+            self._proc = None
         self._turn_count = 0
+
+    def __del__(self):
+        """Clean up the subprocess on garbage collection."""
+        self.reset()
