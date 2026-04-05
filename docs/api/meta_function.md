@@ -42,12 +42,17 @@ def create(description: str, runtime: Runtime, name: str = None) -> callable
 
 | 限制 | 说明 |
 |------|------|
-| 禁止 import | `import` 和 `from ... import` 语句被拦截 |
+| 仅允许白名单 import | 只能导入框架预先允许的一小部分标准库模块；像 `subprocess`、第三方包这类导入会被拦截 |
 | 禁止 async | 只允许同步函数 |
-| 受限 builtins | 没有 `exec`、`eval`、`open`、`__import__`、文件 I/O |
+| 受限 builtins | 没有 `exec`、`eval`、`open` 等危险能力；`__import__` 也会经过白名单校验 |
 | 语法校验 | 执行前先编译检查 |
 
-生成的函数只能访问 `agentic_function`（装饰器）和 `runtime`（传入的 Runtime 实例）。
+生成的函数默认只能可靠访问：
+- `agentic_function`（装饰器）
+- `runtime`（传入的 Runtime 实例）
+- 以及白名单内的少量标准库模块
+
+也就是说，`create()` / `fix()` 不是“完全禁止 import”，而是“只允许安全白名单 import”。这和当前实现保持一致。
 
 ---
 

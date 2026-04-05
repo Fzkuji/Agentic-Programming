@@ -33,6 +33,15 @@ def test_extract_code_with_explanation():
     assert "This function" not in code
 
 
+def test_extract_code_keeps_leading_imports():
+    """Extracted code keeps allowed imports that appear before the decorator."""
+    response = 'Sure — use json.\n\nimport json\n\n@agentic_function\ndef greet(name):\n    return json.dumps({"name": name})'
+    code = _extract_code(response)
+    assert code.startswith("import json")
+    assert "@agentic_function" in code
+    assert "json.dumps" in code
+
+
 # ── Safety tests ───────────────────────────────────────────────
 
 def test_safe_builtins_blocks_import():
@@ -48,6 +57,13 @@ def test_safe_builtins_allows_basics():
     assert safe["len"]([1, 2, 3]) == 3
     assert safe["str"](42) == "42"
     assert safe["int"]("5") == 5
+
+
+def test_safe_builtins_allow_whitelisted_stdlib_imports():
+    """Safe builtins still allow a curated set of stdlib imports."""
+    safe = _make_safe_builtins()
+    json_mod = safe["__import__"]("json")
+    assert json_mod.loads('{"ok": true}') == {"ok": True}
 
 
 # ── create() with mock LLM ────────────────────────────────────
@@ -127,6 +143,22 @@ def evil():
     runtime = Runtime(call=mock_call)
     with pytest.raises(ValueError, match="not allowed"):
         create(description="evil", runtime=runtime)
+
+
+def test_create_allows_whitelisted_stdlib_imports():
+    """create() may use explicitly allowed standard-library imports."""
+    def mock_call(content, model="test", response_format=None):
+        return '''import json
+
+@agentic_function
+def as_json(value):
+    """Return a tiny JSON object."""
+    return json.dumps({"value": value})'''
+
+    runtime = Runtime(call=mock_call)
+    fn = create(description="Return a JSON object", runtime=runtime)
+
+    assert fn(value="x") == '{"value": "x"}'
 
 
 def test_create_custom_name():

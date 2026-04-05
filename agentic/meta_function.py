@@ -84,9 +84,18 @@ def _extract_code(response: str) -> str:
     match = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
     if match:
         return match.group(1).strip()
-    match = re.search(r"(@agentic_function.*)", response, re.DOTALL)
-    if match:
-        return match.group(1).strip()
+
+    lines = response.strip().splitlines()
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if (
+            stripped.startswith("import ")
+            or stripped.startswith("from ")
+            or stripped.startswith("@agentic_function")
+            or stripped.startswith("def ")
+        ):
+            return "\n".join(lines[i:]).strip()
+
     return response.strip()
 
 
@@ -136,13 +145,20 @@ def _compile_function(code: str, runtime: Runtime, name: str = None) -> callable
         fn.__name__ = name
         fn.__qualname__ = name
 
-    # Bind runtime into the function's globals so it can access it
+    # Bind runtime and any approved imports into the generated function's globals.
+    target_globals = None
     if hasattr(fn, '__wrapped__'):
-        fn.__wrapped__.__globals__['runtime'] = runtime
+        target_globals = fn.__wrapped__.__globals__
     elif hasattr(fn, '_fn') and fn._fn:
-        fn._fn.__globals__['runtime'] = runtime
+        target_globals = fn._fn.__globals__
     elif hasattr(fn, '__globals__'):
-        fn.__globals__['runtime'] = runtime
+        target_globals = fn.__globals__
+
+    if target_globals is not None:
+        for key, value in namespace.items():
+            if key != "__builtins__":
+                target_globals[key] = value
+        target_globals['runtime'] = runtime
 
     return fn
 
@@ -390,7 +406,9 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
     - If exact formatting matters, include an example in the docstring:
       e.g., "Example output: {'time': '12:00-14:00', 'type': 'Lecture'}"
 
-    Write ONLY the function definition. No extra imports, no explanation.
+    Write ONLY the code needed for the function. No explanation.
+    Imports are allowed only when genuinely needed, and they must stay within
+    the safe standard-library whitelist.
 
     Args:
         description:  What the function should do.

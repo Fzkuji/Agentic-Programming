@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Tests for `fix()` docstring/source fallback, nested child error extraction, and async retry attempt history.
 - Provider export coverage now also checks `GeminiCLIRuntime` in `agentic.providers.__all__`.
+- Meta-function regression tests now cover preserving leading imports in `_extract_code()` and executing generated functions that use whitelisted stdlib imports.
 
 ### Changed
 - README installation/configuration guidance now covers optional provider extras, runtime selection, and the `fix()` workflow.
@@ -16,6 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `docs/api/providers.md` now documents the CLI runtimes (`ClaudeCodeRuntime`, `CodexRuntime`, `GeminiCLIRuntime`) alongside SDK-based providers.
 - `docs/api/meta_function.md` now documents the current `fix(fn, runtime, instruction, on_question, max_rounds)` API and interactive repair flow.
 - `docs/api/runtime.md` now explains retry attempt recording and how retry history feeds into `fix()`.
+- `create()` / `fix()` now preserve approved stdlib imports that appear before the generated function definition, matching the sandbox whitelist documented in `meta_function.py`.
+- `.gitignore` now excludes generated runtime artifacts under `agentic/logs/` and `agentic/functions/`.
 
 ## [0.3.0] - 2025-04-04
 

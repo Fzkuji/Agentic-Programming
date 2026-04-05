@@ -9,3 +9,7 @@ build/
 .pytest_cache/
 .DS_Store
 *.egg-info/
+
+# Runtime/generated artifacts
+agentic/logs/
+agentic/functions/
