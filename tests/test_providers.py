@@ -5,6 +5,7 @@ All tests use mocked SDKs — no real API calls are made.
 """
 
 import base64
+import json
 import os
 import subprocess
 import types
@@ -993,6 +994,39 @@ class TestClaudeCodeRuntimeUnsupported:
             rt._call([{"type": "text", "text": "hi"}, {"type": "file", "path": "test.pdf"}])
             file_warnings = [x for x in w if "file" in str(x.message).lower()]
             assert len(file_warnings) == 1
+
+    def test_unknown_block_with_text_fallback_text_only(self):
+        """Unknown blocks with text fall back to plain text in text-only mode."""
+        rt = self._make_runtime()
+        result = rt._call([{"type": "custom", "text": "fallback text"}])
+        assert result == "mock reply"
+        cmd = self._mock_run.call_args[0][0]
+        assert cmd[-1] == "fallback text"
+
+    def test_unknown_block_with_text_fallback_with_images(self, tmp_path):
+        """Unknown blocks with text fall back to text in stream-json image mode."""
+        img_path = tmp_path / "test.png"
+        img_path.write_bytes(b"\x89PNG" + b"\x00" * 10)
+
+        def stream_json_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            result.stdout = '{"type":"result","result":"mock reply"}\n'
+            return result
+
+        self._mock_run.side_effect = stream_json_run
+
+        rt = self._make_runtime()
+        result = rt._call([
+            {"type": "image", "path": str(img_path)},
+            {"type": "custom", "text": "fallback text"},
+        ])
+
+        assert result == "mock reply"
+        stream_msg = json.loads(self._mock_run.call_args[1]["input"])
+        content = stream_msg["message"]["content"]
+        assert any(block.get("type") == "text" and block.get("text") == "fallback text" for block in content)
 
 
 # ══════════════════════════════════════════════════════════════

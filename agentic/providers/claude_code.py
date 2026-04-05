@@ -137,6 +137,8 @@ class ClaudeCodeRuntime(Runtime):
         for block in content:
             if block.get("type") == "text":
                 parts.append(block["text"])
+            elif "text" in block:
+                parts.append(block["text"])
 
         prompt = "\n".join(parts)
         if response_format:
@@ -170,6 +172,8 @@ class ClaudeCodeRuntime(Runtime):
                 img_block = self._encode_image(block)
                 if img_block:
                     anthropic_content.append(img_block)
+            elif "text" in block:
+                anthropic_content.append({"type": "text", "text": block["text"]})
 
         if response_format:
             anthropic_content.append({
