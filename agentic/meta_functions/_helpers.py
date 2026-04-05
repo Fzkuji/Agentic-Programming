@@ -32,6 +32,9 @@ _ALLOWED_IMPORTS = {
     "pathlib", "collections", "itertools", "functools",
     "textwrap", "string", "io", "csv", "hashlib", "base64",
     "time", "random", "copy", "glob", "shutil", "tempfile",
+    "urllib", "urllib.parse", "urllib.request",
+    "typing", "dataclasses", "enum", "abc",
+    "statistics", "decimal", "fractions",
 }
 
 

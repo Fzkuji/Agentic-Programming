@@ -109,7 +109,9 @@ def create_app(description: str, runtime: Runtime, name: str = "app") -> str:
         {"type": "text", "text": (
             f"Write a complete, runnable agentic app that does the following:\n\n"
             f"{description}\n\n"
-            f"The app name is '{name}'."
+            f"The app name is '{name}'.\n\n"
+            f"Respond with ONLY the Python code inside a ```python code fence. "
+            f"No explanation, no commentary, no markdown outside the fence."
         )},
     ])
     code = extract_code(response)

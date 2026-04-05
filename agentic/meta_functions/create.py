@@ -90,7 +90,12 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
         A callable function.
     """
     response = runtime.exec(content=[
-        {"type": "text", "text": f"Write a Python function that does the following:\n\n{description}"},
+        {"type": "text", "text": (
+            f"Write a Python function that does the following:\n\n"
+            f"{description}\n\n"
+            f"Respond with ONLY the Python code inside a ```python code fence. "
+            f"No explanation, no commentary, no markdown outside the fence."
+        )},
     ])
     code = extract_code(response)
     fn_name = name or guess_name(code) or "generated"

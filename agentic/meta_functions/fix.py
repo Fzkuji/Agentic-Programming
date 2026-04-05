@@ -65,10 +65,15 @@ def fix(
     if instruction:
         data_parts.append(f"Instruction: {instruction}")
 
+    code_fence_reminder = (
+        "\n\nRespond with ONLY the fixed Python code inside a ```python code fence. "
+        "No explanation, no commentary, no markdown outside the fence."
+    )
+
     # Interaction loop
     extra_context = ""
     for round_num in range(max_rounds):
-        prompt = "\n\n".join(data_parts)
+        prompt = "\n\n".join(data_parts) + code_fence_reminder
         if extra_context:
             prompt += extra_context
 

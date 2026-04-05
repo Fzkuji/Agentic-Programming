@@ -948,18 +948,31 @@ class TestClaudeCodeRuntimeUnsupported:
 
     @pytest.fixture(autouse=True)
     def setup_mock(self, monkeypatch):
-        """Mock shutil.which and subprocess."""
+        """Mock shutil.which and subprocess.Popen for persistent process mode."""
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None)
 
-        def mock_run(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "mock reply"
-            result.stderr = ""
-            return result
+        # Mock Popen to simulate a persistent claude process
+        self._mock_stdin = MagicMock()
+        self._mock_stdout = MagicMock()
+        self._mock_proc = MagicMock()
+        self._mock_proc.poll.return_value = None  # process is alive
+        self._mock_proc.stdin = self._mock_stdin
+        self._mock_proc.stdout = self._mock_stdout
+        self._mock_proc.stderr = MagicMock()
 
-        self._mock_run = MagicMock(side_effect=mock_run)
-        monkeypatch.setattr("subprocess.run", self._mock_run)
+        # _read_response reads lines from stdout; return a result message
+        self._mock_stdout.readline.side_effect = [
+            '{"type":"result","result":"mock reply"}\n',
+        ]
+
+        self._orig_popen = subprocess.Popen
+        monkeypatch.setattr("subprocess.Popen", lambda *a, **kw: self._mock_proc)
+
+    def _reset_stdout(self):
+        """Reset mock stdout for a fresh _call."""
+        self._mock_stdout.readline.side_effect = [
+            '{"type":"result","result":"mock reply"}\n',
+        ]
 
     def _make_runtime(self, **kwargs):
         from agentic.providers.claude_code import ClaudeCodeRuntime
@@ -978,6 +991,7 @@ class TestClaudeCodeRuntimeUnsupported:
     def test_video_block_warns(self):
         """Video blocks emit a warning and are filtered out."""
         rt = self._make_runtime()
+        self._reset_stdout()
         import warnings
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -988,6 +1002,7 @@ class TestClaudeCodeRuntimeUnsupported:
     def test_file_block_warns(self):
         """File/PDF blocks emit a warning and are filtered out."""
         rt = self._make_runtime()
+        self._reset_stdout()
         import warnings
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
@@ -995,37 +1010,16 @@ class TestClaudeCodeRuntimeUnsupported:
             file_warnings = [x for x in w if "file" in str(x.message).lower()]
             assert len(file_warnings) == 1
 
-    def test_unknown_block_with_text_fallback_text_only(self):
-        """Unknown blocks with text fall back to plain text in text-only mode."""
+    def test_unknown_block_with_text_fallback(self):
+        """Unknown blocks with text fall back to text content."""
         rt = self._make_runtime()
+        self._reset_stdout()
         result = rt._call([{"type": "custom", "text": "fallback text"}])
         assert result == "mock reply"
-        cmd = self._mock_run.call_args[0][0]
-        assert cmd[-1] == "fallback text"
-
-    def test_unknown_block_with_text_fallback_with_images(self, tmp_path):
-        """Unknown blocks with text fall back to text in stream-json image mode."""
-        img_path = tmp_path / "test.png"
-        img_path.write_bytes(b"\x89PNG" + b"\x00" * 10)
-
-        def stream_json_run(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            result.stderr = ""
-            result.stdout = '{"type":"result","result":"mock reply"}\n'
-            return result
-
-        self._mock_run.side_effect = stream_json_run
-
-        rt = self._make_runtime()
-        result = rt._call([
-            {"type": "image", "path": str(img_path)},
-            {"type": "custom", "text": "fallback text"},
-        ])
-
-        assert result == "mock reply"
-        stream_msg = json.loads(self._mock_run.call_args[1]["input"])
-        content = stream_msg["message"]["content"]
+        # Verify the text was sent via stdin
+        written = self._mock_stdin.write.call_args[0][0]
+        msg = json.loads(written.strip())
+        content = msg["message"]["content"]
         assert any(block.get("type") == "text" and block.get("text") == "fallback text" for block in content)
 
 
