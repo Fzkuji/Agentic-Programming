@@ -193,7 +193,7 @@ def plan(goal):
 ### 配置
 
 ```python
-# 默认：最多尝试 2 次（失败 1 次后重试 1 次）
+# 默认：最多尝试 2 次（首次调用 + 失败后再试一次）
 rt = Runtime(call=my_llm, max_retries=2)
 
 # 不重试（失败即抛异常）
@@ -207,10 +207,26 @@ rt = Runtime(call=my_llm, max_retries=5)
 
 | 情况 | 处理 |
 |------|------|
-| API 调用成功 | 返回结果，记录到 Context |
-| API 抛出异常（非 TypeError/NotImplementedError） | 重试，直到 max_retries 次 |
-| TypeError 或 NotImplementedError | 立即抛出，不重试（编程错误） |
-| 所有重试均失败 | 抛出 RuntimeError，包含所有尝试的错误报告 |
+| API 调用成功 | 返回结果，并把 `{attempt, reply, error}` 记录到当前 Context 节点 |
+| API 抛出异常（非 `TypeError` / `NotImplementedError`） | 记录失败 attempt，然后继续重试，直到达到 `max_retries` |
+| `TypeError` 或 `NotImplementedError` | 立即抛出，不重试（通常是 provider 实现或调用方式的问题） |
+| 所有重试均失败 | 抛出 `RuntimeError`，并附上完整 attempt 报告 |
+
+### Context 中的 attempts
+
+每次 `exec()` / `async_exec()` 都会把尝试历史写入 `ctx.attempts`：
+
+```python
+[
+    {"attempt": 1, "reply": None, "error": "ConnectionError: timeout"},
+    {"attempt": 2, "reply": "ok", "error": None},
+]
+```
+
+这有两个直接用途：
+
+1. `Context.save()` 能把 retry 历史落盘，方便排查线上问题。
+2. `fix(fn=...)` 能直接读取这些 attempts，把失败上下文带给 LLM 做定向修复。
 
 ### 错误报告格式
 
@@ -224,3 +240,20 @@ Attempt 3: ConnectionError: timeout
 ```
 
 这样可以在 Context 树中看到完整的失败史，方便调试。
+
+### 与 `fix()` 的配合
+
+推荐模式：让 `Runtime(max_retries=N)` 先处理短暂 API 波动；如果函数本身逻辑或输出格式有问题，再用 `fix()` 做结构性修复。
+
+```python
+runtime = Runtime(call=my_llm, max_retries=3)
+
+try:
+    result = my_agentic_function(...)
+except Exception:
+    my_agentic_function = fix(
+        fn=my_agentic_function,
+        runtime=runtime,
+        instruction="Handle empty input and always return valid JSON.",
+    )
+```

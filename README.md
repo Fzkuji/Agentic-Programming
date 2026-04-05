@@ -75,20 +75,40 @@ def observe(task):
 
 ## Quick Start
 
-### Install as Skills
+### Install
 
 ```bash
-# 1. Clone the repository
+# Clone the repository
 git clone https://github.com/Fzkuji/Agentic-Programming.git
 cd Agentic-Programming
 
-# 2. Install the Python package
+# Core package (no provider SDKs)
 pip install -e .
 
-# 3. Install skills (choose your platform)
-cp -r skills/* ~/.claude/skills/                     # Claude Code
-cp -r skills/* ~/.openclaw/workspace/skills/         # OpenClaw
-cp -r skills/* ~/.gemini/skills/                     # Gemini CLI
+# Optional providers
+pip install -e ".[anthropic]"   # Anthropic Claude API
+pip install -e ".[openai]"      # OpenAI Responses API
+pip install -e ".[gemini]"      # Google Gemini API
+pip install -e ".[all]"         # everything
+```
+
+### Provider setup
+
+Pick one runtime and configure its credential or CLI:
+
+| Runtime | Install | Auth / setup |
+|---------|---------|--------------|
+| `ClaudeCodeRuntime` | `npm install -g @anthropic-ai/claude-code` | `claude login` |
+| `AnthropicRuntime` | `pip install -e ".[anthropic]"` | `export ANTHROPIC_API_KEY=...` |
+| `OpenAIRuntime` | `pip install -e ".[openai]"` | `export OPENAI_API_KEY=...` |
+| `GeminiRuntime` | `pip install -e ".[gemini]"` | `export GOOGLE_API_KEY=...` |
+
+### Optional: install skills
+
+```bash
+cp -r skills/* ~/.claude/skills/             # Claude Code
+cp -r skills/* ~/.openclaw/workspace/skills/ # OpenClaw
+cp -r skills/* ~/.gemini/skills/             # Gemini CLI
 ```
 
 ### Use
@@ -158,12 +178,18 @@ LLM writes the code. Framework validates and sandboxes it. You get a real `@agen
 ### 4. Errors recover automatically
 
 ```python
-runtime = Runtime(call=my_llm, max_retries=2)  # auto-retry on failure
+runtime = Runtime(call=my_llm, max_retries=2)  # try once + retry once
 
 # Or fix a broken function:
 from agentic.meta_function import fix
-fixed_fn = fix(fn=broken_fn, runtime=runtime, instruction="use label instead of coordinates")
+fixed_fn = fix(
+    fn=broken_fn,
+    runtime=runtime,
+    instruction="use label instead of coordinates",
+)
 ```
+
+`Runtime.exec()` and `Runtime.async_exec()` record every attempt in the current `Context` node. Transient provider failures are retried automatically; programming errors such as `TypeError` and `NotImplementedError` fail immediately.
 
 ---
 
@@ -203,15 +229,60 @@ MCP is the *transport*. Agentic Programming is the *execution model*. They're or
 
 ---
 
-## Install
+## Install & Configuration
+
+### Minimal install
 
 ```bash
-pip install -e .                    # core (zero dependencies)
-pip install -e ".[anthropic]"       # + Claude
-pip install -e ".[openai]"          # + GPT
-pip install -e ".[gemini]"          # + Gemini
-pip install -e ".[all]"             # everything
+pip install -e .
 ```
+
+### Provider-specific installs
+
+```bash
+pip install -e ".[anthropic]"  # Anthropic Claude API
+pip install -e ".[openai]"     # OpenAI GPT / Responses API
+pip install -e ".[gemini]"     # Google Gemini API
+pip install -e ".[all]"        # install all provider SDKs
+```
+
+### Runtime selection
+
+```python
+from agentic.providers import ClaudeCodeRuntime, AnthropicRuntime
+from agentic.providers import OpenAIRuntime, GeminiRuntime
+
+local = ClaudeCodeRuntime(model="sonnet")
+strong = AnthropicRuntime(model="claude-sonnet-4-20250514")
+json_rt = OpenAIRuntime(model="gpt-4o")
+fast = GeminiRuntime(model="gemini-2.5-flash")
+```
+
+### Retry + `fix()` workflow
+
+```python
+from agentic import agentic_function, Runtime
+from agentic.meta_function import create, fix
+
+runtime = Runtime(call=my_llm, max_retries=3)
+extract = create(
+    "Extract company name and price from text. Return JSON with keys company and price.",
+    runtime=runtime,
+    name="extract_quote",
+)
+
+try:
+    result = extract(text="Acme closed at $42.50 today")
+except Exception:
+    extract = fix(
+        fn=extract,
+        runtime=runtime,
+        instruction="Validate missing prices and always return valid JSON.",
+    )
+    result = extract(text="Acme closed at $42.50 today")
+```
+
+`fix()` infers the source code and prior error history from `fn`, so you only pass the function object plus any extra guidance.
 
 ## Project Structure
 
@@ -224,7 +295,7 @@ agentic/
 ├── meta_function.py     # create() + fix()
 └── providers/           # Anthropic, OpenAI, Gemini, Claude Code CLI
 
-examples/                # 5 runnable demos
+examples/                # runnable demos and provider examples
 docs/api/                # API reference
 tests/                   # 161 tests
 ```

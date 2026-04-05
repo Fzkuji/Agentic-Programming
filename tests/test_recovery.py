@@ -288,3 +288,71 @@ def generated():
 
     fixed_fn = fix(fn=original, runtime=runtime, name="my_fixed")
     assert fixed_fn.__name__ == "my_fixed"
+
+
+def test_fix_uses_docstring_when_source_unavailable(monkeypatch):
+    """fix() falls back to docstring when inspect.getsource() is unavailable."""
+    prompts = []
+
+    def mock_call(content, model="test", response_format=None):
+        prompts.append(content[-1]["text"] if content else "")
+        return '''@agentic_function
+def restored():
+    """Fixed."""
+    return "ok"'''
+
+    runtime = Runtime(call=mock_call)
+
+    @agentic_function
+    def original():
+        """Original docstring."""
+        return "original"
+
+    import inspect
+    original_getsource = inspect.getsource
+
+    def raising_getsource(fn):
+        if fn is original:
+            raise OSError("source unavailable")
+        return original_getsource(fn)
+
+    monkeypatch.setattr(inspect, "getsource", raising_getsource)
+
+    fixed_fn = fix(fn=original, runtime=runtime)
+    assert fixed_fn() == "ok"
+    assert "Source not available for original" in prompts[0]
+    assert "Original docstring" in prompts[0]
+
+
+def test_fix_includes_nested_child_errors():
+    """fix() includes child context errors collected from nested attempts."""
+    prompts = []
+
+    def flaky(content, model="test", response_format=None):
+        raise ValueError("child boom")
+
+    runtime_fail = Runtime(call=flaky, max_retries=1)
+
+    @agentic_function
+    def child():
+        return runtime_fail.exec(content=[{"type": "text", "text": "hi"}])
+
+    @agentic_function
+    def parent():
+        return child()
+
+    with pytest.raises(RuntimeError):
+        parent()
+
+    def fix_call(content, model="test", response_format=None):
+        prompts.append(content[-1]["text"] if content else "")
+        return '''@agentic_function
+def parent():
+    """Fixed parent."""
+    return "fixed"'''
+
+    runtime_fix = Runtime(call=fix_call)
+    fixed_fn = fix(fn=parent, runtime=runtime_fix)
+    assert fixed_fn() == "fixed"
+    assert "child attempt 1: FAILED" in prompts[0]
+    assert "ValueError: child boom" in prompts[0]

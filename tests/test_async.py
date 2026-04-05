@@ -261,6 +261,32 @@ class TestAsyncExec:
         with pytest.raises(RuntimeError, match="failed after 3 attempts"):
             asyncio.run(func())
 
+    def test_async_exec_records_failed_attempts(self):
+        """async_exec stores full attempt history on the Context node."""
+        call_count = [0]
+
+        async def flaky(content, model="test", response_format=None):
+            call_count[0] += 1
+            if call_count[0] < 3:
+                raise ConnectionError(f"transient-{call_count[0]}")
+            return "ok"
+
+        runtime = Runtime(call=flaky, max_retries=3)
+
+        @agentic_function
+        async def func():
+            return await runtime.async_exec(content=[
+                {"type": "text", "text": "test"},
+            ])
+
+        result = asyncio.run(func())
+        assert result == "ok"
+        assert len(func.context.attempts) == 3
+        assert "ConnectionError: transient-1" == func.context.attempts[0]["error"]
+        assert "ConnectionError: transient-2" == func.context.attempts[1]["error"]
+        assert func.context.attempts[2]["reply"] == "ok"
+        assert func.context.attempts[2]["error"] is None
+
     def test_async_exec_no_provider_raises(self):
         """async_exec without provider raises NotImplementedError."""
         runtime = Runtime()

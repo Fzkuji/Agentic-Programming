@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- Tests for `fix()` docstring/source fallback, nested child error extraction, and async retry attempt history.
+
+### Changed
+- README installation/configuration guidance now covers optional provider extras, runtime selection, and the `fix()` workflow.
+- `docs/api/meta_function.md` now documents the current `fix(fn, runtime, instruction, on_question, max_rounds)` API and interactive repair flow.
+- `docs/api/runtime.md` now explains retry attempt recording and how retry history feeds into `fix()`.
+
 ## [0.3.0] - 2025-04-04
 
 ### Added

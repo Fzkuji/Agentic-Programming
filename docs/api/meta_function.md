@@ -130,79 +130,105 @@ def analyze_topic(topic):
 
 ```python
 @agentic_function
-def fix(description: str, code: str, error_log: str, runtime: Runtime, name: str = None) -> callable
+def fix(
+    fn,
+    runtime: Runtime,
+    instruction: str = None,
+    name: str = None,
+    on_question: Callable[[str], str] = None,
+    max_rounds: int = 5,
+) -> callable
 ```
 
-当 `create()` 生成的函数运行失败时，用 `fix()` 来修复。它把原始代码和错误日志发给 LLM，让 LLM 重写一个修复版本。
+当已有函数运行失败、输出格式不稳定、或你想做定向改写时，用 `fix()`。它会自动从 `fn` 中提取源码、函数名，以及最近 Context 树里的错误 / retry 历史，再交给 LLM 重写。
 
 ### 参数
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `description` | `str` | *(必填)* | 原始任务描述（和 create 时相同） |
-| `code` | `str` | *(必填)* | 失败的生成代码 |
-| `error_log` | `str` | *(必填)* | 错误日志（包含失败尝试的错误信息） |
-| `runtime` | `Runtime` | *(必填)* | Runtime 实例 |
+| `fn` | `callable` | *(必填)* | 要修复的函数对象。通常是 `create()` 生成的函数，也可以是手写的 `@agentic_function` |
+| `runtime` | `Runtime` | *(必填)* | 用来分析与重写函数的 Runtime |
+| `instruction` | `str \| None` | `None` | 额外修复要求，例如“改成返回 JSON” |
 | `name` | `str \| None` | `None` | 覆盖修复后函数的名称 |
+| `on_question` | `Callable[[str], str] \| None` | `None` | 当 LLM 返回 `QUESTION: ...` 时的回调。返回值会作为补充信息继续修复 |
+| `max_rounds` | `int` | `5` | 最多允许多少轮问答 / 重写 |
 
 ### 返回值
 
-`callable` — 修复后的 `@agentic_function`。
+`callable` — 修复后的函数。
 
 ### 异常
 
 | 异常 | 原因 |
 |------|------|
 | `SyntaxError` | 修复后的代码仍有语法错误 |
-| `ValueError` | 修复后的代码包含 import、async 等 |
+| `ValueError` | 修复后的代码包含不允许的 import、async、或无法执行 |
+| `RuntimeError` | 超过 `max_rounds` 仍未得到可编译代码 |
 
 ---
 
-### 使用方式
+### 基本用法
 
 ```python
 from agentic.meta_function import create, fix
 
 runtime = Runtime(call=my_llm, model="sonnet")
 
-# 创建函数
 analyze = create("Analyze sentiment of text", runtime=runtime)
 
-# 尝试运行
 try:
     result = analyze(text="This is great!")
-except Exception as e:
-    # 如果失败，用 fix() 修复
+except Exception:
     analyze = fix(
-        description="Analyze sentiment of text",
-        code="<the generated code>",
-        error_log=str(e),
+        fn=analyze,
         runtime=runtime,
+        instruction="Return exactly one word: positive, negative, or neutral.",
     )
     result = analyze(text="This is great!")
 ```
 
-### create + fix 自动重试模式
+### `fix()` 会自动拿到什么
+
+`fix(fn=..., runtime=...)` 会自动收集：
+
+- `fn` 的源码（若可读）
+- `fn.__doc__` / 名称，用来恢复原始意图
+- `fn.context` 里的失败记录，包括 retry attempts 和异常信息
+- 你额外传入的 `instruction`
+
+所以新版 API 不再需要手动传 `description`、`code`、`error_log`。
+
+### 交互式修复：`on_question`
 
 ```python
-def create_with_retry(description, runtime, max_attempts=3):
-    """Create a function, auto-fix if it fails."""
-    fn = create(description, runtime=runtime)
-    errors = []
-    
-    for attempt in range(max_attempts):
-        try:
-            # Test with a sample input
-            fn(text="test")
-            return fn
-        except Exception as e:
-            errors.append(f"Attempt {attempt + 1}: {e}")
-            fn = fix(
-                description=description,
-                code="<source>",
-                error_log="\n".join(errors),
-                runtime=runtime,
-            )
-    
-    return fn  # Best effort
+def answer(question: str) -> str:
+    if "JSON" in question:
+        return "Return a JSON object with keys sentiment and confidence."
+    return "Prefer the safest interpretation."
+
+fixed = fix(fn=analyze, runtime=runtime, on_question=answer)
 ```
+
+如果模型不确定修哪里，可以先问，再继续生成最终代码。
+
+### create + fix + retry 模式
+
+```python
+def create_with_retry(description, runtime, sample_kwargs, attempts=3):
+    fn = create(description, runtime=runtime)
+
+    for _ in range(attempts):
+        try:
+            fn(**sample_kwargs)
+            return fn
+        except Exception:
+            fn = fix(
+                fn=fn,
+                runtime=runtime,
+                instruction="Make the output schema explicit and validate edge cases.",
+            )
+
+    return fn
+```
+
+这个模式适合“先生成，再用真实样例验证，不对就继续修”的工作流。
