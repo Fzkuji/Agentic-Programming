@@ -194,6 +194,12 @@ def test_runtime_no_call_raises():
         func()
 
 
+def test_runtime_rejects_zero_retries():
+    """max_retries must allow at least one attempt."""
+    with pytest.raises(ValueError, match="max_retries"):
+        Runtime(call=echo_call, max_retries=0)
+
+
 def test_runtime_subclass():
     """Runtime can be subclassed with custom _call."""
     class CustomRuntime(Runtime):

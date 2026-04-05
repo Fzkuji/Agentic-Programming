@@ -61,6 +61,9 @@ class Runtime:
             max_retries: Maximum number of exec() attempts before raising.
                          Default 2 (try once, retry once on failure).
         """
+        if max_retries < 1:
+            raise ValueError("max_retries must be >= 1")
+
         self._call_fn = call
         self.model = model
         self.max_retries = max_retries
