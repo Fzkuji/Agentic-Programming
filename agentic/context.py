@@ -401,7 +401,7 @@ class Context:
                 continue
             render_level = level or c.render
             if render_level != "silent":
-                indent = "  " * depth
+                indent = "    " * depth
                 lines.append(c._render_traceback(indent, render_level))
                 if c.children and not (c.compress and c.status != "running"):
                     lines.append(c._render_branch_traceback(render_level, depth + 1, include, exclude))

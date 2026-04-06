@@ -215,6 +215,33 @@ def test_path_property():
     assert "child_fn" in root.children[0].path
 
 
+def test_summarize_branch_uses_consistent_indentation():
+    """Expanded branch children align with the surrounding traceback indentation."""
+    @agentic_function
+    def leaf():
+        return "leaf done"
+
+    @agentic_function
+    def branch_node():
+        leaf()
+        return "branch done"
+
+    @agentic_function
+    def outer():
+        branch_node()
+        return inspect()
+
+    @agentic_function
+    def inspect():
+        return "ready"
+
+    outer()
+    summary = outer.context.children[1].summarize(branch=["branch_node"])
+
+    assert "        - outer.branch_node()" in summary
+    assert "            - outer.branch_node.leaf()" in summary
+
+
 def test_duration():
     """duration_ms is non-negative."""
     @agentic_function
