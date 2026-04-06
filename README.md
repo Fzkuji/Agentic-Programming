@@ -9,6 +9,12 @@
     A programming paradigm where Python and LLM co-execute functions.
   </p>
   <p align="center">
+    <a href="https://pypi.org/project/agentic-programming/"><img src="https://img.shields.io/pypi/v/agentic-programming?color=blue" alt="PyPI"></a>
+    <a href="https://github.com/Fzkuji/Agentic-Programming/actions/workflows/ci.yml"><img src="https://github.com/Fzkuji/Agentic-Programming/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/Fzkuji/Agentic-Programming/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fzkuji/Agentic-Programming" alt="License"></a>
+    <a href="https://www.python.org/"><img src="https://img.shields.io/pypi/pyversions/agentic-programming" alt="Python"></a>
+  </p>
+  <p align="center">
     <a href="docs/README_CN.md">🇨🇳 中文</a>
   </p>
 </p>
