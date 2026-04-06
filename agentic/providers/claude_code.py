@@ -108,12 +108,11 @@ class ClaudeCodeRuntime(Runtime):
             self.reset()
 
         cmd = [
-            self.cli_path, "-p",
+            self.cli_path,
             "--permission-mode", "bypassPermissions",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
-            "--verbose",  # required for stream-json output in print mode
-            "--no-session-persistence",  # don't save to disk (process-only context)
+            "--verbose",
         ]
 
         if self.model and self.model != "sonnet":
