@@ -76,7 +76,8 @@ class ClaudeCodeRuntime(Runtime):
         timeout: int = 180,
         cli_path: str = None,
         session_id: str = "auto",
-        max_turns_per_process: int = 2,
+        max_turns_per_process: int = 10,
+        compact_every: int = 3,
     ):
         super().__init__(model=model)
         self.timeout = timeout
@@ -84,6 +85,7 @@ class ClaudeCodeRuntime(Runtime):
         self._proc: Optional[subprocess.Popen] = None
         self._lock = threading.Lock()
         self._turn_count = 0
+        self._compact_every = compact_every
         self._max_turns = max_turns_per_process
 
         if self.cli_path is None:
@@ -206,6 +208,11 @@ class ClaudeCodeRuntime(Runtime):
             # Read response lines until we get a result
             reply = self._read_response()
             self._turn_count += 1
+
+            # Compact context periodically to prevent bloat
+            if self._compact_every and self._turn_count % self._compact_every == 0:
+                self._compact()
+
             return reply
 
     def _read_response(self) -> str:
@@ -284,6 +291,28 @@ class ClaudeCodeRuntime(Runtime):
         if exc[0]:
             raise exc[0]
         return result[0]
+
+    def _compact(self):
+        """Send /compact to compress the conversation context.
+
+        This is a Claude Code slash command that summarizes prior messages
+        to free up context window space. Keeps the session alive without
+        restarting the process.
+        """
+        try:
+            compact_msg = json.dumps({
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "/compact"}],
+                },
+            })
+            self._proc.stdin.write(compact_msg + "\n")
+            self._proc.stdin.flush()
+            # Read the compact response (don't care about content)
+            self._read_response()
+        except Exception:
+            pass  # Best-effort, never fail
 
     def _encode_image(self, block: dict) -> Optional[dict]:
         """Convert an image content block to Anthropic base64 format."""
