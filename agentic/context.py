@@ -521,10 +521,9 @@ class Context:
 
     def _to_records(self, tree_depth: int = 0) -> list[dict]:
         """Flatten the tree into a list of dicts for JSONL export."""
-        records = [{
-            "depth": tree_depth,
-            **self._to_dict(),
-        }]
+        node = self._to_dict()
+        node["depth"] = tree_depth
+        records = [node]
         for c in self.children:
             records.extend(c._to_records(tree_depth + 1))
         return records

@@ -125,6 +125,27 @@ def test_save_jsonl(tmp_path):
         assert "status" in obj
 
 
+
+
+def test_save_jsonl_preserves_numeric_depth(tmp_path):
+    """JSONL export keeps the flattened depth field instead of nested node.path depth text."""
+    @agentic_function
+    def task():
+        step()
+        return "done"
+
+    @agentic_function
+    def step():
+        return "step done"
+
+    task()
+    path = tmp_path / "depth.jsonl"
+    task.context.save(path)
+
+    rows = [json.loads(line) for line in path.read_text().strip().split("\n")]
+    assert rows[0]["depth"] == 0
+    assert rows[1]["depth"] == 1
+
 def test_save_md(tmp_path):
     """save() to .md creates readable output."""
     @agentic_function
