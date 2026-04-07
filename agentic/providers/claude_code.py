@@ -144,6 +144,18 @@ class ClaudeCodeRuntime(Runtime):
         )
         self._turn_count = 0
 
+        # Persistent stdout reader thread + queue (avoids race conditions
+        # from creating multiple readline threads). Each call to
+        # _read_line_with_timeout previously spawned a new thread that
+        # blocked on readline(); old threads kept blocking even after timeout,
+        # causing multiple threads to race on the same pipe and lose data.
+        import queue
+        self._stdout_queue = queue.Queue()
+        self._stdout_thread = threading.Thread(
+            target=self._read_stdout_loop, daemon=True
+        )
+        self._stdout_thread.start()
+
         # Drain stderr in background to prevent buffer deadlock.
         # Without this, complex tasks that produce lots of stderr output
         # (e.g., multi-tool Bash calls) fill the 64KB pipe buffer, causing
@@ -343,24 +355,24 @@ class ClaudeCodeRuntime(Runtime):
         except Exception:
             pass  # Never fail for logging
 
+    def _read_stdout_loop(self):
+        """Persistent thread that reads stdout lines into a queue."""
+        try:
+            while self._proc and self._proc.poll() is None:
+                line = self._proc.stdout.readline()
+                if not line:
+                    break
+                self._stdout_queue.put(line)
+        except Exception:
+            pass
+
     def _read_line_with_timeout(self, remaining: float) -> Optional[str]:
-        """Read a single line from stdout with timeout using a thread."""
-        result = [None]
-        exc = [None]
-
-        def _read():
-            try:
-                result[0] = self._proc.stdout.readline()
-            except Exception as e:
-                exc[0] = e
-
-        thread = threading.Thread(target=_read, daemon=True)
-        thread.start()
-        thread.join(timeout=min(remaining, 5.0))
-
-        if exc[0]:
-            raise exc[0]
-        return result[0]
+        """Read a single line from the stdout queue with timeout."""
+        import queue
+        try:
+            return self._stdout_queue.get(timeout=min(remaining, 5.0))
+        except queue.Empty:
+            return None
 
     def _drain_stderr(self):
         """Read and discard stderr to prevent pipe buffer deadlock."""
