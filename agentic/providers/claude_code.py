@@ -144,6 +144,15 @@ class ClaudeCodeRuntime(Runtime):
         )
         self._turn_count = 0
 
+        # Drain stderr in background to prevent buffer deadlock.
+        # Without this, complex tasks that produce lots of stderr output
+        # (e.g., multi-tool Bash calls) fill the 64KB pipe buffer, causing
+        # the process to block on stderr.write() which also blocks stdout.
+        self._stderr_thread = threading.Thread(
+            target=self._drain_stderr, daemon=True
+        )
+        self._stderr_thread.start()
+
     def _call(self, content: list[dict], model: str = "sonnet", response_format: dict = None) -> str:
         """Send a message to the persistent claude process and read the response.
 
@@ -305,6 +314,16 @@ class ClaudeCodeRuntime(Runtime):
         if exc[0]:
             raise exc[0]
         return result[0]
+
+    def _drain_stderr(self):
+        """Read and discard stderr to prevent pipe buffer deadlock."""
+        try:
+            while self._proc and self._proc.poll() is None:
+                line = self._proc.stderr.readline()
+                if not line:
+                    break
+        except Exception:
+            pass
 
     def _compact(self):
         """Send /compact to compress the conversation context.
