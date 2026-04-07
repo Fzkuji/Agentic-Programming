@@ -229,8 +229,11 @@ class ClaudeCodeRuntime(Runtime):
                 self._proc.stdin.flush()
 
             # Read response lines until we get a result
-            reply = self._read_response()
+            reply, events = self._read_response()
             self._turn_count += 1
+
+            # Save intermediate events to log (not to LLM context)
+            self._save_turn_log(events)
 
             # Compact context periodically to prevent bloat
             if self._compact_every and self._turn_count % self._compact_every == 0:
@@ -238,16 +241,22 @@ class ClaudeCodeRuntime(Runtime):
 
             return reply
 
-    def _read_response(self) -> str:
+    def _read_response(self) -> tuple[str, list]:
         """Read lines from stdout until we get a result message.
 
         The timeout is per-line, not total. As long as the process keeps
         producing output (e.g., tool_use events during interactive mode),
         the deadline is extended. Timeout only fires when the process goes
         silent for self.timeout seconds.
+
+        Returns:
+            (result_text, events) — the final reply text and a list of
+            all intermediate events (for logging, not for LLM context).
         """
         deadline = time.time() + self.timeout
         result_text = None
+        events = []
+        start_time = time.time()
 
         while time.time() < deadline:
             # Check if process is still alive
@@ -276,25 +285,63 @@ class ClaudeCodeRuntime(Runtime):
                 continue
 
             msg_type = data.get("type", "")
+            elapsed = round(time.time() - start_time, 1)
 
-            # "result" marks the end of a turn
+            # Collect event for logging
+            event = {"type": msg_type, "elapsed": elapsed}
+
             if msg_type == "result":
                 result_text = data.get("result", "")
-                return result_text
+                usage = data.get("usage", {})
+                event["result"] = result_text[:200]
+                event["usage"] = {
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                    "cache_read": usage.get("cache_read_input_tokens", 0),
+                    "cache_create": usage.get("cache_creation_input_tokens", 0),
+                }
+                event["duration_ms"] = data.get("duration_ms", 0)
+                event["num_turns"] = data.get("num_turns", 0)
+                events.append(event)
+                return result_text, events
 
-            # "assistant" message with content
             if msg_type == "assistant" and "message" in data:
                 msg = data["message"]
                 if isinstance(msg, dict) and "content" in msg:
-                    texts = [
-                        b["text"] for b in msg["content"]
-                        if isinstance(b, dict) and b.get("type") == "text"
-                    ]
-                    if texts:
-                        result_text = "\n".join(texts)
-                        # Don't return yet — wait for "result" to mark end of turn
+                    for block in msg["content"]:
+                        if isinstance(block, dict):
+                            if block.get("type") == "text":
+                                event_text = {"type": "text", "elapsed": elapsed,
+                                              "text": block["text"][:200]}
+                                events.append(event_text)
+                                result_text = block["text"]
+                            elif block.get("type") == "tool_use":
+                                event_tool = {"type": "tool_use", "elapsed": elapsed,
+                                              "tool": block.get("name", "?"),
+                                              "input": str(block.get("input", {}))[:100]}
+                                events.append(event_tool)
+                    continue
+
+            # Other events (rate_limit, system, etc.)
+            events.append(event)
 
         raise TimeoutError(f"Claude Code CLI timed out (no output for {self.timeout}s)")
+
+    def _save_turn_log(self, events: list):
+        """Save intermediate events from a turn to a log file."""
+        try:
+            log_dir = os.path.join(os.path.dirname(__file__), "..", "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, "claude_code_turns.jsonl")
+            entry = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "turn": self._turn_count,
+                "events": events,
+            }
+            with open(log_file, "a") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass  # Never fail for logging
 
     def _read_line_with_timeout(self, remaining: float) -> Optional[str]:
         """Read a single line from stdout with timeout using a thread."""
