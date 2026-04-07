@@ -71,6 +71,18 @@ def main():
     p_skill.add_argument("name", help="Function name")
     _add_provider_args(p_skill)
 
+    # deep-work
+    p_deep = sub.add_parser("deep-work", help="Run autonomous agent on a complex task with quality evaluation")
+    p_deep.add_argument("task", help="The task to accomplish")
+    p_deep.add_argument("--level", "-l", default="bachelor",
+                        choices=["high_school", "bachelor", "master", "phd", "professor"],
+                        help="Quality level (default: bachelor)")
+    p_deep.add_argument("--max-steps", type=int, default=100, help="Max total steps (default: 100)")
+    p_deep.add_argument("--max-revisions", type=int, default=5, help="Max evaluation cycles (default: 5)")
+    p_deep.add_argument("--no-interactive", action="store_true",
+                        help="Skip clarification questions, start immediately")
+    _add_provider_args(p_deep)
+
     # providers
     sub.add_parser("providers", help="Show available LLM providers and detection status")
 
@@ -95,6 +107,13 @@ def main():
         _cmd_run(args.name, args.arg, args.provider, args.model)
     elif args.command == "create-skill":
         _cmd_create_skill(args.name, args.provider, args.model)
+    elif args.command == "deep-work":
+        _cmd_deep_work(
+            args.task, args.level,
+            args.provider, args.model,
+            args.max_steps, args.max_revisions,
+            not args.no_interactive,
+        )
 
 
 def _get_runtime(provider=None, model=None):
@@ -319,6 +338,65 @@ def _cmd_create_skill(name, provider=None, model=None):
     print(f"Creating skill for '{name}'...")
     path = create_skill(fn_name=name, description=description, code=code, runtime=runtime)
     print(f"  Skill created at {path}")
+
+
+def _cmd_deep_work(task, level, provider, model,
+                    max_steps, max_revisions, interactive):
+    """Run deep work session."""
+    from agentic.functions.deep_work import deep_work
+
+    runtime = _get_runtime(provider, model)
+
+    print(f"Deep work session")
+    print(f"  Task: {task}")
+    print(f"  Level: {level}")
+    print(f"  Runtime: {runtime.__class__.__name__}")
+    print()
+
+    def on_update(result):
+        rtype = result.get("type", "?")
+        if rtype == "clarify":
+            plan = result.get("plan_summary", "")
+            if plan:
+                print(f"  Plan: {plan[:200]}")
+        elif rtype == "step":
+            action = result.get("action", "?")
+            print(f"  [step] {action}")
+            if result.get("ready_for_review"):
+                print(f"  → Submitting for evaluation...")
+        elif rtype == "evaluation":
+            score = result.get("score", "?")
+            verdict = result.get("verdict", "?")
+            passed = result.get("passed", False)
+            icon = "PASS" if passed else "FAIL"
+            print(f"  [eval] [{icon}] Score: {score}/10 — {verdict}")
+            if not passed:
+                feedback = result.get("feedback", "")
+                if feedback:
+                    print(f"  Feedback: {feedback[:200]}")
+                print(f"  → Revising...")
+
+    result = deep_work(
+        task=task,
+        level=level,
+        runtime=runtime,
+        max_steps=max_steps,
+        max_revisions=max_revisions,
+        callback=on_update,
+        interactive=interactive,
+    )
+
+    print()
+    if result.get("done"):
+        evals = result.get("evaluations", [])
+        final_score = evals[-1].get("score", "?") if evals else "?"
+        print(f"Completed in {result['steps']} steps, {result.get('revisions', 0)} revision(s).")
+        if evals:
+            print(f"Final score: {final_score}/10")
+    else:
+        print(f"Stopped after {result['steps']} steps.")
+        if result.get("error"):
+            print(f"Reason: {result['error']}")
 
 
 if __name__ == "__main__":

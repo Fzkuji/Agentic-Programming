@@ -13,3 +13,11 @@ build/
 # Runtime/generated artifacts
 agentic/logs/
 agentic/functions/
+
+# But keep built-in functions
+!agentic/functions/__init__.py
+!agentic/functions/_utils.py
+!agentic/functions/general_action.py
+!agentic/functions/agent_loop.py
+!agentic/functions/wait.py
+!agentic/functions/deep_work.py

@@ -1,19 +1,21 @@
 """
 Claude Code CLI provider — routes LLM calls through the Claude Code CLI.
 
-Uses `claude -p` (print mode) which is covered by Claude Code subscription.
-No API key needed — uses the logged-in Claude Code session.
+Uses Claude Code in SDK/agent mode (stream-json) which is covered by
+Claude Code subscription. No API key needed — uses the logged-in session.
 
 Architecture:
   A single long-running `claude` process is kept alive for the entire runtime.
   Messages are sent via stdin (stream-json format) and responses read from
-  stdout. This eliminates process startup overhead (~2-3s per call) and
-  enables natural KV cache reuse across turns.
+  stdout. The agent runs in full mode — it can use tools, edit files, and
+  execute commands. This eliminates process startup overhead (~2-3s per call)
+  and enables natural KV cache reuse across turns.
 
 Supports:
 - Text content blocks
 - Image content blocks (base64 encoded via stream-json)
 - Session continuity (single persistent process)
+- Full agent execution (tool use, file editing, bash commands)
 
 Unsupported (with warnings):
 - Audio content blocks (Claude CLI does not support audio input)
@@ -25,12 +27,17 @@ Usage:
 
     runtime = ClaudeCodeRuntime(model="sonnet")
 
+    # Reasoning mode (exec)
     @agentic_function
     def observe(task):
         return runtime.exec(content=[
             {"type": "text", "text": f"Find: {task}"},
             {"type": "image", "path": "screenshot.png"},
         ])
+
+    # Execution mode (execute)
+    result = runtime.execute("Create a file called hello.py with a hello world script")
+    # Returns "DONE" or "ERROR: ..."
 """
 
 from __future__ import annotations
@@ -55,19 +62,26 @@ class ClaudeCodeRuntime(Runtime):
     """
     Runtime that routes LLM calls through a persistent Claude Code CLI process.
 
-    A single `claude -p` process is started on first call and kept alive.
-    All subsequent calls reuse the same process via stdin/stdout streaming,
-    eliminating the ~2-3s startup overhead per call.
+    Runs Claude Code in SDK/agent mode (not -p print mode). The agent has
+    full capabilities: tool use, file editing, bash commands, etc.
+
+    A single process is started on first call and kept alive. All subsequent
+    calls reuse the same process via stdin/stdout streaming, eliminating
+    the ~2-3s startup overhead per call.
 
     Requires `claude` CLI to be installed and logged in.
     Uses Claude Code subscription (no separate API key needed).
 
     Args:
         model:      Model to use (default: "sonnet"). Passed to --model flag.
-        timeout:    Max seconds per LLM call (default: 300).
+        timeout:    Max seconds per LLM call (default: 600). In SDK agent mode
+                    the agent may use tools (file editing, bash), so calls
+                    take longer than pure text responses.
         cli_path:   Path to claude CLI binary (auto-detected if not specified).
         session_id: Kept for API compat. Ignored (persistent process manages
                     its own session internally).
+        max_turns_per_process: Restart process after this many turns to
+                    prevent context window overflow (default: 20).
     """
 
     def __init__(

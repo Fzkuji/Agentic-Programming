@@ -1,13 +1,16 @@
 """
 Gemini CLI provider — routes LLM calls through the Gemini CLI.
 
-Uses `gemini -p` (prompt mode) which uses your Google account login.
-No API key needed.
+Uses Gemini CLI in agent mode. No API key needed — uses your Google account.
+
+The CLI runs as a full agent with tool use, file editing, and command
+execution capabilities (when --yolo is enabled).
 
 Supports:
 - Text content blocks
 - Session continuity (via --resume <session_id>)
 - JSON output format for clean response extraction
+- Full agent execution (tool use, file editing, commands)
 
 Unsupported (with warnings):
 - Image content blocks (CLI does not support image input)
@@ -18,11 +21,15 @@ Usage:
 
     runtime = GeminiCLIRuntime()
 
+    # Reasoning mode
     @agentic_function
     def observe(task):
         return runtime.exec(content=[
             {"type": "text", "text": f"Find: {task}"},
         ])
+
+    # Execution mode
+    result = runtime.execute("Create a hello.py file")
 """
 
 from __future__ import annotations
@@ -85,7 +92,11 @@ class GeminiCLIRuntime(Runtime):
         Uses --output-format json to get structured responses and
         --resume to maintain session continuity across calls.
         """
-        # Build prompt from content blocks
+        prompt = self._build_prompt(content, response_format)
+        return self._run_gemini(prompt, model)
+
+    def _build_prompt(self, content: list[dict], response_format: dict = None) -> str:
+        """Build prompt string from content blocks."""
         parts = []
         for block in content:
             block_type = block.get("type", "text")
@@ -117,8 +128,11 @@ class GeminiCLIRuntime(Runtime):
         if response_format:
             prompt += f"\n\nRespond with ONLY valid JSON matching this schema: {json.dumps(response_format)}"
 
-        # Build command
-        cmd = [self.cli_path, "-p", prompt, "--output-format", "json"]
+        return prompt
+
+    def _run_gemini(self, prompt: str, model: str = "default") -> str:
+        """Build and run the gemini CLI command."""
+        cmd = [self.cli_path, prompt, "--output-format", "json"]
 
         if model and model != "default":
             cmd.extend(["-m", model])

@@ -35,6 +35,10 @@ from agentic.function import agentic_function
 from agentic.runtime import Runtime
 from agentic.meta_functions import create, create_app, fix, create_skill
 from agentic.providers import detect_provider, create_runtime
+from agentic.functions.general_action import general_action
+from agentic.functions.agent_loop import agent_loop
+from agentic.functions.wait import wait
+from agentic.functions.deep_work import deep_work
 
 __all__ = [
     "agentic_function",
@@ -45,4 +49,8 @@ __all__ = [
     "fix",
     "detect_provider",
     "create_runtime",
+    "general_action",
+    "agent_loop",
+    "wait",
+    "deep_work",
 ]
