@@ -154,6 +154,27 @@ def test_save_accepts_pathlike_jsonl(tmp_path):
     assert json.loads(lines[0])["name"] == "task"
 
 
+def test_save_json_tree(tmp_path):
+    """save() to .json exports one nested tree object."""
+    @agentic_function
+    def task():
+        step()
+        return "done"
+
+    @agentic_function
+    def step():
+        return "step done"
+
+    task()
+    path = tmp_path / "tree.json"
+    task.context.save(path)
+
+    obj = json.loads(path.read_text())
+    assert obj["name"] == "task"
+    assert obj["children"][0]["name"] == "step"
+    assert obj["children"][0]["output"] == "step done"
+
+
 def test_save_accepts_pathlike_md(tmp_path):
     """save() accepts pathlib.Path for Markdown output."""
     @agentic_function
@@ -175,7 +196,7 @@ def test_save_rejects_unsupported_extension(tmp_path):
 
     task()
     path = tmp_path / "bad.txt"
-    with pytest.raises(ValueError, match=r"Use \.md or \.jsonl"):
+    with pytest.raises(ValueError, match=r"Use \.md, \.json, or \.jsonl"):
         task.context.save(path)
 
 

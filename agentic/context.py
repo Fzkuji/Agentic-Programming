@@ -477,7 +477,8 @@ class Context:
         """
         Save the full tree to a file.
 
-        .md   → human-readable tree view (same as tree())
+        .md    → human-readable tree view (same as tree())
+        .json  → full tree as one nested JSON object
         .jsonl → one JSON object per node, machine-readable
 
         Accepts both plain strings and pathlib.Path / os.PathLike objects.
@@ -488,19 +489,21 @@ class Context:
         if path_str.endswith(".md"):
             with open(path_str, "w") as f:
                 f.write(self.tree())
+        elif path_str.endswith(".json"):
+            with open(path_str, "w") as f:
+                json.dump(self._to_dict(), f, ensure_ascii=False, default=str, indent=2)
         elif path_str.endswith(".jsonl"):
             with open(path_str, "w") as f:
                 for record in self._to_records():
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         else:
             raise ValueError(
-                f"Unsupported file extension: {path_str}. Use .md or .jsonl."
+                f"Unsupported file extension: {path_str}. Use .md, .json, or .jsonl."
             )
 
-    def _to_records(self, tree_depth: int = 0) -> list[dict]:
-        """Flatten the tree into a list of dicts for JSONL export."""
-        records = [{
-            "depth": tree_depth,
+    def _to_dict(self) -> dict:
+        """Serialize the full tree into one nested dict for JSON export."""
+        return {
             "path": self.path,
             "name": self.name,
             "prompt": self.prompt,
@@ -513,6 +516,14 @@ class Context:
             "render": self.render,
             "compress": self.compress,
             "duration_ms": self.duration_ms,
+            "children": [c._to_dict() for c in self.children],
+        }
+
+    def _to_records(self, tree_depth: int = 0) -> list[dict]:
+        """Flatten the tree into a list of dicts for JSONL export."""
+        records = [{
+            "depth": tree_depth,
+            **self._to_dict(),
         }]
         for c in self.children:
             records.extend(c._to_records(tree_depth + 1))
