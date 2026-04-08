@@ -1124,7 +1124,9 @@ function connect() {
     try {
       const msg = JSON.parse(e.data);
       handleMessage(msg);
-    } catch(err) {}
+    } catch(err) {
+      console.error('[ws.onmessage] error:', err, 'data:', e.data.substring(0, 200));
+    }
   };
 
   ws.onclose = () => {
@@ -1246,31 +1248,38 @@ function mergeChildren(existing, incoming) {
 
 // ===== Chat =====
 function sendMessage() {
-  const input = document.getElementById('chatInput');
-  const text = input.value.trim();
-  if (!text) return;
+  try {
+    const input = document.getElementById('chatInput');
+    const text = input.value.trim();
+    if (!text) return;
 
-  // Hide welcome
-  const welcome = document.getElementById('welcomeScreen');
-  if (welcome) welcome.style.display = 'none';
+    // Hide welcome
+    const welcome = document.getElementById('welcomeScreen');
+    if (welcome) welcome.style.display = 'none';
 
-  // Add user message to UI
-  addUserMessage(text);
-  input.value = '';
-  autoResize(input);
+    // Add user message to UI
+    addUserMessage(text);
+    input.value = '';
+    autoResize(input);
 
-  // Send to server
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      action: 'chat',
-      text: text,
-      conv_id: currentConvId
-    }));
+    // Send to server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        action: 'chat',
+        text: text,
+        conv_id: currentConvId
+      }));
+      console.log('[sendMessage] sent:', text);
+    } else {
+      console.error('[sendMessage] WebSocket not connected, state:', ws ? ws.readyState : 'null');
+    }
+
+    // Add a pending assistant message placeholder
+    const msgId = 'pending_' + Date.now();
+    addAssistantPlaceholder(msgId);
+  } catch(e) {
+    console.error('[sendMessage] error:', e);
   }
-
-  // Add a pending assistant message placeholder
-  const msgId = 'pending_' + Date.now();
-  addAssistantPlaceholder(msgId);
 }
 
 function addUserMessage(text) {
