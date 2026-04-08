@@ -388,18 +388,30 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
         # Validate create() description before executing
         if func_name == "create" and "description" in kwargs:
             desc = kwargs["description"].strip()
-            # Check for gibberish / too short / not meaningful
             words = [w for w in desc.split() if len(w) > 1]
-            has_ascii_letters = sum(1 for c in desc if c.isalpha()) > len(desc) * 0.3
-            if len(desc) < 10 or len(words) < 3 or not has_ascii_letters:
+            # Must have enough meaningful words describing a function
+            # Check for action verbs / function-like keywords
+            action_keywords = (
+                "reverse", "sort", "count", "extract", "parse", "convert", "calculate",
+                "generate", "find", "search", "filter", "format", "validate", "check",
+                "translate", "summarize", "analyze", "split", "merge", "encode", "decode",
+                "read", "write", "get", "set", "create", "delete", "update", "return",
+                "process", "transform", "compute", "detect", "classify", "predict",
+                "反转", "排序", "计算", "提取", "解析", "转换", "生成", "查找", "搜索",
+                "过滤", "格式化", "验证", "检查", "翻译", "总结", "分析", "拆分", "合并",
+                "编码", "解码", "读取", "写入", "获取", "设置", "处理", "检测", "分类",
+            )
+            desc_lower = desc.lower()
+            has_action = any(kw in desc_lower for kw in action_keywords)
+            if len(desc) < 10 or len(words) < 3 or not has_action:
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
                     "content": (
-                        f"The description seems unclear: \"{desc}\"\n\n"
-                        "Could you provide a clearer description? For example:\n"
+                        f"I'm not sure what function to create from: \"{desc}\"\n\n"
+                        "Please describe what the function should **do**. For example:\n"
                         "- `create a function that reverses a string`\n"
                         "- `create a function that extracts emails from text`\n"
-                        "- `create a function that calculates fibonacci numbers`"
+                        "- `create 一个计算斐波那契数列的函数`"
                     ),
                     "function": func_name,
                 })
