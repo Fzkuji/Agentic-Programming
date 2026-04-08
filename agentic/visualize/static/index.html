@@ -130,7 +130,69 @@ html, body {
   color: var(--text-bright);
 }
 
-/* Sidebar sections */
+/* Sidebar panels (collapsible + resizable) */
+.sidebar-panels {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.sidebar-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 32px;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-panel:not(.panel-collapsed) {
+  flex: 1;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  user-select: none;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  transition: background var(--transition);
+}
+
+.panel-header:hover { background: var(--bg-hover); }
+
+.panel-chevron {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+  display: inline-block;
+}
+
+.panel-collapsed .panel-chevron { transform: rotate(-90deg); }
+.panel-collapsed .panel-body { display: none; }
+
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.panel-resize {
+  height: 4px;
+  cursor: ns-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.panel-resize:hover, .panel-resize.dragging {
+  background: var(--accent-blue);
+}
+
+/* Keep existing section styles */
 .sidebar-section {
   flex: 1;
   overflow-y: auto;
@@ -937,20 +999,35 @@ html, body {
     </div>
     <div class="new-chat-btn" onclick="newConversation()">+ New conversation</div>
 
-    <!-- Conversations -->
-    <div class="sidebar-section" id="convList">
-      <div class="sidebar-section-title">Conversations</div>
-    </div>
+    <div class="sidebar-panels">
+      <!-- Conversations -->
+      <div class="sidebar-panel" id="convPanel" data-panel="conv">
+        <div class="panel-header" onclick="togglePanel('conv')">
+          <span class="panel-chevron" id="convChevron">&#9660;</span>
+          <span class="sidebar-section-title" style="padding:0">Conversations</span>
+        </div>
+        <div class="panel-body" id="convList"></div>
+        <div class="panel-resize" data-resize="conv"></div>
+      </div>
 
-    <!-- Functions -->
-    <div class="sidebar-functions" id="fnList">
-      <div class="sidebar-section-title">Functions</div>
-    </div>
+      <!-- Functions -->
+      <div class="sidebar-panel" id="fnPanel" data-panel="fn">
+        <div class="panel-header" onclick="togglePanel('fn')">
+          <span class="panel-chevron" id="fnChevron">&#9660;</span>
+          <span class="sidebar-section-title" style="padding:0">Functions</span>
+        </div>
+        <div class="panel-body" id="fnList"></div>
+        <div class="panel-resize" data-resize="fn"></div>
+      </div>
 
-    <!-- Provider Selector -->
-    <div class="provider-selector" id="providerSelector">
-      <div class="sidebar-section-title">Provider</div>
-      <div id="providerList"></div>
+      <!-- Provider Selector -->
+      <div class="sidebar-panel" id="provPanel" data-panel="prov">
+        <div class="panel-header" onclick="togglePanel('prov')">
+          <span class="panel-chevron" id="provChevron">&#9660;</span>
+          <span class="sidebar-section-title" style="padding:0">Provider</span>
+        </div>
+        <div class="panel-body" id="providerList"></div>
+      </div>
     </div>
   </div>
 
@@ -1519,7 +1596,7 @@ function toggleSidebar() {
 
 function renderConversations() {
   const container = document.getElementById('convList');
-  let html = '<div class="sidebar-section-title">Conversations</div>';
+  let html = '';
   const convs = Object.values(conversations).sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
   if (convs.length === 0) {
     html += '<div style="padding:8px 16px;font-size:12px;color:var(--text-muted)">No conversations yet</div>';
@@ -1535,7 +1612,7 @@ function renderConversations() {
 
 function renderFunctions() {
   const container = document.getElementById('fnList');
-  let html = '<div class="sidebar-section-title">Functions</div>';
+  let html = '';
 
   const categories = { meta: [], builtin: [], user: [] };
   for (const f of availableFunctions) {
@@ -1799,6 +1876,55 @@ setInterval(() => {
     ws.send('ping');
   }
 }, 30000);
+
+// ===== Panel Collapse & Resize =====
+
+function togglePanel(name) {
+  const panel = document.querySelector('[data-panel="' + name + '"]');
+  if (!panel) return;
+  panel.classList.toggle('panel-collapsed');
+}
+
+// Drag-to-resize panels
+(function() {
+  let dragging = null;
+  let startY = 0;
+  let startHeight = 0;
+
+  document.addEventListener('mousedown', function(e) {
+    const handle = e.target.closest('.panel-resize');
+    if (!handle) return;
+    e.preventDefault();
+    dragging = handle.closest('.sidebar-panel');
+    startY = e.clientY;
+    const body = dragging.querySelector('.panel-body');
+    startHeight = body ? body.offsetHeight : 100;
+    handle.classList.add('dragging');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!dragging) return;
+    const dy = e.clientY - startY;
+    const body = dragging.querySelector('.panel-body');
+    if (body) {
+      const newH = Math.max(40, startHeight + dy);
+      body.style.maxHeight = newH + 'px';
+      body.style.flex = 'none';
+      body.style.height = newH + 'px';
+    }
+  });
+
+  document.addEventListener('mouseup', function() {
+    if (!dragging) return;
+    const handle = dragging.querySelector('.panel-resize');
+    if (handle) handle.classList.remove('dragging');
+    dragging = null;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  });
+})();
 
 // ===== Provider Switching =====
 
