@@ -385,37 +385,39 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
                 })
                 return
 
-        # Validate create() description before executing
+        # Validate create() description — ask LLM if it's a clear function request
         if func_name == "create" and "description" in kwargs:
             desc = kwargs["description"].strip()
-            words = [w for w in desc.split() if len(w) > 1]
-            # Must have enough meaningful words describing a function
-            # Check for action verbs / function-like keywords
-            action_keywords = (
-                "reverse", "sort", "count", "extract", "parse", "convert", "calculate",
-                "generate", "find", "search", "filter", "format", "validate", "check",
-                "translate", "summarize", "analyze", "split", "merge", "encode", "decode",
-                "read", "write", "get", "set", "create", "delete", "update", "return",
-                "process", "transform", "compute", "detect", "classify", "predict",
-                "反转", "排序", "计算", "提取", "解析", "转换", "生成", "查找", "搜索",
-                "过滤", "格式化", "验证", "检查", "翻译", "总结", "分析", "拆分", "合并",
-                "编码", "解码", "读取", "写入", "获取", "设置", "处理", "检测", "分类",
-            )
-            desc_lower = desc.lower()
-            has_action = any(kw in desc_lower for kw in action_keywords)
-            if len(desc) < 10 or len(words) < 3 or not has_action:
+            if len(desc) < 5:
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
-                    "content": (
-                        f"I'm not sure what function to create from: \"{desc}\"\n\n"
-                        "Please describe what the function should **do**. For example:\n"
-                        "- `create a function that reverses a string`\n"
-                        "- `create a function that extracts emails from text`\n"
-                        "- `create 一个计算斐波那契数列的函数`"
-                    ),
+                    "content": "Description too short. What function would you like to create?",
                     "function": func_name,
                 })
                 return
+            try:
+                rt = _get_runtime()
+                check = rt.exec(
+                    f'Is the following a clear description of a Python function to create? '
+                    f'Reply ONLY "yes" or "no, <reason>".\n\n'
+                    f'Description: "{desc}"'
+                )
+                check_lower = check.strip().lower()
+                if check_lower.startswith("no"):
+                    reason = check.strip()[2:].strip().lstrip(",").lstrip(":").strip() or "unclear description"
+                    _broadcast_chat_response(conv_id, msg_id, {
+                        "type": "result",
+                        "content": (
+                            f"I couldn't understand what function to create: {reason}\n\n"
+                            "Please describe what the function should **do**. For example:\n"
+                            "- `create a function that reverses a string`\n"
+                            "- `create a function that extracts emails from text`"
+                        ),
+                        "function": func_name,
+                    })
+                    return
+            except Exception:
+                pass  # If validation fails, proceed anyway
 
         # Execute
         _broadcast_chat_response(conv_id, msg_id, {
