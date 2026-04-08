@@ -69,10 +69,21 @@ html, body {
 }
 
 .sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  border-right: none;
+  width: 48px;
+  min-width: 48px;
 }
+.sidebar.collapsed .sidebar-section,
+.sidebar.collapsed .sidebar-section-title,
+.sidebar.collapsed .new-chat-btn span,
+.sidebar.collapsed .fn-category,
+.sidebar.collapsed .fn-item-main .fn-name,
+.sidebar.collapsed .fn-item-main .fn-desc,
+.sidebar.collapsed .fn-actions,
+.sidebar.collapsed .conv-title,
+.sidebar.collapsed .provider-selector { display: none; }
+.sidebar.collapsed .new-chat-btn { justify-content: center; padding: 8px; font-size: 18px; }
+.sidebar.collapsed .sidebar-header { justify-content: center; padding: 8px; }
+.sidebar.collapsed .sidebar-header .sidebar-title { display: none; }
 
 .sidebar-header {
   padding: 16px;
@@ -906,6 +917,16 @@ html, body {
 .syn-builtin { color: var(--accent-yellow); }
 .syn-self { color: var(--accent-red); }
 
+/* Provider selector */
+.provider-selector { padding: 8px 12px; border-top: 1px solid var(--border); margin-top: auto; }
+.provider-item { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-radius: var(--radius); cursor: pointer; font-size: 12px; color: var(--text-secondary); transition: all var(--transition); }
+.provider-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.provider-item.active { color: var(--accent-green); }
+.provider-item.unavailable { opacity: 0.4; cursor: default; }
+.provider-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+.provider-item.active .provider-dot { background: var(--accent-green); }
+.provider-item.available .provider-dot { background: var(--accent-blue); }
+
 /* Running node pulse animation */
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
 .node-running { animation: pulse 1.5s ease-in-out infinite; }
@@ -931,6 +952,12 @@ html, body {
     <!-- Functions -->
     <div class="sidebar-functions" id="fnList">
       <div class="sidebar-section-title">Functions</div>
+    </div>
+
+    <!-- Provider Selector -->
+    <div class="provider-selector" id="providerSelector">
+      <div class="sidebar-section-title">Provider</div>
+      <div id="providerList"></div>
     </div>
   </div>
 
@@ -1073,6 +1100,9 @@ function handleMessage(msg) {
     case 'status':
       isPaused = msg.paused;
       updatePauseBtn();
+      break;
+    case 'provider_changed':
+      loadProviders();
       break;
     case 'pong':
       break;
@@ -1777,6 +1807,40 @@ setInterval(() => {
   }
 }, 30000);
 
+// ===== Provider Switching =====
+
+async function loadProviders() {
+  try {
+    const resp = await fetch('/api/providers');
+    const providers = await resp.json();
+    renderProviders(providers);
+  } catch(e) {}
+}
+
+function renderProviders(providers) {
+  const el = document.getElementById('providerList');
+  if (!el) return;
+  el.innerHTML = providers.map(p => {
+    const cls = p.active ? 'provider-item active' : (p.available ? 'provider-item available' : 'provider-item unavailable');
+    return '<div class="' + cls + '" onclick="' + (p.available ? "switchProvider('" + p.name + "')" : '') + '" title="' + escAttr(p.label) + '">' +
+      '<span class="provider-dot"></span>' +
+      '<span>' + escHtml(p.name) + '</span>' +
+    '</div>';
+  }).join('');
+}
+
+async function switchProvider(name) {
+  try {
+    const resp = await fetch('/api/provider/' + encodeURIComponent(name), { method: 'POST' });
+    const data = await resp.json();
+    if (data.switched) {
+      loadProviders();
+    } else if (data.error) {
+      alert('Switch failed: ' + data.error);
+    }
+  } catch(e) { alert('Switch failed: ' + e.message); }
+}
+
 // ===== Code Viewer =====
 
 async function viewSource(name) {
@@ -1884,6 +1948,7 @@ async function deleteFunction(name) {
 
 // ===== Init =====
 connect();
+loadProviders();
 </script>
 </body>
 </html>

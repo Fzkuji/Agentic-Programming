@@ -59,63 +59,92 @@ _conversations_lock = threading.Lock()
 
 # Cached runtime (created once, reused)
 _cached_runtime = None
+_cached_provider_name = None
 _runtime_lock = threading.Lock()
 
 
 def _get_runtime(conv_id: str = None, msg_id: str = None):
-    """Get or create a cached runtime instance.
-
-    Prefers API providers (fast) over CLI providers (slow) for the visualizer,
-    since interactive use requires quick responses.
-
-    If conv_id and msg_id are provided, broadcasts status updates during setup.
-    """
+    """Get or create a cached runtime instance."""
     global _cached_runtime
     if _cached_runtime is not None:
         return _cached_runtime
-    with _runtime_lock:
-        if _cached_runtime is not None:
-            return _cached_runtime
+    # Default to codex if available, then API providers
+    _switch_runtime("auto", conv_id, msg_id)
+    return _cached_runtime
 
+
+def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
+    """Switch to a different runtime provider."""
+    global _cached_runtime, _cached_provider_name
+
+    with _runtime_lock:
         if conv_id and msg_id:
             _broadcast_chat_response(conv_id, msg_id, {
                 "type": "status",
-                "content": "Setting up runtime...",
+                "content": f"Switching to {provider}...",
             })
 
-        import concurrent.futures
         from agentic.providers import create_runtime
 
-        def _try_create():
-            # Try API providers first (much faster for interactive use)
-            for api_provider in ("gemini", "anthropic", "openai"):
-                try:
-                    return create_runtime(provider=api_provider)
-                except Exception:
-                    continue
-            # Fall back to CLI providers
-            return create_runtime()
+        try:
+            if provider == "auto":
+                # Try CLI first (codex), then API
+                for p in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
+                    try:
+                        _cached_runtime = create_runtime(provider=p)
+                        _cached_provider_name = p
+                        break
+                    except Exception:
+                        continue
+                if _cached_runtime is None:
+                    raise RuntimeError("No provider available")
+            else:
+                _cached_runtime = create_runtime(provider=provider)
+                _cached_provider_name = provider
+        except Exception as e:
+            if conv_id and msg_id:
+                _broadcast_chat_response(conv_id, msg_id, {
+                    "type": "error",
+                    "content": f"Failed to set up {provider}: {e}",
+                })
+            raise
 
-        # Use a thread pool to enforce a 10-second timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_try_create)
-            try:
-                _cached_runtime = future.result(timeout=10)
-            except concurrent.futures.TimeoutError:
-                if conv_id and msg_id:
-                    _broadcast_chat_response(conv_id, msg_id, {
-                        "type": "error",
-                        "content": "Runtime setup timed out after 10 seconds. Check your provider configuration.",
-                    })
-                raise TimeoutError("Runtime setup timed out after 10 seconds")
-
-        if conv_id and msg_id and _cached_runtime is not None:
+        info = f"{type(_cached_runtime).__name__} ({_cached_provider_name}: {_cached_runtime.model})"
+        if conv_id and msg_id:
             _broadcast_chat_response(conv_id, msg_id, {
                 "type": "status",
-                "content": f"Using {type(_cached_runtime).__name__} (provider: {_cached_runtime.model})...",
+                "content": f"Using {info}",
             })
+        # Broadcast provider change to all clients
+        _broadcast(json.dumps({
+            "type": "provider_changed",
+            "data": {"provider": _cached_provider_name, "runtime": type(_cached_runtime).__name__, "model": _cached_runtime.model},
+        }))
 
         return _cached_runtime
+
+
+def _list_providers() -> list[dict]:
+    """List available providers and their status."""
+    import shutil
+    result = []
+    checks = [
+        ("codex", "Codex CLI", lambda: shutil.which("codex") is not None),
+        ("claude-code", "Claude Code CLI", lambda: shutil.which("claude") is not None),
+        ("gemini-cli", "Gemini CLI", lambda: shutil.which("gemini") is not None),
+        ("anthropic", "Anthropic API", lambda: bool(os.environ.get("ANTHROPIC_API_KEY"))),
+        ("openai", "OpenAI API", lambda: bool(os.environ.get("OPENAI_API_KEY"))),
+        ("gemini", "Gemini API", lambda: bool(os.environ.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_GENERATIVE_AI_API_KEY"))),
+    ]
+    for name, label, check in checks:
+        available = check()
+        result.append({
+            "name": name,
+            "label": label,
+            "available": available,
+            "active": name == _cached_provider_name,
+        })
+    return result
 
 
 def _find_root(ctx_data: dict) -> Optional[dict]:
@@ -776,6 +805,18 @@ def create_app():
         resume_execution()
         _broadcast(json.dumps({"type": "status", "paused": False}))
         return JSONResponse(content={"paused": False})
+
+    @app.get("/api/providers")
+    async def get_providers():
+        return JSONResponse(content=_list_providers())
+
+    @app.post("/api/provider/{name}")
+    async def switch_provider(name: str):
+        try:
+            _switch_runtime(name)
+            return JSONResponse(content={"switched": True, "provider": name})
+        except Exception as e:
+            return JSONResponse(content={"error": str(e)}, status_code=400)
 
     @app.get("/api/node/{path:path}")
     async def get_node(path: str):
