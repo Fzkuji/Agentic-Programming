@@ -385,6 +385,26 @@ def _run_function_in_thread(func_name: str, kwargs: dict, conv_id: str, msg_id: 
                 })
                 return
 
+        # Validate create() description before executing
+        if func_name == "create" and "description" in kwargs:
+            desc = kwargs["description"].strip()
+            # Check for gibberish / too short / not meaningful
+            words = [w for w in desc.split() if len(w) > 1]
+            has_ascii_letters = sum(1 for c in desc if c.isalpha()) > len(desc) * 0.3
+            if len(desc) < 10 or len(words) < 3 or not has_ascii_letters:
+                _broadcast_chat_response(conv_id, msg_id, {
+                    "type": "result",
+                    "content": (
+                        f"The description seems unclear: \"{desc}\"\n\n"
+                        "Could you provide a clearer description? For example:\n"
+                        "- `create a function that reverses a string`\n"
+                        "- `create a function that extracts emails from text`\n"
+                        "- `create a function that calculates fibonacci numbers`"
+                    ),
+                    "function": func_name,
+                })
+                return
+
         # Execute
         _broadcast_chat_response(conv_id, msg_id, {
             "type": "status",
