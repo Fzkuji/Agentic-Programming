@@ -69,12 +69,14 @@ html, body {
 }
 
 .sidebar.collapsed {
-  width: 0;
-  min-width: 0;
-  padding: 0;
+  width: 42px;
+  min-width: 42px;
   overflow: hidden;
-  border-right: none;
 }
+.sidebar.collapsed > *:not(.sidebar-header) { display: none; }
+.sidebar.collapsed .sidebar-header { justify-content: center; padding: 12px 0; border-bottom: none; }
+.sidebar.collapsed .sidebar-header .logo { display: none; }
+.sidebar.collapsed .sidebar-toggle { font-size: 20px; }
 
 .sidebar-header {
   padding: 16px;
@@ -1511,10 +1513,8 @@ function toggleDetail() {
 // ===== Sidebar =====
 function toggleSidebar() {
   const sb = document.getElementById('sidebar');
-  const menuBtn = document.getElementById('menuBtn');
   sidebarOpen = !sidebarOpen;
   sb.classList.toggle('collapsed', !sidebarOpen);
-  if (menuBtn) menuBtn.style.display = sidebarOpen ? 'none' : 'block';
 }
 
 function renderConversations() {
