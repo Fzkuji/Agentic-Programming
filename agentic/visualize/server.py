@@ -63,7 +63,11 @@ _runtime_lock = threading.Lock()
 
 
 def _get_runtime():
-    """Get or create a cached runtime instance."""
+    """Get or create a cached runtime instance.
+
+    Prefers API providers (fast) over CLI providers (slow) for the visualizer,
+    since interactive use requires quick responses.
+    """
     global _cached_runtime
     if _cached_runtime is not None:
         return _cached_runtime
@@ -71,6 +75,14 @@ def _get_runtime():
         if _cached_runtime is not None:
             return _cached_runtime
         from agentic.providers import create_runtime
+        # Try API providers first (much faster for interactive use)
+        for api_provider in ("gemini", "anthropic", "openai"):
+            try:
+                _cached_runtime = create_runtime(provider=api_provider)
+                return _cached_runtime
+            except Exception:
+                continue
+        # Fall back to CLI providers
         _cached_runtime = create_runtime()
         return _cached_runtime
 
