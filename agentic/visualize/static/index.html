@@ -2784,56 +2784,54 @@ async function loadModelPills() {
   if (!_currentModel && _modelList.length === 0) { badge.style.display = 'none'; return; }
   badge.textContent = _currentModel || 'default';
   badge.style.display = '';
-  badge.onclick = toggleModelDropdown;
+  badge.onclick = function(e) { toggleModelDropdown(e); };
 }
 
-function toggleModelDropdown() {
-  var badge = document.getElementById('modelBadge');
+function toggleModelDropdown(event) {
+  if (event) event.stopPropagation();
   var existing = document.getElementById('modelDropdown');
   if (existing) { existing.remove(); return; }
+  var badge = document.getElementById('modelBadge');
+  if (!badge || _modelList.length === 0) return;
 
-  var dropdown = document.createElement('div');
-  dropdown.id = 'modelDropdown';
-  dropdown.className = 'model-dropdown';
+  var rect = badge.getBoundingClientRect();
+  var html = '<div id="modelDropdown" class="model-dropdown" style="top:' +
+    (rect.bottom + 4) + 'px;left:' + rect.left + 'px;">';
+  for (var i = 0; i < _modelList.length; i++) {
+    var m = _modelList[i];
+    var cls = m === _currentModel ? 'runtime-badge model active' : 'runtime-badge model';
+    html += '<span class="' + cls + '" data-model="' + escAttr(m) + '" style="cursor:pointer">' + escHtml(m) + '</span>';
+  }
+  html += '</div>';
+  document.body.insertAdjacentHTML('beforeend', html);
 
-  _modelList.forEach(function(m) {
-    var item = document.createElement('span');
-    item.className = 'runtime-badge model' + (m === _currentModel ? ' active' : '');
-    item.textContent = m;
-    item.style.cursor = 'pointer';
-    item.addEventListener('click', async function(e) {
-      e.stopPropagation();
-      if (m === _currentModel) { dropdown.remove(); return; }
-      try {
-        var resp = await fetch('/api/model', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: m, conv_id: currentConvId })
-        });
-        var data = await resp.json();
-        if (data.switched) {
-          _currentModel = m;
-          badge.textContent = m;
-        }
-      } catch(err) {}
-      dropdown.remove();
-    });
-    dropdown.appendChild(item);
+  var dropdown = document.getElementById('modelDropdown');
+  dropdown.addEventListener('click', function(e) {
+    var target = e.target.closest('[data-model]');
+    if (!target) return;
+    e.stopPropagation();
+    var model = target.getAttribute('data-model');
+    dropdown.remove();
+    if (model === _currentModel) return;
+    fetch('/api/model', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: model, conv_id: currentConvId })
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      if (data.switched) {
+        _currentModel = model;
+        badge.textContent = model;
+      }
+    }).catch(function() {});
   });
 
-  // Position dropdown below the badge using fixed coordinates
-  var rect = badge.getBoundingClientRect();
-  dropdown.style.top = (rect.bottom + 4) + 'px';
-  dropdown.style.left = rect.left + 'px';
-  document.body.appendChild(dropdown);
-
-  var close = function(e) {
-    if (e.target !== badge && !dropdown.contains(e.target)) {
-      dropdown.remove();
-      document.removeEventListener('click', close);
+  document.addEventListener('click', function closeDropdown(e) {
+    var dd = document.getElementById('modelDropdown');
+    if (dd && !dd.contains(e.target) && e.target !== badge) {
+      dd.remove();
     }
-  };
-  setTimeout(function() { document.addEventListener('click', close); }, 0);
+    document.removeEventListener('click', closeDropdown);
+  }, { once: false });
 }
 
 function addSystemMessage(text) {
