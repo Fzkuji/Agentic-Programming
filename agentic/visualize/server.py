@@ -1294,12 +1294,13 @@ def create_app():
         # Static fallback lists for providers without auto-detection
         static_models = {
             "claude-code": ["sonnet", "opus", "haiku"],
-            "gemini-cli": ["gemini-3.1-pro", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+            "codex": ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"],
+            "gemini-cli": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
             "anthropic": [
-                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5",
+                "claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001",
             ],
-            "openai": ["o3-pro", "o3", "o4-mini", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
-            "gemini": ["gemini-3.1-pro", "gemini-3.1-flash-lite", "gemini-3-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+            "openai": ["o4-mini", "o3", "gpt-5.4", "gpt-5.4-mini", "gpt-4.1", "gpt-4.1-mini"],
+            "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
         }
         # Ensure runtime is initialized
         global _default_provider, _default_runtime
