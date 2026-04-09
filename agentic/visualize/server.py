@@ -95,9 +95,6 @@ def _detect_default_provider() -> tuple:
     for p in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
         try:
             rt = _create_runtime_for_visualizer(p)
-            # Health check for CLI providers — verify they can actually respond
-            if p in _CLI_PROVIDERS:
-                rt._call([{"type": "text", "text": "Reply with OK"}])
             return p, rt
         except Exception:
             continue
@@ -117,8 +114,10 @@ def _get_conv_runtime(conv_id: str, msg_id: str = None):
         if _default_runtime is None:
             _default_provider, _default_runtime = _detect_default_provider()
 
-    # Create runtime for this conversation using default provider
+    # Create runtime for this conversation using default provider + current model
     rt = _create_runtime_for_visualizer(_default_provider)
+    if _default_runtime and _default_runtime.model:
+        rt.model = _default_runtime.model
     if conv:
         conv["runtime"] = rt
         conv["provider_name"] = _default_provider
