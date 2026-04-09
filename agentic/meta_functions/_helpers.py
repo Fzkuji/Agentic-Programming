@@ -9,7 +9,7 @@ import os
 import re
 from typing import Optional
 
-from agentic.function import agentic_function
+from agentic.function import agentic_function, traced
 from agentic.runtime import Runtime
 
 
@@ -61,6 +61,7 @@ def _safe_import(name, *args, **kwargs):
 
 # ���─ Code extraction ───────────��────────────────────────────────
 
+@traced
 def extract_code(response: str) -> str:
     """Extract Python code from LLM response, stripping markdown fences."""
     match = re.search(r"```(?:python)?\s*\n(.*?)```", response, re.DOTALL)
@@ -83,6 +84,7 @@ def extract_code(response: str) -> str:
 
 # ─��� Validation ─────────────────────────────────────────────────
 
+@traced
 def validate_code(code: str, response: str) -> None:
     """Validate generated code: no disallowed imports, no async, valid syntax."""
     for line in (response + "\n" + code).split("\n"):
@@ -107,6 +109,7 @@ def validate_code(code: str, response: str) -> None:
 
 # ── Compilation ────────────────────────────────────────────────
 
+@traced
 def compile_function(code: str, runtime: Runtime, name: str = None) -> callable:
     """Execute code in sandbox and return the generated agentic_function."""
     namespace = {
@@ -172,6 +175,7 @@ def guess_name(code: str) -> Optional[str]:
 
 # ── File I/O ───────────────────────────────────────────────────
 
+@traced
 def save_function(code: str, fn_name: str, description: str = None) -> str:
     """Save generated function source code to agentic/functions/."""
     if os.environ.get("PYTEST_CURRENT_TEST"):
@@ -195,6 +199,7 @@ def save_function(code: str, fn_name: str, description: str = None) -> str:
     return filepath
 
 
+@traced
 def save_skill_template(fn_name: str, description: str, code: str) -> str:
     """Create a basic template SKILL.md (no LLM needed)."""
     if os.environ.get("PYTEST_CURRENT_TEST"):

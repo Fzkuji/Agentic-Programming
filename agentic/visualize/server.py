@@ -413,6 +413,21 @@ def _discover_functions() -> list[dict]:
                             result.append(info)
                         break  # one entry point per subdirectory project
 
+    # Apps — scan apps/ for subdirectories with main.py at any depth
+    apps_dir = os.path.join(base, "apps")
+    if os.path.isdir(apps_dir):
+        for f in sorted(os.listdir(apps_dir)):
+            full_path = os.path.join(apps_dir, f)
+            if os.path.isdir(full_path) and not f.startswith(("_", ".")):
+                for root, dirs, files in os.walk(full_path):
+                    dirs[:] = [d for d in dirs if not d.startswith(("_", "."))]
+                    if "main.py" in files:
+                        main_py = os.path.join(root, "main.py")
+                        info = _extract_function_info(main_py, None, "app")
+                        if info:
+                            result.append(info)
+                        break
+
     return result
 
 
@@ -660,24 +675,40 @@ def _load_function(func_name: str):
         except (ImportError, AttributeError):
             pass
     # Try single-file function
+    from agentic.function import auto_trace_module, auto_trace_package
     try:
         mod = importlib.import_module(f"agentic.functions.{func_name}")
+        auto_trace_module(mod, trace_pkg=os.path.abspath(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "functions")))
         return getattr(mod, func_name)
     except (ImportError, AttributeError):
         pass
-    # Try subdirectory apps — scan functions/ for dirs with main.py
+    # Try subdirectory projects — scan functions/ and apps/ for main.py at any depth
     import importlib.util as _imputil
-    fn_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "functions")
-    if os.path.isdir(fn_dir):
-        for d in os.listdir(fn_dir):
-            main_py = os.path.join(fn_dir, d, "main.py")
-            if os.path.isfile(main_py):
-                spec = _imputil.spec_from_file_location(f"agentic.functions.{d}.main", main_py)
-                mod = _imputil.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                fn = getattr(mod, func_name, None)
-                if fn is not None:
-                    return fn
+    base = os.path.dirname(os.path.dirname(__file__))
+    for search_dir in (os.path.join(base, "functions"), os.path.join(base, "apps")):
+        if not os.path.isdir(search_dir):
+            continue
+        for d in os.listdir(search_dir):
+            full_path = os.path.join(search_dir, d)
+            if not os.path.isdir(full_path) or d.startswith(("_", ".")):
+                continue
+            for root, dirs, files in os.walk(full_path):
+                dirs[:] = [x for x in dirs if not x.startswith(("_", "."))]
+                if "main.py" in files:
+                    main_py = os.path.join(root, "main.py")
+                    spec = _imputil.spec_from_file_location(f"agentic.apps.{d}.main", main_py)
+                    mod = _imputil.module_from_spec(spec)
+                    spec.loader.exec_module(mod)
+                    # Auto-trace all functions in the entire app package
+                    pkg_dir = os.path.dirname(main_py)
+                    auto_trace_package(pkg_dir)
+                    # Re-fetch the function since module may have been reloaded
+                    mod = sys.modules.get(mod.__name__, mod)
+                    fn = getattr(mod, func_name, None)
+                    if fn is not None:
+                        return fn
+                    break
     return None
 
 

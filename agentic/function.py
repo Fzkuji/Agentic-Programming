@@ -224,6 +224,143 @@ class agentic_function:
         return wrapper
 
 
+def traced(fn):
+    """Lightweight decorator that records function execution in the Context tree.
+
+    Unlike @agentic_function, this does NOT involve any LLM logic — it simply
+    creates a Context node so the function appears in the Execution Tree.
+
+    Usage:
+        @traced
+        def search_papers(query):
+            ...
+    """
+    sig = inspect.signature(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        parent = _current_ctx.get(None)
+        if parent is None:
+            # No active context tree — run without tracing
+            return fn(*args, **kwargs)
+
+        ctx = Context(
+            name=fn.__name__,
+            prompt=fn.__doc__ or "",
+            params={},
+            parent=parent,
+            start_time=time.time(),
+        )
+        parent.children.append(ctx)
+        token = _current_ctx.set(ctx)
+        _emit_event("node_created", ctx)
+        try:
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            ctx.params = {k: v for k, v in bound.arguments.items()
+                          if k not in ("self", "cls", "runtime", "callback")}
+            result = fn(*args, **kwargs)
+            ctx.output = result
+            ctx.status = "success"
+            return result
+        except Exception as e:
+            ctx.error = str(e)
+            ctx.status = "error"
+            raise
+        finally:
+            ctx.end_time = time.time()
+            _emit_event("node_completed", ctx)
+            _current_ctx.reset(token)
+
+    wrapper._is_traced = True
+    return wrapper
+
+
+def auto_trace_module(mod, exclude=None, trace_pkg=None):
+    """Auto-apply @traced to all user-defined functions in a module.
+
+    Skips functions that are already @agentic_function or @traced,
+    private functions (starting with _), and third-party imports.
+
+    Functions imported from the same package (trace_pkg) ARE traced,
+    so the execution tree shows the full call chain within an app.
+
+    Args:
+        mod: The module object to patch.
+        exclude: Optional set of function names to skip.
+        trace_pkg: Package directory path. Functions from files within this
+                   directory are traced even if imported. If None, uses
+                   the directory of mod.__file__.
+    """
+    exclude = exclude or set()
+    mod_file = getattr(mod, '__file__', None)
+    if not mod_file:
+        return
+    if trace_pkg is None:
+        trace_pkg = os.path.dirname(os.path.abspath(mod_file))
+
+    for name in list(dir(mod)):
+        if name.startswith('_') or name in exclude:
+            continue
+        obj = getattr(mod, name)
+        if not callable(obj) or not inspect.isfunction(obj):
+            continue
+        # Skip already decorated
+        if getattr(obj, '_is_agentic', False) or getattr(obj, '_is_traced', False):
+            continue
+        # Only trace functions defined within the package
+        try:
+            fn_file = os.path.abspath(inspect.getfile(obj))
+        except (TypeError, OSError):
+            continue
+        if not fn_file.startswith(trace_pkg):
+            continue
+        setattr(mod, name, traced(obj))
+
+
+def auto_trace_package(pkg_dir, pkg_name=None):
+    """Recursively auto-trace all .py files in a package directory.
+
+    Walks the directory tree, imports each module, and applies @traced
+    to all user-defined functions. This ensures that lazy imports
+    within the package get traced versions.
+
+    Args:
+        pkg_dir: Absolute path to the package root directory.
+        pkg_name: Dotted package name prefix (e.g. "research_harness").
+                  If None, uses the directory basename.
+    """
+    import importlib.util as _imputil
+    import sys as _sys
+
+    pkg_dir = os.path.abspath(pkg_dir)
+    if pkg_name is None:
+        pkg_name = os.path.basename(pkg_dir)
+
+    for root, dirs, files in os.walk(pkg_dir):
+        dirs[:] = [d for d in dirs if not d.startswith(("_", ".", "test"))]
+        for f in sorted(files):
+            if not f.endswith(".py") or f.startswith("_"):
+                continue
+            filepath = os.path.join(root, f)
+            # Build module name relative to pkg_dir
+            rel = os.path.relpath(filepath, os.path.dirname(pkg_dir))
+            mod_name = rel.replace(os.sep, ".")[:-3]  # strip .py
+            if mod_name in _sys.modules:
+                mod = _sys.modules[mod_name]
+            else:
+                try:
+                    spec = _imputil.spec_from_file_location(mod_name, filepath)
+                    if spec is None:
+                        continue
+                    mod = _imputil.module_from_spec(spec)
+                    _sys.modules[mod_name] = mod
+                    spec.loader.exec_module(mod)
+                except Exception:
+                    continue
+            auto_trace_module(mod, trace_pkg=pkg_dir)
+
+
 def _auto_save(ctx: Context):
     """Auto-save the completed Context tree to the logs directory."""
     try:
