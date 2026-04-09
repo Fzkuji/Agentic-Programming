@@ -105,80 +105,29 @@ class CodexRuntime(Runtime):
                 "  codex auth"
             )
 
-    _cached_models = None  # class-level cache
-
     def list_models(self) -> list[str]:
-        """Auto-detect available models for Codex CLI.
+        """Auto-detect available models from Codex CLI's own model cache.
 
-        ChatGPT subscription mode: limited set.
-        API key mode: queries OpenAI API, filters to chat models, then
-        verifies each model is accessible (parallel probe). Results cached.
+        Reads ~/.codex/models_cache.json which the CLI maintains.
+        Returns models with visibility='list', sorted by priority.
+        Falls back to a reasonable default if the cache doesn't exist.
         """
-        if CodexRuntime._cached_models is not None:
-            return CodexRuntime._cached_models
-
+        # Read Codex CLI's own model cache
+        cache_path = os.path.join(os.path.expanduser("~"), ".codex", "models_cache.json")
         try:
-            result = subprocess.run(
-                [self.cli_path, "login", "status"],
-                capture_output=True, text=True, timeout=5,
-            )
-            output = (result.stdout + result.stderr).strip()
-            if "ChatGPT" in output:
-                CodexRuntime._cached_models = ["o4-mini", "gpt-5.4", "gpt-5.4-mini"]
-                return CodexRuntime._cached_models
+            with open(cache_path) as f:
+                data = json.load(f)
+            models = []
+            for m in data.get("models", []):
+                if m.get("visibility") == "list":
+                    models.append((m.get("priority", 999), m["slug"]))
+            models.sort()
+            return [slug for _, slug in models]
         except Exception:
             pass
 
-        # API key mode — query + verify
-        try:
-            import re
-            import concurrent.futures
-            import openai
-            client = openai.OpenAI()
-
-            # Step 1: list and filter
-            all_models = client.models.list()
-            skip = ("audio", "realtime", "image", "search", "transcribe", "tts",
-                    "instruct", "embed", "davinci", "babbage", "whisper", "dall-e",
-                    "moderation", "diarize", "chat-latest", "-codex", "deep-research")
-            date_re = re.compile(r"-\d{4}-\d{2}-\d{2}")
-            candidates = []
-            for m in all_models:
-                mid = m.id
-                if not any(mid.startswith(p) for p in ("gpt-4", "gpt-5", "o1", "o3", "o4")):
-                    continue
-                if any(s in mid for s in skip):
-                    continue
-                if date_re.search(mid):
-                    continue
-                candidates.append(mid)
-
-            # Step 2: parallel verify (max_tokens=1 probe)
-            def _probe(model):
-                try:
-                    client.chat.completions.create(
-                        model=model,
-                        messages=[{"role": "user", "content": "hi"}],
-                        max_tokens=1,
-                    )
-                    return True
-                except Exception as e:
-                    err = str(e).lower()
-                    # Quota/rate errors mean the model exists, just temporarily limited
-                    if "quota" in err or "billing" in err or "rate" in err:
-                        return True
-                    return False
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-                results = list(ex.map(_probe, candidates))
-
-            verified = [m for m, ok in zip(candidates, results) if ok]
-            verified.sort(key=lambda x: (not x.startswith("o"), x))
-            CodexRuntime._cached_models = verified if verified else ["o4-mini", "gpt-5.4", "gpt-5.4-mini"]
-        except Exception:
-            CodexRuntime._cached_models = ["o4-mini", "gpt-5.4", "gpt-5.4-mini"]
-
-        return CodexRuntime._cached_models
+        # Fallback
+        return ["gpt-5.4", "gpt-5.4-mini"]
 
     def _call(self, content: list[dict], model: str = None, response_format: dict = None) -> str:
         """Call Codex CLI with the content list.
