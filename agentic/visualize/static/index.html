@@ -1462,10 +1462,21 @@ function handleMessage(msg) {
         for (var ci = 0; ci < msg.data.length; ci++) {
           var c = msg.data[ci];
           if (!conversations[c.id]) {
-            conversations[c.id] = { id: c.id, title: c.title, messages: [], created_at: c.created_at };
+            conversations[c.id] = { id: c.id, title: c.title, messages: [], created_at: c.created_at, has_session: c.has_session };
+          } else {
+            conversations[c.id].has_session = c.has_session;
           }
         }
         renderConversations();
+        // If current conversation has session, update lock state
+        if (currentConvId && conversations[currentConvId] && conversations[currentConvId].has_session) {
+          _hasActiveSession = true;
+          var provBadge = document.getElementById('providerBadge');
+          if (provBadge && provBadge.textContent.indexOf('\ud83d\udd12') === -1) {
+            provBadge.textContent += ' \ud83d\udd12';
+          }
+          loadProviders();
+        }
       }
       break;
     case 'status':
@@ -2439,6 +2450,20 @@ function switchConversation(convId) {
   currentConvId = convId;
   localStorage.setItem('agentic_conv_id', convId);
   renderConversations();
+  // Update lock state immediately from cached data
+  if (conversations[convId]) {
+    if (conversations[convId].provider_info) {
+      updateProviderBadge(conversations[convId].provider_info);
+    } else if (conversations[convId].has_session !== undefined) {
+      _hasActiveSession = !!conversations[convId].has_session;
+      var provBadge = document.getElementById('providerBadge');
+      if (provBadge) {
+        provBadge.textContent = provBadge.textContent.replace(' \ud83d\udd12', '');
+        if (_hasActiveSession) provBadge.textContent += ' \ud83d\udd12';
+      }
+      loadProviders();
+    }
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ action: 'load_conversation', conv_id: convId }));
   }
@@ -2581,10 +2606,15 @@ function newConversation() {
     '</div>';
   container.appendChild(welcome);
   renderConversations();
-  // Reset session badge for new conversation (no session yet)
+  // Reset session state for new conversation (no session yet)
   _hasActiveSession = false;
+  var provBadge = document.getElementById('providerBadge');
+  if (provBadge) {
+    provBadge.textContent = provBadge.textContent.replace(' \ud83d\udd12', '');
+  }
   var sessBadge = document.getElementById('sessionBadge');
   if (sessBadge) { sessBadge.textContent = 'no session'; sessBadge.title = ''; }
+  loadProviders();
   loadModelPills();
 }
 

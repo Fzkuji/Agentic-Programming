@@ -1263,10 +1263,13 @@ async def _handle_ws_command(ws, cmd: dict):
         conv_list = []
         with _conversations_lock:
             for cid, conv in _conversations.items():
+                runtime = conv.get("runtime")
+                session_id = getattr(runtime, '_session_id', None) if runtime else None
                 conv_list.append({
                     "id": cid,
                     "title": conv.get("title", "Untitled"),
                     "created_at": conv.get("created_at"),
+                    "has_session": session_id is not None,
                 })
         conv_list.sort(key=lambda c: c.get("created_at") or 0)
         await ws.send_text(json.dumps({
