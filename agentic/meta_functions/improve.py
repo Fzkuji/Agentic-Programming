@@ -19,7 +19,7 @@ def improve(
     runtime: Runtime,
     goal: str = "general improvement",
     name: str = None,
-) -> callable:
+):
     """Improve an existing function based on a specified goal.
 
     Calls generate_code() with the current code and improvement goal,
@@ -32,7 +32,8 @@ def improve(
         name: Optional name override.
 
     Returns:
-        An improved callable function.
+        callable — the improved function, or
+        dict — {"type": "follow_up", "question": "..."} if LLM needs more info.
     """
     code = get_source(fn)
     fn_name = name or getattr(fn, '__name__', 'improved')
@@ -44,8 +45,12 @@ def improve(
         f"Respond with ONLY the improved Python code in a ```python fence. "
         f"No explanation, no commentary."
     )
-    response = generate_code(task=task, runtime=runtime)
+    result = generate_code(task=task, runtime=runtime)
 
+    if result.get("type") == "follow_up":
+        return result
+
+    response = result["content"]
     improved_code = extract_code(response)
     save_function(improved_code, fn_name, f"Improved: {goal}")
     validate_code(improved_code, response)

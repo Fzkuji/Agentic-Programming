@@ -14,7 +14,7 @@ from agentic.meta_functions._helpers import (
 
 
 @agentic_function
-def create(description: str, runtime: Runtime, name: str = None, as_skill: bool = False) -> callable:
+def create(description: str, runtime: Runtime, name: str = None, as_skill: bool = False):
     """Create a new Python function from a natural language description.
 
     Calls generate_code() with the design specification, then extracts,
@@ -27,7 +27,8 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
         as_skill: If True, also create a SKILL.md for agent discovery.
 
     Returns:
-        A callable function.
+        callable — the generated function, or
+        dict — {"type": "follow_up", "question": "..."} if LLM needs more info.
     """
     task = (
         f"Write a Python function that does the following:\n\n"
@@ -35,8 +36,12 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
         f"Respond with ONLY the Python code inside a ```python code fence. "
         f"No explanation, no commentary, no markdown outside the fence."
     )
-    response = generate_code(task=task, runtime=runtime)
+    result = generate_code(task=task, runtime=runtime)
 
+    if result.get("type") == "follow_up":
+        return result
+
+    response = result["content"]
     code = extract_code(response)
     fn_name = name or guess_name(code) or "generated"
 

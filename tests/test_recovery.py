@@ -105,9 +105,9 @@ def test_attempts_visible_in_summarize():
         return runtime2.exec(content=[{"type": "text", "text": "second"}])
 
     parent()
-    ctx_text = received_context[0]["text"]
-    assert "FAILED" in ctx_text
-    assert "bad format" in ctx_text
+    all_text = " ".join(b.get("text", "") for b in received_context)
+    assert "FAILED" in all_text
+    assert "bad format" in all_text
 
 
 def test_attempts_in_save(tmp_path):
@@ -217,19 +217,10 @@ def func():
     assert "some error" in received_prompts[0]
 
 
-def test_fix_with_on_question():
-    """fix() calls on_question when LLM asks a question."""
-    call_count = [0]
-    questions_received = []
-
+def test_fix_follow_up():
+    """fix() returns follow_up when LLM needs more info."""
     def mock_call(content, model="test", response_format=None):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return "QUESTION: Should I use recursion or iteration?"
-        return '''@agentic_function
-def func():
-    """Fixed with answer."""
-    return "answered"'''
+        return '{"call": "follow_up", "args": {"question": "Should I use recursion or iteration?"}}'
 
     runtime = Runtime(call=mock_call)
 
@@ -238,28 +229,21 @@ def func():
         """Do something."""
         return "original"
 
-    def handler(question):
-        questions_received.append(question)
-        return "Use iteration"
-
-    fixed_fn = fix(fn=original, runtime=runtime, on_question=handler)
-    assert fixed_fn() == "answered"
-    assert len(questions_received) == 1
-    assert "recursion" in questions_received[0]
+    result = fix(fn=original, runtime=runtime)
+    assert isinstance(result, dict)
+    assert result["type"] == "follow_up"
+    assert "recursion" in result["question"]
 
 
-def test_fix_without_on_question_retries():
-    """fix() without on_question retries when LLM asks question."""
-    call_count = [0]
-
+def test_fix_produces_code_directly():
+    """fix() returns compiled function when LLM produces code."""
     def mock_call(content, model="test", response_format=None):
-        call_count[0] += 1
-        if call_count[0] <= 1:
-            return "QUESTION: What should I do?"
-        return '''@agentic_function
+        return '''```python
+@agentic_function
 def func():
-    """Fixed without question."""
-    return "no_question"'''
+    """Fixed."""
+    return "fixed_result"
+```'''
 
     runtime = Runtime(call=mock_call)
 
@@ -269,7 +253,8 @@ def func():
         return "original"
 
     fixed_fn = fix(fn=original, runtime=runtime)
-    assert fixed_fn() == "no_question"
+    assert callable(fixed_fn)
+    assert fixed_fn() == "fixed_result"
 
 
 def test_fix_custom_name():

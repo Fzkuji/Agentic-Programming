@@ -256,6 +256,55 @@ class Context:
             node = node.parent
         return ".".join(reversed(parts))
 
+    def render_tree(self) -> str:
+        """Render a clean call tree from root, marking the current node.
+
+        Output example:
+            create
+            └── generate_code  <-- Current
+
+        Or for fix() with 3 rounds:
+            fix
+            ├── generate_code  ✓
+            ├── generate_code  ✓
+            └── generate_code  <-- Current
+        """
+        # Find root
+        root = self
+        while root.parent:
+            root = root.parent
+
+        lines = []
+        self._render_tree_node(root, lines, "", True)
+        return "\n".join(lines)
+
+    def _render_tree_node(self, node: "Context", lines: list, prefix: str, is_root: bool):
+        """Recursively render one node and its children."""
+        # Status marker
+        if node is self:
+            marker = "  <-- Current"
+        elif node.status == "success":
+            marker = "  ✓"
+        elif node.status == "error":
+            marker = "  ✗"
+        elif node.status == "running":
+            marker = "  ..."
+        else:
+            marker = ""
+
+        if is_root:
+            lines.append(f"{node.name}{marker}")
+            child_prefix = ""
+        else:
+            lines.append(f"{prefix}{node.name}{marker}")
+            child_prefix = prefix.replace("├── ", "│   ").replace("└── ", "    ")
+
+        children = node.children
+        for i, child in enumerate(children):
+            is_last = (i == len(children) - 1)
+            connector = "└── " if is_last else "├── "
+            self._render_tree_node(child, lines, child_prefix + connector, False)
+
     @property
     def duration_ms(self) -> float:
         """Execution time in milliseconds. 0 if still running."""
@@ -271,6 +320,7 @@ class Context:
         self,
         depth: int = -1,
         siblings: int = -1,
+        prompted_functions: Optional[set] = None,
         level: Optional[str] = None,
         include: Optional[list] = None,
         exclude: Optional[list] = None,
@@ -334,10 +384,15 @@ class Context:
             ctx.summarize(branch=["observe"])             # expand observe's children
             ctx.summarize(max_tokens=1000)               # with token budget
         """
-        lines = ["Execution Context (most recent call last):"]
+        lines = []
+        # Track which functions have had their docstrings shown
+        if prompted_functions is None:
+            prompted_functions = set()
 
         # --- Ancestors: root → ... → parent ---
         # Collect ancestors from root to parent, each indented by depth
+        # Calculate base depth so the outermost ancestor starts at indent 0
+        base_depth = self._depth()
         if depth != 0 and self.parent and self.parent.name:
             ancestors = []
             node = self.parent
@@ -346,14 +401,22 @@ class Context:
                 node = node.parent
                 if depth > 0 and len(ancestors) >= depth:
                     break
+            if ancestors:
+                base_depth = ancestors[-1]._depth()
             for a in reversed(ancestors):
                 if not _node_allowed(a, include, exclude):
                     continue
-                lines.append(a._render_traceback("    " * a._depth(), level))
+                ancestor_level = level
+                if a.name in prompted_functions:
+                    ancestor_level = "result"
+                else:
+                    prompted_functions.add(a.name)
+                indent = "    " * (a._depth() - base_depth)
+                lines.append(a._render_traceback(indent, ancestor_level))
 
         # --- Siblings: previous same-level nodes ---
         if self.parent:
-            sibling_indent = "    " * self._depth()
+            sibling_indent = "    " * (self._depth() - base_depth)
 
             sibling_parts = []
             for c in self.parent.children:
@@ -367,6 +430,10 @@ class Context:
                 render_level = level or c.render
                 if render_level == "silent":
                     continue
+
+                # Same function called in a loop: skip docstring, show only result
+                if c.name == self.name and render_level != "result":
+                    render_level = "result"
 
                 rendered = c._render_traceback(sibling_indent, render_level)
 
@@ -389,10 +456,10 @@ class Context:
 
             lines.extend(sibling_parts)
 
-        # --- Current call at its natural indent ---
-        self_indent = "    " * self._depth()
+        # --- Current call ---
+        self_indent = "    " * (self._depth() - base_depth)
         lines.append(f"{self_indent}- {self._call_path()}({_fmt_params(self.params)})  <-- Current Call")
-        if self.prompt:
+        if self.prompt and self.name not in prompted_functions:
             lines.append(f'{self_indent}    """{self.prompt}"""')
 
         return "\n".join(lines)
@@ -731,6 +798,45 @@ def _fmt_params(params: dict) -> str:
             v_str = v_str[:47] + "..."
         parts.append(f"{k}={v_str}")
     return ", ".join(parts)
+
+
+def _fmt_params_expanded(params: dict, call_path: str, indent: str, param_indent: str) -> str:
+    """Format current call with fully expanded parameters, multi-line."""
+    if not params:
+        return f"{indent}- {call_path}()"
+
+    # Check if any param is long enough to warrant multi-line
+    short_parts = []
+    has_long = False
+    for k, v in params.items():
+        v_str = repr(v) if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+        if len(v_str) > 80:
+            has_long = True
+            break
+        short_parts.append(f"{k}={v_str}")
+
+    if not has_long:
+        return f"{indent}- {call_path}({', '.join(short_parts)})"
+
+    # Multi-line format
+    lines = [f"{indent}- {call_path}("]
+    param_items = list(params.items())
+    for i, (k, v) in enumerate(param_items):
+        v_str = repr(v) if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
+        comma = "," if i < len(param_items) - 1 else ""
+        if "\n" in v_str or len(v_str) > 80:
+            # Multi-line value: indent each line
+            value_indent = param_indent + "    "
+            v_lines = v_str.splitlines()
+            lines.append(f"{param_indent}{k}={v_lines[0]}")
+            for vl in v_lines[1:]:
+                lines.append(f"{value_indent}{vl}")
+            if comma:
+                lines[-1] += comma
+        else:
+            lines.append(f"{param_indent}{k}={v_str}{comma}")
+    lines.append(f"{indent})")
+    return "\n".join(lines)
 
 
 def _json(obj: Any, max_len: int = 0) -> str:

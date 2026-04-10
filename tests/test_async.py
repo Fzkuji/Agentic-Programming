@@ -205,8 +205,8 @@ class TestAsyncExec:
             ])
 
         asyncio.run(parent())
-        assert len(received) >= 2
-        assert "Execution Context" in received[0]["text"]
+        texts = [b.get("text", "") for b in received if b["type"] == "text"]
+        assert any("Parent." in t for t in texts)
 
     def test_async_exec_double_call_raises(self):
         """Calling async_exec twice in one function raises."""

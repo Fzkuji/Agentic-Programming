@@ -270,10 +270,29 @@ def _collect_attempt_info(ctx, lines: list, depth: int = 0):
         _collect_attempt_info(child, lines, depth + 1)
 
 
+# ── Follow-up ─────────────────────────────────────────────────
+
+@agentic_function
+def follow_up(question: str, runtime: Runtime) -> str:
+    """向调用方提出问题以获取补充信息。
+
+    当 LLM 判断信息不足以完成任务时，通过此函数向调用方提问。
+    问题会沿调用链返回，由上层的 agent 或用户处理。
+
+    Args:
+        question: 需要回答的具体问题。
+        runtime: LLM 运行时实例。
+
+    Returns:
+        问题本身（由调用方处理并在后续调用中提供答案）。
+    """
+    return question
+
+
 # ── Base meta function ────────────────────────────────────────
 
 @agentic_function
-def generate_code(task: str, runtime: Runtime) -> str:
+def generate_code(task: str, runtime: Runtime) -> dict:
     """Generate or modify Python code following the Agentic Programming specification.
 
     This is the base meta function. All code generation/modification meta functions
@@ -560,7 +579,8 @@ def generate_code(task: str, runtime: Runtime) -> str:
 
     Respond with ONLY the Python code inside a ```python code fence.
     No explanation, no commentary outside the fence.
-    If unsure about the task, respond with ONLY "QUESTION: <your question>".
+    If you need more information to complete the task, call the follow_up
+    function instead of guessing.
 
     Args:
         task: Complete task description including all necessary data
@@ -568,8 +588,44 @@ def generate_code(task: str, runtime: Runtime) -> str:
         runtime: LLM runtime instance.
 
     Returns:
-        LLM's raw reply (containing code fence or question).
+        dict with "type" and payload:
+        - {"type": "code", "content": "..."} when LLM produced code
+        - {"type": "follow_up", "question": "..."} when LLM needs more info
     """
-    return runtime.exec(content=[
-        {"type": "text", "text": task},
+    from agentic.functions.build_catalog import build_catalog
+    from agentic.functions.parse_action import parse_action
+    from agentic.functions.prepare_args import prepare_args
+
+    available = {
+        "follow_up": {
+            "function": follow_up,
+            "description": "信息不足时向调用方提问，获取补充信息后再继续",
+            "input": {
+                "question": {
+                    "source": "llm",
+                    "type": str,
+                    "description": "需要调用方回答的具体问题",
+                },
+            },
+            "output": {"question": str},
+        },
+    }
+    catalog = build_catalog(available)
+
+    reply = runtime.exec(content=[
+        {"type": "text", "text": (
+            f"{task}\n\n"
+            "== Available Functions ==\n"
+            "If you need more information, call follow_up.\n"
+            "Otherwise, respond with code directly.\n\n"
+            f"{catalog}"
+        )},
     ])
+
+    action = parse_action(reply)
+    if action and action["call"] == "follow_up":
+        args = prepare_args(action, available, runtime, context={})
+        question = available["follow_up"]["function"](**args)
+        return {"type": "follow_up", "question": question}
+
+    return {"type": "code", "content": reply}

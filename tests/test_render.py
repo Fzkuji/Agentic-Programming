@@ -10,10 +10,18 @@ from agentic import agentic_function, Runtime
 
 
 def echo_call(content, model="test", response_format=None):
-    """Echo the last non-context text block."""
+    """Echo the user's text content (after exec marker or last plain block)."""
     for block in reversed(content):
-        if block["type"] == "text" and "Execution Context" not in block.get("text", ""):
-            return block["text"]
+        if block["type"] != "text":
+            continue
+        text = block.get("text", "")
+        # If content was merged into context, extract the exec() portion
+        if "→ Current Task:" in text:
+            return text.split("→ Current Task:\n", 1)[1].strip()
+        # Skip context blocks (contain call paths like "- func(")
+        if "- " in text and "(" in text and "<-- Current Call" in text:
+            continue
+        return text
     return "ok"
 
 

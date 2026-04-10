@@ -309,8 +309,8 @@ def test_summarize_branch_uses_consistent_indentation():
     outer()
     summary = outer.context.children[1].summarize(branch=["branch_node"])
 
-    assert "        - outer.branch_node()" in summary
-    assert "            - outer.branch_node.leaf()" in summary
+    assert "    - outer.branch_node()" in summary
+    assert "        - outer.branch_node.leaf()" in summary
 
 
 def test_duration():

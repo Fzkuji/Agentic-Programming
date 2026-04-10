@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import os
 from typing import Any, Optional
 
 from agentic.context import _current_ctx
@@ -68,6 +69,7 @@ class Runtime:
         self.model = model
         self.max_retries = max_retries
         self.has_session = False  # Subclasses set True if they manage their own context
+        self._prompted_functions: set[str] = set()  # Functions whose docstrings have been sent
 
     def exec(
         self,
@@ -114,25 +116,74 @@ class Runtime:
 
         # --- Read: auto-generate context from the tree ---
         if context is None and ctx is not None:
+            func_is_new = ctx.name not in self._prompted_functions
+
             if self.has_session:
-                # Session-based runtimes (e.g. Claude Code CLI) manage their
-                # own conversation history, so we skip the full context tree.
-                # But the current function's docstring IS the prompt/instruction
-                # — it must always be injected, otherwise the LLM doesn't know
-                # what task to perform.
-                if ctx.prompt:
+                if func_is_new and ctx.prompt:
                     context = ctx.prompt
             else:
-                if ctx._summarize_kwargs:
-                    context = ctx.summarize(**ctx._summarize_kwargs)
-                else:
-                    context = ctx.summarize()
+                kwargs = dict(ctx._summarize_kwargs) if ctx._summarize_kwargs else {}
+                kwargs["prompted_functions"] = self._prompted_functions
+                context = ctx.summarize(**kwargs)
 
-        # --- Build full content: context + user content ---
+            # Mark function as prompted AFTER building context
+            if ctx.name:
+                self._prompted_functions.add(ctx.name)
+
+        # --- Build full content ---
+        # Merge text content into the context string under an exec() marker,
+        # so the LLM sees one coherent structure. Non-text content (images, etc.)
+        # stays as separate blocks.
         full_content = []
-        if context:
+        if context and ctx is not None and ctx.parent:
+            # Calculate indent for exec content (one level deeper than current call)
+            base = ctx._depth()
+            node = ctx.parent
+            while node and node.name:
+                base = node._depth()
+                node = node.parent
+            exec_indent = "    " * (ctx._depth() - base + 1)
+
+            # Merge text content into context
+            text_parts = []
+            for block in content:
+                if block.get("type") == "text":
+                    indented = "\n".join(
+                        exec_indent + line if line.strip() else ""
+                        for line in block["text"].splitlines()
+                    )
+                    text_parts.append(indented)
+                else:
+                    full_content.append(block)  # non-text goes as separate block
+
+            if text_parts:
+                merged = context + "\n" + exec_indent + "→ Current Task:\n" + "\n".join(text_parts)
+            else:
+                merged = context
+            full_content.insert(0, {"type": "text", "text": merged})
+        elif context:
             full_content.append({"type": "text", "text": context})
-        full_content.extend(content)
+            full_content.extend(content)
+        else:
+            full_content.extend(content)
+
+        # --- Debug: dump LLM input ---
+        if os.environ.get("AGENTIC_DUMP_INPUT"):
+            import json as _json
+            _dump_dir = os.environ.get("AGENTIC_DUMP_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "tmp"))
+            os.makedirs(_dump_dir, exist_ok=True)
+            _call_path = ctx._call_path() if ctx else "unknown"
+            _seq = getattr(self, '_dump_seq', 0)
+            self._dump_seq = _seq + 1
+            _dump_path = os.path.join(_dump_dir, f"{_seq:03d}_{_call_path}.txt")
+            with open(_dump_path, "w") as _f:
+                for block in full_content:
+                    if block.get("type") == "text":
+                        _f.write(block["text"])
+                    else:
+                        _f.write(_json.dumps(block, ensure_ascii=False, default=str))
+                    _f.write("\n\n")
+            print(f"[DUMP] {_call_path} -> {_dump_path}")
 
         # --- Call the LLM (with retry) ---
         attempts = ctx.attempts if ctx is not None else []
