@@ -402,21 +402,20 @@ def deep_work(
             continue
 
         # --- Evaluation phase ---
-        # Reset the runtime process to give the evaluator a clean session.
-        # The evaluator should not be influenced by the execution agent's
-        # accumulated context (tool calls, file operations, etc.)
-        if hasattr(runtime, 'reset'):
-            runtime.reset()
+        # Fresh runtime so the evaluator is not influenced by the
+        # execution agent's accumulated context.
+        from agentic.providers import create_runtime as _create_rt
 
         work_summary = _build_work_summary(state["history"])
 
         try:
-            eval_result = _evaluate(
-                task=task,
-                standard=standard,
-                work_summary=work_summary,
-                runtime=runtime,
-            )
+            with _create_rt(model=runtime.model) as eval_runtime:
+                eval_result = _evaluate(
+                    task=task,
+                    standard=standard,
+                    work_summary=work_summary,
+                    runtime=eval_runtime,
+                )
         except Exception as e:
             eval_result = {
                 "passed": False,

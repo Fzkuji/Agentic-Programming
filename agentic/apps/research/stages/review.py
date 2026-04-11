@@ -128,16 +128,16 @@ def review_loop(
     log_path = os.path.join(os.path.dirname(paper_dir), "AUTO_REVIEW.md")
     reviews = []
 
-    for round_num in range(1, max_rounds + 1):
-        # Review phase (reviewer model)
-        if hasattr(review_runtime, 'reset'):
-            review_runtime.reset()
+    from agentic.providers import create_runtime
 
-        reply = review_paper(
-            paper_content=paper_content[:15000],
-            venue=venue,
-            runtime=review_runtime,
-        )
+    for round_num in range(1, max_rounds + 1):
+        # Review phase — fresh runtime each round
+        with create_runtime(model=review_runtime.model) as round_review_rt:
+            reply = review_paper(
+                paper_content=paper_content[:15000],
+                venue=venue,
+                runtime=round_review_rt,
+            )
 
         try:
             review = parse_json(reply)
@@ -155,16 +155,14 @@ def review_loop(
             return {"passed": True, "rounds": round_num,
                     "final_score": review["score"], "reviews": reviews}
 
-        # Fix phase (executor model)
-        if hasattr(exec_runtime, 'reset'):
-            exec_runtime.reset()
-
-        paper_content = fix_paper(
-            paper_content=paper_content[:15000],
-            review_feedback=reply[:5000],
-            round_num=round_num,
-            runtime=exec_runtime,
-        )
+        # Fix phase — fresh runtime each round
+        with create_runtime(model=exec_runtime.model) as round_exec_rt:
+            paper_content = fix_paper(
+                paper_content=paper_content[:15000],
+                review_feedback=reply[:5000],
+                round_num=round_num,
+                runtime=round_exec_rt,
+            )
 
         if callback:
             callback({"type": "fix", "round": round_num})

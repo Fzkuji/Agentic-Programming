@@ -178,7 +178,8 @@ class GeminiCLIRuntime(Runtime):
             self._turn_count += 1
             return raw
 
-    def new_session(self):
-        """Start a new session (discard current session context)."""
+    def close(self):
+        """Clear session and release resources."""
         self._session_id = None
         self._turn_count = 0
+        super().close()

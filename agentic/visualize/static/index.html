@@ -714,6 +714,66 @@ html, body {
 .runtime-badge.model:hover {
   background: rgba(198,120,221,0.2);
 }
+.agent-badge {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.agent-badge:hover {
+  background: rgba(198,120,221,0.15);
+  border-color: rgba(198,120,221,0.3);
+}
+.agent-selector {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  min-width: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.agent-selector h4 {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.agent-selector .provider-group {
+  margin-bottom: 8px;
+}
+.agent-selector .provider-name {
+  font-size: 11px;
+  color: var(--accent-green);
+  margin: 4px 0 2px 0;
+  font-weight: 600;
+}
+.agent-selector .model-item {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  margin: 1px 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.agent-selector .model-item:hover {
+  background: rgba(198,120,221,0.15);
+  color: var(--accent-purple);
+}
+.agent-selector .model-item.active {
+  background: rgba(198,120,221,0.12);
+  color: var(--accent-purple);
+  font-weight: 600;
+}
 .model-dropdown {
   position: fixed;
   display: flex;
@@ -1307,9 +1367,8 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
       <div class="topbar-left">
         <button class="menu-btn" id="menuBtn" onclick="toggleSidebar()">&#9776;</button>
         <span id="statusBadge" class="status-badge">connecting...</span>
-        <span id="providerBadge" class="runtime-badge" style="display:none"></span>
-        <span id="sessionBadge" class="runtime-badge session" style="display:none" title="Codex session ID"></span>
-        <span id="modelBadge" class="runtime-badge model" style="display:none"></span>
+        <span id="chatAgentBadge" class="runtime-badge agent-badge" onclick="openAgentSelector('chat')" title="Chat agent model">Chat: ...</span>
+        <span id="execAgentBadge" class="runtime-badge agent-badge" onclick="openAgentSelector('exec')" title="Execution agent model">Exec: ...</span>
       </div>
       <div class="topbar-right">
         <button class="btn" onclick="toggleDetail()" id="btnDetail">Detail Panel</button>
@@ -1396,6 +1455,8 @@ function connect() {
   ws.onopen = function() {
     updateStatus('connected');
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    // Load agent settings (chat + exec models)
+    loadAgentSettings();
     // Request all saved conversations from server
     ws.send(JSON.stringify({ action: 'list_conversations' }));
     // Restore current conversation from localStorage
@@ -1502,6 +1563,12 @@ function handleMessage(msg) {
       if (msg.type === 'provider_changed') {
         addSystemMessage('Switched to ' + formatProviderLabel(msg.data));
       }
+      break;
+    case 'agent_settings_changed':
+      _agentSettings.chat = msg.data.chat || _agentSettings.chat;
+      _agentSettings.exec = msg.data.exec || _agentSettings.exec;
+      updateAgentBadges();
+      addSystemMessage('Agent settings updated: Chat=' + msg.data.chat.provider + '·' + msg.data.chat.model + ', Exec=' + msg.data.exec.provider + '·' + msg.data.exec.model);
       break;
     case 'pong':
       break;
@@ -2485,9 +2552,7 @@ function switchConversation(convId) {
 }
 
 function loadConversationData(data) {
-  if (!data.messages || data.messages.length === 0) {
-    data.messages = extractMessagesFromTree(data.context_tree);
-  }
+  if (!data.messages) data.messages = [];
   conversations[data.id] = data;
   renderConversations();
   if (data.id === currentConvId) {
@@ -2495,6 +2560,44 @@ function loadConversationData(data) {
     if (data.provider_info) {
       updateProviderBadge(data.provider_info);
     }
+  }
+}
+
+function formatProgramResultContent(output) {
+  if (output == null) return '';
+  if (typeof output === 'string') return output;
+  if (typeof output !== 'object') return String(output);
+
+  if (typeof output.final_state === 'string' && output.final_state.trim()) {
+    return output.final_state;
+  }
+  if (typeof output.output === 'string' && output.output.trim()) {
+    return output.output;
+  }
+  if (typeof output.reasoning === 'string' && output.reasoning.trim()) {
+    return output.reasoning;
+  }
+  if (Array.isArray(output.history) && output.history.length > 0) {
+    var last = output.history[output.history.length - 1] || {};
+    if (typeof last.output === 'string' && last.output.trim()) {
+      return last.output;
+    }
+    if (typeof last.reasoning === 'string' && last.reasoning.trim()) {
+      return last.reasoning;
+    }
+  }
+  if (typeof output.action === 'string' && output.action) {
+    var summary = output.action;
+    if (typeof output.target === 'string' && output.target.trim()) {
+      summary += ': ' + output.target.trim();
+    }
+    return summary;
+  }
+
+  try {
+    return JSON.stringify(output, null, 2);
+  } catch (e) {
+    return String(output);
   }
 }
 
@@ -2509,7 +2612,7 @@ function extractMessagesFromTree(tree) {
         messages.push({ role: 'user', content: query });
       }
       if (child.output) {
-        messages.push({ role: 'assistant', content: child.output, type: 'result', function: null });
+        messages.push({ role: 'assistant', content: formatProgramResultContent(child.output), type: 'result', function: null });
       }
     } else if (child.name && child.name !== '_chat_query' && !child.name.startsWith('_')) {
       // User function call (e.g. word_count, research_assistant)
@@ -2518,7 +2621,7 @@ function extractMessagesFromTree(tree) {
       var argStr = Object.entries(kwargs).filter(function(e) { return e[0] !== 'runtime'; }).map(function(e) { return e[0] + '=' + JSON.stringify(e[1]); }).join(' ');
       messages.push({ role: 'user', content: 'run ' + funcName + (argStr ? ' ' + argStr : '') });
       if (child.output) {
-        messages.push({ role: 'assistant', content: child.output, type: 'result', function: funcName });
+        messages.push({ role: 'assistant', content: formatProgramResultContent(child.output), type: 'result', function: funcName });
       }
     }
   }
@@ -2960,6 +3063,100 @@ function toggleModelDropdown(event) {
     }
     document.removeEventListener('click', closeDropdown);
   }, { once: false });
+}
+
+// --- Agent settings (chat + exec) ---
+var _agentSettings = { chat: {}, exec: {}, available: {} };
+
+async function loadAgentSettings() {
+  try {
+    var resp = await fetch('/api/agent_settings');
+    _agentSettings = await resp.json();
+  } catch(e) { return; }
+  updateAgentBadges();
+}
+
+function updateAgentBadges() {
+  var chatBadge = document.getElementById('chatAgentBadge');
+  var execBadge = document.getElementById('execAgentBadge');
+  if (chatBadge && _agentSettings.chat) {
+    var cp = _agentSettings.chat.provider || '?';
+    var cm = _agentSettings.chat.model || 'default';
+    chatBadge.textContent = 'Chat: ' + cp + ' \u00b7 ' + cm;
+  }
+  if (execBadge && _agentSettings.exec) {
+    var ep = _agentSettings.exec.provider || '?';
+    var em = _agentSettings.exec.model || 'default';
+    execBadge.textContent = 'Exec: ' + ep + ' \u00b7 ' + em;
+  }
+}
+
+function openAgentSelector(agentType) {
+  // Close existing
+  var existing = document.getElementById('agentSelector');
+  if (existing) { existing.remove(); return; }
+
+  var badge = document.getElementById(agentType === 'chat' ? 'chatAgentBadge' : 'execAgentBadge');
+  if (!badge) return;
+  var rect = badge.getBoundingClientRect();
+
+  var current = _agentSettings[agentType] || {};
+  var available = _agentSettings.available || {};
+
+  var html = '<div id="agentSelector" class="agent-selector" style="top:' +
+    (rect.bottom + 4) + 'px;left:' + Math.max(rect.left - 50, 10) + 'px;">';
+  html += '<h4>' + (agentType === 'chat' ? 'Chat Agent' : 'Execution Agent') + '</h4>';
+
+  for (var provName in available) {
+    var prov = available[provName];
+    html += '<div class="provider-group">';
+    html += '<div class="provider-name">' + escHtml(provName) + '</div>';
+    var models = prov.models || [];
+    if (models.length === 0) models = [prov.default_model || 'default'];
+    for (var i = 0; i < models.length; i++) {
+      var m = models[i];
+      var isActive = (current.provider === provName && current.model === m);
+      var cls = 'model-item' + (isActive ? ' active' : '');
+      html += '<button class="' + cls + '" data-provider="' + escAttr(provName) +
+              '" data-model="' + escAttr(m) + '">' + escHtml(m) + '</button>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+
+  var selector = document.getElementById('agentSelector');
+  selector.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-provider]');
+    if (!btn) return;
+    e.stopPropagation();
+    var provider = btn.getAttribute('data-provider');
+    var model = btn.getAttribute('data-model');
+    selector.remove();
+
+    var body = {};
+    body[agentType] = { provider: provider, model: model };
+    fetch('/api/agent_settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(function(r) { return r.json(); }).then(function(data) {
+      _agentSettings.chat = data.chat || _agentSettings.chat;
+      _agentSettings.exec = data.exec || _agentSettings.exec;
+      updateAgentBadges();
+    }).catch(function() {});
+  });
+
+  // Close on outside click
+  setTimeout(function() {
+    document.addEventListener('click', function closeSelector(e) {
+      var sel = document.getElementById('agentSelector');
+      if (sel && !sel.contains(e.target) && e.target !== badge) {
+        sel.remove();
+      }
+      document.removeEventListener('click', closeSelector);
+    });
+  }, 0);
 }
 
 function addSystemMessage(text) {

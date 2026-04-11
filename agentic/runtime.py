@@ -69,7 +69,32 @@ class Runtime:
         self.model = model
         self.max_retries = max_retries
         self.has_session = False  # Subclasses set True if they manage their own context
+        self._closed = False  # True after close() is called
         self._prompted_functions: set[str] = set()  # Functions whose docstrings have been sent
+
+    # --- Lifecycle ---
+
+    def close(self):
+        """Close this runtime: release resources, kill processes, end session.
+
+        After close(), exec() will raise RuntimeError.
+        Subclasses should override this to clean up provider-specific resources
+        (kill CLI processes, clear session IDs, etc.) and call super().close().
+        """
+        self.has_session = False
+        self._prompted_functions.clear()
+        self._closed = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    def __del__(self):
+        if not self._closed:
+            self.close()
 
     def exec(
         self,
@@ -99,6 +124,9 @@ class Runtime:
         Returns:
             str — the LLM's reply text.
         """
+        if self._closed:
+            raise RuntimeError("Runtime is closed. Create a new runtime instance.")
+
         # Handle plain string input
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]

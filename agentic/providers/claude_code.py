@@ -128,8 +128,8 @@ class ClaudeCodeRuntime(Runtime):
         if self._proc is not None and self._proc.poll() is None:
             if self._turn_count < self._max_turns:
                 return  # Still alive and under turn limit
-            # Turn limit reached — restart to clear context
-            self.reset()
+            # Turn limit reached — restart process to clear context
+            self._restart_process()
 
         cmd = [
             self.cli_path,
@@ -448,8 +448,12 @@ class ClaudeCodeRuntime(Runtime):
 
         return None
 
-    def reset(self):
-        """Kill the current process and start fresh on next call."""
+    def _restart_process(self):
+        """Kill the current process so a new one starts on next _call().
+
+        Unlike close(), this does NOT mark the runtime as closed —
+        it just restarts the underlying CLI process.
+        """
         if self._proc is not None:
             try:
                 self._proc.terminate()
@@ -462,6 +466,7 @@ class ClaudeCodeRuntime(Runtime):
             self._proc = None
         self._turn_count = 0
 
-    def __del__(self):
-        """Clean up the subprocess on garbage collection."""
-        self.reset()
+    def close(self):
+        """Kill the Claude Code process and release resources."""
+        self._restart_process()
+        super().close()

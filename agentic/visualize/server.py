@@ -59,10 +59,17 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 _conversations: dict[str, dict] = {}
 _conversations_lock = threading.Lock()
 
-# Global default provider (used when creating new conversations)
+# Global default providers (used when creating new conversations)
+_chat_provider = None
+_chat_model = None
+_chat_runtime = None  # template for detecting default
+_exec_provider = None
+_exec_model = None
+_runtime_lock = threading.Lock()
+
+# Legacy aliases
 _default_provider = None
 _default_runtime = None
-_runtime_lock = threading.Lock()
 
 _CLI_PROVIDERS = {"codex", "claude-code", "gemini-cli"}
 
@@ -102,26 +109,73 @@ def _detect_default_provider() -> tuple:
     raise RuntimeError("No provider available")
 
 
-def _get_conv_runtime(conv_id: str, msg_id: str = None):
-    """Get runtime for a conversation, creating if needed."""
+_available_providers = {}
+
+
+def _init_providers():
+    """Initialize chat and exec provider defaults + probe available providers."""
+    global _chat_provider, _chat_model, _chat_runtime
+    global _exec_provider, _exec_model
     global _default_provider, _default_runtime
+    global _available_providers
+
+    with _runtime_lock:
+        if _chat_runtime is not None:
+            return  # already initialized
+
+        provider_name, rt = _detect_default_provider()
+
+        # Chat: use detected provider
+        _chat_provider = provider_name
+        _chat_model = rt.model
+        _chat_runtime = rt
+
+        # Exec: same provider by default (user can change later)
+        _exec_provider = provider_name
+        _exec_model = rt.model
+
+        # Legacy
+        _default_provider = provider_name
+        _default_runtime = rt
+
+        # Probe all providers once at startup
+        for p_name in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
+            try:
+                probe_rt = _create_runtime_for_visualizer(p_name)
+                models = probe_rt.list_models() if hasattr(probe_rt, 'list_models') else []
+                if probe_rt.model and probe_rt.model not in models:
+                    models = [probe_rt.model] + models
+                _available_providers[p_name] = {"models": models, "default_model": probe_rt.model}
+                if hasattr(probe_rt, 'close'):
+                    probe_rt.close()
+            except Exception:
+                continue
+
+
+def _get_conv_runtime(conv_id: str, msg_id: str = None):
+    """Get chat runtime for a conversation, creating if needed."""
+    _init_providers()
 
     conv = _conversations.get(conv_id)
     if conv and conv.get("runtime"):
         return conv["runtime"]
 
-    # Initialize default if needed
-    with _runtime_lock:
-        if _default_runtime is None:
-            _default_provider, _default_runtime = _detect_default_provider()
-
-    # Create runtime for this conversation using default provider + current model
-    rt = _create_runtime_for_visualizer(_default_provider)
-    if _default_runtime and _default_runtime.model:
-        rt.model = _default_runtime.model
+    # Create runtime for this conversation using chat provider + model
+    rt = _create_runtime_for_visualizer(_chat_provider)
+    if _chat_model:
+        rt.model = _chat_model
     if conv:
         conv["runtime"] = rt
-        conv["provider_name"] = _default_provider
+        conv["provider_name"] = _chat_provider
+    return rt
+
+
+def _get_exec_runtime():
+    """Create a fresh runtime for function execution."""
+    _init_providers()
+    rt = _create_runtime_for_visualizer(_exec_provider)
+    if _exec_model:
+        rt.model = _exec_model
     return rt
 
 
@@ -460,6 +514,8 @@ def _discover_functions() -> list[dict]:
     """
     result = []
     base = os.path.dirname(os.path.dirname(__file__))
+    _SKIP_DIRS = {"libs", "vendor", "node_modules", "desktop_env",
+                  "test", "tests", "examples", "docs", "build", "dist"}
 
     # Meta functions
     meta_dir = os.path.join(base, "meta_functions")
@@ -482,13 +538,15 @@ def _discover_functions() -> list[dict]:
             elif os.path.isdir(full_path) and not f.startswith("_"):
                 # Subdirectory project — find main.py at any depth
                 for root, dirs, files in os.walk(full_path):
-                    dirs[:] = [d for d in dirs if not d.startswith(("_", "."))]
+                    dirs[:] = [d for d in dirs
+                               if not d.startswith(("_", "."))
+                               and d not in _SKIP_DIRS]
                     if "main.py" in files:
                         main_py = os.path.join(root, "main.py")
                         info = _extract_function_info(main_py, None, "app")
                         if info:
                             result.append(info)
-                        break  # one entry point per subdirectory project
+                            break  # found valid entry point
 
     # Apps — scan apps/ for subdirectories with main.py at any depth
     apps_dir = os.path.join(base, "apps")
@@ -496,14 +554,35 @@ def _discover_functions() -> list[dict]:
         for f in sorted(os.listdir(apps_dir)):
             full_path = os.path.join(apps_dir, f)
             if os.path.isdir(full_path) and not f.startswith(("_", ".")):
+                found = False
                 for root, dirs, files in os.walk(full_path):
-                    dirs[:] = [d for d in dirs if not d.startswith(("_", "."))]
+                    dirs[:] = [d for d in dirs
+                               if not d.startswith(("_", "."))
+                               and d not in _SKIP_DIRS]
                     if "main.py" in files:
                         main_py = os.path.join(root, "main.py")
                         info = _extract_function_info(main_py, None, "app")
                         if info:
                             result.append(info)
-                        break
+                            found = True
+                            break
+                        # main.py has no @agentic_function — scan package for first one
+                        pkg_dir = root
+                        for sub_root, sub_dirs, sub_files in os.walk(pkg_dir):
+                            sub_dirs[:] = [d for d in sub_dirs
+                                           if not d.startswith(("_", "."))
+                                           and d not in _SKIP_DIRS]
+                            for py_file in sorted(sub_files):
+                                if py_file.endswith(".py") and not py_file.startswith("_"):
+                                    info = _extract_function_info(os.path.join(sub_root, py_file), None, "app")
+                                    if info:
+                                        result.append(info)
+                                        found = True
+                                        break
+                            if found:
+                                break
+                        if found:
+                            break
 
     return result
 
@@ -522,15 +601,25 @@ def _extract_function_info(filepath: str, name: Optional[str], category: str) ->
         with open(filepath) as f:
             content = f.read()
 
-        # If name not given, find the first @agentic_function decorated function
+        # If name not given, find the first public @agentic_function
         if name is None:
-            match = re.search(
+            # Prefer public functions (not starting with _)
+            for match in re.finditer(
                 r"@agentic_function[^\n]*\s*def\s+(\w+)\s*\(",
                 content,
-            )
-            if not match:
-                return None
-            name = match.group(1)
+            ):
+                if not match.group(1).startswith("_"):
+                    name = match.group(1)
+                    break
+            # Fallback to first @agentic_function (even private)
+            if name is None:
+                match = re.search(
+                    r"@agentic_function[^\n]*\s*def\s+(\w+)\s*\(",
+                    content,
+                )
+                if not match:
+                    return None
+                name = match.group(1)
 
         doc = ""
         # Try to find the docstring of the specific function
@@ -610,15 +699,6 @@ def _extract_all_functions(filepath: str, category: str) -> list[dict]:
 # Agentic chat functions — the visualizer eats its own dog food
 # ---------------------------------------------------------------------------
 
-@agentic_function
-def _chat_query(query: str, runtime: Runtime) -> str:
-    """You are a helpful assistant for the Agentic Programming framework.
-    Answer the user's question based on the conversation context.
-    The context of previous messages and function results is automatically
-    provided to you — just respond naturally."""
-    return runtime.exec(content=[{"type": "text", "text": query}])
-
-
 def _inject_runtime(loaded_func, kwargs: dict, runtime: Runtime):
     """Inject runtime into function kwargs if the function accepts it."""
     unwrapped_func = loaded_func._fn if hasattr(loaded_func, '_fn') else loaded_func
@@ -656,7 +736,7 @@ def _format_result(result) -> str:
         return result
     else:
         try:
-            return json.dumps(result, indent=2, default=str)
+            return json.dumps(result, indent=2, default=str, ensure_ascii=False)
         except (TypeError, ValueError):
             return str(result)
 
@@ -807,22 +887,26 @@ def _load_function(func_name: str):
             full_path = os.path.join(search_dir, d)
             if not os.path.isdir(full_path) or d.startswith(("_", ".")):
                 continue
+            _skip = {"libs", "vendor", "node_modules", "desktop_env",
+                     "test", "tests", "examples", "docs", "build", "dist"}
             for root, dirs, files in os.walk(full_path):
-                dirs[:] = [x for x in dirs if not x.startswith(("_", "."))]
+                dirs[:] = [x for x in dirs
+                           if not x.startswith(("_", ".")) and x not in _skip]
                 if "main.py" in files:
                     main_py = os.path.join(root, "main.py")
-                    spec = _imputil.spec_from_file_location(f"agentic.apps.{d}.main", main_py)
-                    mod = _imputil.module_from_spec(spec)
-                    spec.loader.exec_module(mod)
-                    # Auto-trace all functions in the entire app package
-                    pkg_dir = os.path.dirname(main_py)
-                    auto_trace_package(pkg_dir)
-                    # Re-fetch the function since module may have been reloaded
-                    mod = sys.modules.get(mod.__name__, mod)
-                    fn = getattr(mod, func_name, None)
-                    if fn is not None:
-                        return fn
-                    break
+                    try:
+                        spec = _imputil.spec_from_file_location(f"agentic.apps.{d}.main", main_py)
+                        mod = _imputil.module_from_spec(spec)
+                        spec.loader.exec_module(mod)
+                        # Only @agentic_function decorated functions are traced;
+                        # skip auto_trace_package to avoid tracing utility functions
+                        # like compute_iou that pollute the context tree.
+                        mod = sys.modules.get(mod.__name__, mod)
+                        fn = getattr(mod, func_name, None)
+                        if fn is not None:
+                            return fn
+                    except Exception:
+                        pass  # skip invalid main.py, continue searching
     return None
 
 
@@ -842,6 +926,8 @@ def _get_or_create_conversation(conv_id: str = None) -> dict:
                 "root_context": Context(name="chat_session", status="idle", start_time=time.time()),
                 "runtime": None,          # created lazily on first message
                 "provider_name": None,
+                "messages": [],
+                "function_trees": [],
                 "created_at": time.time(),
             }
         return _conversations[conv_id]
@@ -856,30 +942,29 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
     """
     try:
         conv = _get_or_create_conversation(conv_id)
-        root_ctx = conv["root_context"]
         runtime = _get_conv_runtime(conv_id, msg_id=msg_id)
-
-        # Mark conversation as running
-        root_ctx.status = "running"
-
-        # Set the conversation root as the current context so that
-        # @agentic_function calls become children of this root
-        token = _current_ctx.set(root_ctx)
 
         try:
             if action == "query":
-                # Chat query — @agentic_function with auto context
+                # Direct chat — no context tree, just talk to the LLM
                 _log(f"[exec] query: {query[:80]}...")
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "status", "content": "Thinking...",
                 })
-                result = _chat_query(query=query, runtime=runtime)
+                result = runtime.exec(content=[{"type": "text", "text": query}])
                 _log(f"[exec] query completed, result length: {len(str(result))}")
+
+                # Store assistant reply
+                conv["messages"].append({
+                    "role": "assistant",
+                    "id": msg_id + "_reply",
+                    "content": str(result),
+                    "timestamp": time.time(),
+                })
+
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
                     "content": str(result),
-                    "function": "chat",
-                    "context_tree": root_ctx._to_dict(),
                 })
 
             elif action == "run":
@@ -920,24 +1005,40 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Function '{func_name}' not found."})
                     return
                 call_kwargs = dict(kwargs or {})
-                _inject_runtime(loaded_func, call_kwargs, runtime)
-                result = _format_result(loaded_func(**call_kwargs))
+                # Use exec runtime (separate from chat runtime)
+                exec_rt = _get_exec_runtime()
+                _inject_runtime(loaded_func, call_kwargs, exec_rt)
+
+                # Create a fresh context tree for this function call
+                func_ctx = Context(name=func_name, status="running", start_time=time.time())
+                func_token = _current_ctx.set(func_ctx)
+                try:
+                    result = _format_result(loaded_func(**call_kwargs))
+                    func_ctx.status = "success"
+                finally:
+                    func_ctx.end_time = time.time()
+                    if func_ctx.status != "success":
+                        func_ctx.status = "error"
+                    _current_ctx.reset(func_token)
+                    if hasattr(exec_rt, 'close'):
+                        exec_rt.close()
+
+                # Store this function's context tree in conversation
+                if "function_trees" not in conv:
+                    conv["function_trees"] = []
+                conv["function_trees"].append(func_ctx._to_dict())
+
                 _log(f"[exec] {func_name} completed, result length: {len(str(result))}")
 
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
                     "content": str(result),
                     "function": func_name,
-                    "context_tree": root_ctx._to_dict(),
+                    "context_tree": func_ctx._to_dict(),
                 })
 
         finally:
-            _current_ctx.reset(token)
-            root_ctx.status = "idle"
-
-        # Broadcast updated provider info (session_id may have been set)
-        info = _get_provider_info(conv_id)
-        _broadcast(json.dumps({"type": "provider_changed", "data": info}))
+            pass
 
         # Update conversation title from first user message
         if not conv.get("_titled"):
@@ -1147,6 +1248,14 @@ async def _handle_ws_command(ws, cmd: dict):
             conv["title"] = text[:50] + ("..." if len(text) > 50 else "")
             conv["_titled"] = True
 
+        # Store user message
+        conv["messages"].append({
+            "role": "user",
+            "id": msg_id,
+            "content": text,
+            "timestamp": time.time(),
+        })
+
         # Send acknowledgment with conv_id
         await ws.send_text(json.dumps({
             "type": "chat_ack",
@@ -1200,15 +1309,15 @@ async def _handle_ws_command(ws, cmd: dict):
         if conv_id:
             with _conversations_lock:
                 conv = _conversations.pop(conv_id, None)
-            if conv and conv.get("runtime") and hasattr(conv["runtime"], 'reset'):
-                conv["runtime"].reset()
+            if conv and conv.get("runtime") and hasattr(conv["runtime"], 'close'):
+                conv["runtime"].close()
             _save_sessions()
 
     elif action == "clear_conversations":
         with _conversations_lock:
             for conv in _conversations.values():
-                if conv.get("runtime") and hasattr(conv["runtime"], 'reset'):
-                    conv["runtime"].reset()
+                if conv.get("runtime") and hasattr(conv["runtime"], 'close'):
+                    conv["runtime"].close()
             _conversations.clear()
         _save_sessions()
 
@@ -1414,7 +1523,8 @@ def create_app():
         with _conversations_lock:
             history = [
                 {"id": c["id"], "title": c["title"], "created_at": c["created_at"],
-                 "message_count": len(c.get("root_context", Context()).children)}
+                 "messages": c.get("messages", []),
+                 "message_count": len(c.get("messages", []))}
                 for c in sorted(_conversations.values(), key=lambda c: c["created_at"], reverse=True)
             ]
         return JSONResponse(content=history)
@@ -1502,18 +1612,20 @@ def create_app():
             with _conversations_lock:
                 conv = _conversations.get(conv_id)
             if conv and conv.get("runtime"):
-                conv["runtime"].model = model
-                # Reset session — Codex threads are bound to a model
-                if hasattr(conv["runtime"], 'reset'):
-                    conv["runtime"].reset()
+                # Close old runtime, create new one with new model
+                old_rt = conv["runtime"]
+                provider_name = conv.get("provider_name", _default_provider)
+                if hasattr(old_rt, 'close'):
+                    old_rt.close()
+                new_rt = _create_runtime_for_visualizer(provider_name)
+                new_rt.model = model
+                conv["runtime"] = new_rt
                 info = _get_provider_info(conv_id)
                 _broadcast(json.dumps({"type": "provider_changed", "data": info}))
                 return JSONResponse(content={"switched": True, "model": model})
         # Update default runtime
         if _default_runtime:
             _default_runtime.model = model
-            if hasattr(_default_runtime, 'reset'):
-                _default_runtime.reset()
             info = _get_provider_info()
             _broadcast(json.dumps({"type": "provider_changed", "data": info}))
             return JSONResponse(content={"switched": True, "model": model})
@@ -1546,6 +1658,71 @@ def create_app():
                 os.environ.pop(key, None)
         _save_config(config)
         return JSONResponse(content={"saved": True})
+
+    # --- Agent settings (chat + exec) ---
+
+    @app.get("/api/agent_settings")
+    async def get_agent_settings():
+        """Get current chat and exec agent provider/model settings."""
+        _init_providers()
+        return JSONResponse(content={
+            "chat": {
+                "provider": _chat_provider,
+                "model": _chat_model,
+            },
+            "exec": {
+                "provider": _exec_provider,
+                "model": _exec_model,
+            },
+            "available": _available_providers,
+        })
+
+    @app.post("/api/agent_settings")
+    async def set_agent_settings(body: dict = None):
+        """Update chat and/or exec agent provider/model."""
+        global _chat_provider, _chat_model, _exec_provider, _exec_model
+        _init_providers()
+
+        changed = False
+
+        if body and "chat" in body:
+            chat = body["chat"]
+            new_provider = chat.get("provider", _chat_provider)
+            new_model = chat.get("model", _chat_model)
+            if new_provider != _chat_provider or new_model != _chat_model:
+                _chat_provider = new_provider
+                _chat_model = new_model
+                # Update all existing conversation runtimes
+                with _conversations_lock:
+                    for conv in _conversations.values():
+                        old_rt = conv.get("runtime")
+                        if old_rt and hasattr(old_rt, 'close'):
+                            old_rt.close()
+                        new_rt = _create_runtime_for_visualizer(_chat_provider)
+                        new_rt.model = _chat_model
+                        conv["runtime"] = new_rt
+                        conv["provider_name"] = _chat_provider
+                changed = True
+
+        if body and "exec" in body:
+            exec_cfg = body["exec"]
+            _exec_provider = exec_cfg.get("provider", _exec_provider)
+            _exec_model = exec_cfg.get("model", _exec_model)
+            changed = True
+
+        if changed:
+            _broadcast(json.dumps({
+                "type": "agent_settings_changed",
+                "data": {
+                    "chat": {"provider": _chat_provider, "model": _chat_model},
+                    "exec": {"provider": _exec_provider, "model": _exec_model},
+                },
+            }))
+
+        return JSONResponse(content={
+            "chat": {"provider": _chat_provider, "model": _chat_model},
+            "exec": {"provider": _exec_provider, "model": _exec_model},
+        })
 
 
     def _validate_api_key(env_var: str, value: str) -> str | None:

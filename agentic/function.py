@@ -18,6 +18,7 @@ from __future__ import annotations
 import functools
 import inspect
 import time
+from contextvars import ContextVar
 from typing import Callable, Optional
 
 import os
@@ -25,6 +26,69 @@ from datetime import datetime
 
 import agentic.context as _ctx_module
 from agentic.context import Context, _current_ctx, _emit_event
+
+# Runtime shared across the call chain via ContextVar.
+# Entry-point functions auto-create a runtime; child functions inherit it.
+_current_runtime: ContextVar = ContextVar('_current_runtime', default=None)
+
+# Parameter names that receive the runtime injection
+_RUNTIME_PARAMS = {"runtime", "exec_runtime", "review_runtime"}
+
+
+def _inject_runtime(sig, args, kwargs):
+    """Auto-inject runtime into function call if needed.
+
+    If the function has a runtime parameter and it's None:
+      - If a runtime exists in the call chain (ContextVar), use it.
+      - Otherwise, create a new one (this function is the entry point).
+
+    Returns:
+        (args, kwargs, runtime_token, owns_runtime)
+        - runtime_token: ContextVar token to reset later (or None)
+        - owns_runtime: True if we created the runtime (need to close it)
+    """
+    bound = sig.bind(*args, **kwargs)
+    bound.apply_defaults()
+
+    runtime_token = None
+    owns_runtime = False
+
+    for param_name in _RUNTIME_PARAMS:
+        if param_name in bound.arguments and bound.arguments[param_name] is None:
+            # Check call chain first
+            rt = _current_runtime.get(None)
+            if rt is None:
+                # Entry point — create runtime
+                from agentic.providers import create_runtime
+                rt = create_runtime()
+                runtime_token = _current_runtime.set(rt)
+                owns_runtime = True
+            bound.arguments[param_name] = rt
+            break
+
+    # Also inject for params that exist but weren't provided (positional missing)
+    if not owns_runtime and runtime_token is None:
+        for param_name in _RUNTIME_PARAMS:
+            if param_name in sig.parameters and param_name not in bound.arguments:
+                rt = _current_runtime.get(None)
+                if rt is None:
+                    from agentic.providers import create_runtime
+                    rt = create_runtime()
+                    runtime_token = _current_runtime.set(rt)
+                    owns_runtime = True
+                bound.arguments[param_name] = rt
+                break
+
+    # If runtime was provided explicitly and no ContextVar set yet, share it
+    if runtime_token is None:
+        for param_name in _RUNTIME_PARAMS:
+            if param_name in bound.arguments and bound.arguments[param_name] is not None:
+                existing = _current_runtime.get(None)
+                if existing is None:
+                    runtime_token = _current_runtime.set(bound.arguments[param_name])
+                break
+
+    return bound.args, bound.kwargs, runtime_token, owns_runtime
 
 
 class agentic_function:
@@ -131,6 +195,9 @@ class agentic_function:
         async def wrapper(*args, **kwargs):
             parent = _current_ctx.get(None)
 
+            # Auto-inject runtime if needed
+            new_args, new_kwargs, runtime_token, owns_runtime = _inject_runtime(sig, args, kwargs)
+
             ctx = Context(
                 name=fn.__name__,
                 prompt=fn.__doc__ or "",
@@ -144,14 +211,14 @@ class agentic_function:
             if parent is not None:
                 parent.children.append(ctx)
 
-            token = _current_ctx.set(ctx)
+            ctx_token = _current_ctx.set(ctx)
             _emit_event("node_created", ctx)
             try:
-                bound = sig.bind(*args, **kwargs)
+                bound = sig.bind(*new_args, **new_kwargs)
                 bound.apply_defaults()
                 ctx.params = dict(bound.arguments)
 
-                result = await fn(*args, **kwargs)
+                result = await fn(*new_args, **new_kwargs)
                 ctx.output = result
                 ctx.status = "success"
                 return result
@@ -162,7 +229,13 @@ class agentic_function:
             finally:
                 ctx.end_time = time.time()
                 _emit_event("node_completed", ctx)
-                _current_ctx.reset(token)
+                _current_ctx.reset(ctx_token)
+                if runtime_token is not None:
+                    _current_runtime.reset(runtime_token)
+                if owns_runtime:
+                    rt = bound.arguments.get("runtime")
+                    if rt and hasattr(rt, 'close'):
+                        rt.close()
                 if parent is None:
                     self_ref.context = ctx
                     _auto_save(ctx)
@@ -180,7 +253,10 @@ class agentic_function:
         def wrapper(*args, **kwargs):
             parent = _current_ctx.get(None)
 
-            # Create node BEFORE binding so even invalid calls are recorded
+            # Auto-inject runtime if needed
+            new_args, new_kwargs, runtime_token, owns_runtime = _inject_runtime(sig, args, kwargs)
+
+            # Create node BEFORE execution so even invalid calls are recorded
             ctx = Context(
                 name=fn.__name__,
                 prompt=fn.__doc__ or "",
@@ -195,15 +271,15 @@ class agentic_function:
                 parent.children.append(ctx)
 
             # Set as current context for the duration of the call
-            token = _current_ctx.set(ctx)
+            ctx_token = _current_ctx.set(ctx)
             _emit_event("node_created", ctx)
             try:
-                # Bind arguments (inside try so binding errors are recorded)
-                bound = sig.bind(*args, **kwargs)
+                # Bind arguments to record params
+                bound = sig.bind(*new_args, **new_kwargs)
                 bound.apply_defaults()
                 ctx.params = dict(bound.arguments)
 
-                result = fn(*args, **kwargs)
+                result = fn(*new_args, **new_kwargs)
                 ctx.output = result
                 ctx.status = "success"
                 return result
@@ -214,7 +290,14 @@ class agentic_function:
             finally:
                 ctx.end_time = time.time()
                 _emit_event("node_completed", ctx)
-                _current_ctx.reset(token)
+                _current_ctx.reset(ctx_token)
+                # Clean up runtime if we created it
+                if runtime_token is not None:
+                    _current_runtime.reset(runtime_token)
+                if owns_runtime:
+                    rt = bound.arguments.get("runtime")
+                    if rt and hasattr(rt, 'close'):
+                        rt.close()
                 # If this was a top-level call (no parent), save and close
                 if parent is None:
                     self_ref.context = ctx
@@ -276,20 +359,47 @@ def traced(fn):
     return wrapper
 
 
+def _is_agentic_obj(obj) -> bool:
+    """Check if an object is an @agentic_function (class instance or wrapper)."""
+    if isinstance(obj, agentic_function):
+        return True
+    return getattr(obj, '_is_agentic', False)
+
+
+def _calls_agentic(func, mod) -> bool:
+    """Check if a function calls any @agentic_function.
+
+    Inspects the function's bytecode references (co_names) and checks
+    whether any referenced name in the module is an @agentic_function.
+    This identifies orchestrator functions that should be traced.
+    """
+    # Unwrap decorated functions to get the original code
+    original = getattr(func, '__wrapped__', func)
+    try:
+        code_names = set(original.__code__.co_names)
+    except AttributeError:
+        return False
+    for ref_name in code_names:
+        ref_obj = getattr(mod, ref_name, None)
+        if ref_obj is not None and _is_agentic_obj(ref_obj):
+            return True
+    return False
+
+
 def auto_trace_module(mod, exclude=None, trace_pkg=None):
-    """Auto-apply @traced to all user-defined functions in a module.
+    """Auto-apply @traced to orchestrator functions in a module.
+
+    Only traces functions that call @agentic_function (orchestrators).
+    Leaf functions (pure utilities like compute_iou) are skipped.
 
     Skips functions that are already @agentic_function or @traced,
     private functions (starting with _), and third-party imports.
-
-    Functions imported from the same package (trace_pkg) ARE traced,
-    so the execution tree shows the full call chain within an app.
 
     Args:
         mod: The module object to patch.
         exclude: Optional set of function names to skip.
         trace_pkg: Package directory path. Functions from files within this
-                   directory are traced even if imported. If None, uses
+                   directory are considered even if imported. If None, uses
                    the directory of mod.__file__.
     """
     exclude = exclude or set()
@@ -315,7 +425,9 @@ def auto_trace_module(mod, exclude=None, trace_pkg=None):
             continue
         if not fn_file.startswith(trace_pkg):
             continue
-        setattr(mod, name, traced(obj))
+        # Only trace orchestrators (functions that call @agentic_function)
+        if _calls_agentic(obj, mod):
+            setattr(mod, name, traced(obj))
 
 
 def auto_trace_package(pkg_dir, pkg_name=None):

@@ -353,8 +353,8 @@ class CodexRuntime(Runtime):
             )
         raise RuntimeError(f"Codex CLI error (exit {result.returncode}): {error_msg}")
 
-    def reset(self):
-        """Start a new session."""
+    def close(self):
+        """Clear Codex session and release resources."""
         self._session_id = None
         self._turn_count = 0
-        self.has_session = False
+        super().close()
