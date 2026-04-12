@@ -353,8 +353,14 @@ class CodexRuntime(Runtime):
             )
         raise RuntimeError(f"Codex CLI error (exit {result.returncode}): {error_msg}")
 
-    def close(self):
-        """Clear Codex session and release resources."""
+    def reset(self):
+        """Drop the active Codex session and clear provider-side conversation state."""
         self._session_id = None
         self._turn_count = 0
+        self.has_session = False
+        self._prompted_functions.clear()
+
+    def close(self):
+        """Clear Codex session and release resources."""
+        self.reset()
         super().close()

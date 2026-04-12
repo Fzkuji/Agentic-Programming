@@ -238,6 +238,27 @@ def test_save_accepts_pathlike_md(tmp_path):
     assert "task" in path.read_text()
 
 
+def test_save_accepts_uppercase_extension(tmp_path):
+    """save() accepts uppercase variants of supported extensions."""
+    @agentic_function
+    def task():
+        return "done"
+
+    task()
+
+    jsonl_path = tmp_path / "trace.JSONL"
+    md_path = tmp_path / "trace.MD"
+    json_path = tmp_path / "trace.JSON"
+
+    task.context.save(jsonl_path)
+    task.context.save(md_path)
+    task.context.save(json_path)
+
+    assert json.loads(jsonl_path.read_text().strip())['name'] == 'task'
+    assert 'task' in md_path.read_text()
+    assert json.loads(json_path.read_text())['name'] == 'task'
+
+
 def test_save_rejects_unsupported_extension(tmp_path):
     """save() rejects unsupported file extensions with a clear error."""
     @agentic_function

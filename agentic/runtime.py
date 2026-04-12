@@ -62,6 +62,9 @@ class Runtime:
             max_retries: Maximum number of exec() attempts before raising.
                          Default 2 (try once, retry once on failure).
         """
+        self._closed = False  # Set early so __del__ is safe even if __init__ raises.
+        self._prompted_functions: set[str] = set()  # Functions whose docstrings have been sent
+
         if max_retries < 1:
             raise ValueError("max_retries must be >= 1")
 
@@ -69,8 +72,6 @@ class Runtime:
         self.model = model
         self.max_retries = max_retries
         self.has_session = False  # Subclasses set True if they manage their own context
-        self._closed = False  # True after close() is called
-        self._prompted_functions: set[str] = set()  # Functions whose docstrings have been sent
 
     # --- Lifecycle ---
 

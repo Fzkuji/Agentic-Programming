@@ -26,8 +26,11 @@ from agentic.runtime import Runtime
 from agentic.functions._utils import parse_json
 
 
+_MISSING_RUNTIME = object()
+
+
 @agentic_function(summarize={"depth": 0, "siblings": 0})
-def general_action(instruction: str, runtime: Runtime = None) -> dict:
+def general_action(instruction: str, runtime: Runtime = _MISSING_RUNTIME) -> dict:
     """Execute a task using any available tools.
 
     You are given a specific task to complete. You have full freedom
@@ -47,7 +50,7 @@ def general_action(instruction: str, runtime: Runtime = None) -> dict:
       "error": null or "error description"
     }
     """
-    if runtime is None:
+    if runtime is _MISSING_RUNTIME or runtime is None:
         raise ValueError("runtime is required for general_action()")
 
     reply = runtime.exec(content=[

@@ -684,14 +684,15 @@ class Context:
         Raises ValueError for unsupported extensions.
         """
         path_str = os.fspath(path)
+        path_lower = path_str.lower()
         os.makedirs(os.path.dirname(os.path.abspath(path_str)), exist_ok=True)
-        if path_str.endswith(".md"):
+        if path_lower.endswith(".md"):
             with open(path_str, "w") as f:
                 f.write(self.tree())
-        elif path_str.endswith(".json"):
+        elif path_lower.endswith(".json"):
             with open(path_str, "w") as f:
                 json.dump(self._to_dict(), f, ensure_ascii=False, default=str, indent=2)
-        elif path_str.endswith(".jsonl"):
+        elif path_lower.endswith(".jsonl"):
             with open(path_str, "w") as f:
                 for record in self._to_records():
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")

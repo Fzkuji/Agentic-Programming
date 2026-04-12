@@ -24,8 +24,11 @@ from agentic.runtime import Runtime
 from agentic.functions._utils import parse_json
 
 
+_MISSING_RUNTIME = object()
+
+
 @agentic_function(compress=True, summarize={"depth": 0, "siblings": 0})
-def wait(action: str, runtime: Runtime = None) -> int:
+def wait(action: str, runtime: Runtime = _MISSING_RUNTIME) -> int:
     """Decide how many seconds to wait before the next step.
 
     Given what just happened, decide the appropriate wait time.
@@ -70,7 +73,7 @@ def wait(action: str, runtime: Runtime = None) -> int:
       "reason": "why this wait time"
     }
     """
-    if runtime is None:
+    if runtime is _MISSING_RUNTIME or runtime is None:
         raise ValueError("runtime is required for wait()")
 
     reply = runtime.exec(content=[
