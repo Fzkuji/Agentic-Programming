@@ -687,13 +687,13 @@ class Context:
         path_lower = path_str.lower()
         os.makedirs(os.path.dirname(os.path.abspath(path_str)), exist_ok=True)
         if path_lower.endswith(".md"):
-            with open(path_str, "w") as f:
-                f.write(self.tree())
+            with open(path_str, "w", encoding="utf-8") as f:
+                f.write(self.tree(color=False))
         elif path_lower.endswith(".json"):
-            with open(path_str, "w") as f:
+            with open(path_str, "w", encoding="utf-8") as f:
                 json.dump(self._to_dict(), f, ensure_ascii=False, default=str, indent=2)
         elif path_lower.endswith(".jsonl"):
-            with open(path_str, "w") as f:
+            with open(path_str, "w", encoding="utf-8") as f:
                 for record in self._to_records():
                     f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
         else:

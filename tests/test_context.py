@@ -177,7 +177,7 @@ def test_summarize_max_tokens_keeps_current_call_and_prefers_newer_siblings():
 
 
 def test_save_md(tmp_path):
-    """save() to .md creates readable output."""
+    """save() to .md creates readable output without ANSI color codes."""
     @agentic_function
     def task():
         return "done"
@@ -188,6 +188,7 @@ def test_save_md(tmp_path):
 
     content = Path(path).read_text()
     assert "task" in content
+    assert "\x1b[" not in content
 
 
 def test_save_accepts_pathlike_jsonl(tmp_path):
