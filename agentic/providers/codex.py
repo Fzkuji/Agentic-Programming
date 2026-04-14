@@ -293,25 +293,78 @@ class CodexRuntime(Runtime):
             env.pop("GEMINI_API_KEY", None)
             env.pop("GOOGLE_API_KEY", None)
 
+            import time as _time
+            start_time = _time.time()
+
             try:
-                proc = subprocess.run(
+                proc = subprocess.Popen(
                     cmd,
-                    input=prompt if not is_resume else None,
-                    capture_output=True,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
-                    timeout=self.timeout,
                     env=env,
                 )
+                # Send prompt via stdin for non-resume
+                if not is_resume:
+                    proc.stdin.write(prompt)
+                    proc.stdin.close()
+                else:
+                    proc.stdin.close()
+            except Exception as e:
+                raise RuntimeError(f"Failed to start Codex CLI: {e}")
+
+            # Read JSONL stdout line by line for streaming
+            stdout_lines = []
+            try:
+                for line in proc.stdout:
+                    stdout_lines.append(line)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    # Stream events to callback
+                    if self.on_stream and line.startswith("{"):
+                        try:
+                            event = json.loads(line)
+                            elapsed = round(_time.time() - start_time, 1)
+                            etype = event.get("type", "")
+
+                            # Extract thread_id from session events
+                            if etype in ("thread.started", "thread.resumed"):
+                                thread_id = event.get("thread_id")
+                                if thread_id:
+                                    self._session_id = thread_id
+                                    self.has_session = True
+
+                            streamed = self._stream_codex_event(event, elapsed)
+                            if streamed:
+                                self.on_stream(streamed)
+                        except json.JSONDecodeError:
+                            pass
+
+                proc.wait(timeout=self.timeout)
             except subprocess.TimeoutExpired:
+                proc.kill()
                 raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
 
-            if proc.returncode != 0:
-                self._handle_error(proc)
+            stderr_output = proc.stderr.read() if proc.stderr else ""
 
-            session_id = self._extract_thread_id(proc.stdout)
-            if session_id:
-                self._session_id = session_id
-                self.has_session = True
+            if proc.returncode != 0:
+                # Build a result-like object for _handle_error
+                class _Result:
+                    pass
+                r = _Result()
+                r.returncode = proc.returncode
+                r.stderr = stderr_output
+                r.stdout = "".join(stdout_lines)
+                self._handle_error(r)
+
+            # Extract thread_id from stdout if not already captured
+            if not self._session_id:
+                session_id = self._extract_thread_id("".join(stdout_lines))
+                if session_id:
+                    self._session_id = session_id
+                    self.has_session = True
 
             # Read output from the -o file
             try:
@@ -323,13 +376,75 @@ class CodexRuntime(Runtime):
                 pass
 
             # Fall back to stdout
-            return proc.stdout.strip()
+            return "".join(stdout_lines).strip()
 
         finally:
             try:
                 os.unlink(output_file)
             except OSError:
                 pass
+
+    def _stream_codex_event(self, event: dict, elapsed: float) -> Optional[dict]:
+        """Parse a Codex JSONL event into a stream dict for the frontend.
+
+        Codex JSONL format (v0.120+):
+          {"type": "thread.started", "thread_id": "..."}
+          {"type": "turn.started"}
+          {"type": "item.started",   "item": {"type": "command_execution", "command": "...", ...}}
+          {"type": "item.completed", "item": {"type": "agent_message", "text": "..."}}
+          {"type": "item.completed", "item": {"type": "command_execution", "command": "...",
+                                              "aggregated_output": "...", "exit_code": 0}}
+          {"type": "turn.completed", "usage": {...}}
+        """
+        etype = event.get("type", "")
+        item = event.get("item") or {}
+        item_type = item.get("type", "")
+
+        if etype == "item.completed" and item_type == "agent_message":
+            text = item.get("text", "")
+            if text:
+                return {"type": "text", "elapsed": elapsed, "text": text[:500]}
+
+        if etype == "item.started" and item_type == "command_execution":
+            cmd = item.get("command", "")
+            if cmd:
+                return {"type": "tool_use", "elapsed": elapsed,
+                        "tool": "shell", "input": cmd[:300]}
+
+        if etype == "item.completed" and item_type == "command_execution":
+            output = item.get("aggregated_output", "")
+            exit_code = item.get("exit_code", "?")
+            cmd = item.get("command", "")
+            if output:
+                return {"type": "text", "elapsed": elapsed,
+                        "text": f"[exit {exit_code}] {output[:400]}"}
+            return {"type": "status", "elapsed": elapsed,
+                    "text": f"command done (exit {exit_code})"}
+
+        if etype == "item.completed" and item_type == "file_edit":
+            path = item.get("path", item.get("file", ""))
+            return {"type": "tool_use", "elapsed": elapsed,
+                    "tool": "edit", "input": path[:200]}
+
+        if etype == "turn.completed":
+            usage = event.get("usage", {})
+            tokens = usage.get("output_tokens", 0)
+            if tokens:
+                return {"type": "status", "elapsed": elapsed,
+                        "text": f"turn done ({tokens} tokens)"}
+            return None
+
+        # Skip noisy events
+        if etype in ("turn.started", "ping", "pong"):
+            return None
+
+        # Session events
+        thread_id = event.get("thread_id")
+        if thread_id:
+            return {"type": "status", "elapsed": elapsed,
+                    "text": f"session {thread_id[:12]}..."}
+
+        return None
 
     def _extract_thread_id(self, stdout: str) -> Optional[str]:
         """Extract the Codex thread id from JSONL exec output."""

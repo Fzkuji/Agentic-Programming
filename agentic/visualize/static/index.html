@@ -1035,23 +1035,47 @@ html, body {
 .inline-tree-body.collapsed { display: none; }
 
 /* Stream terminal */
-.stream-terminal {
+.stream-terminal-wrap {
   margin: 4px 8px 8px;
-  padding: 8px 10px;
-  background: var(--bg-primary);
   border: 1px solid var(--border);
   border-radius: 6px;
+  overflow: hidden;
+}
+.stream-terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.stream-terminal-header:hover { color: var(--text-primary); }
+.stream-terminal-toggle {
+  font-size: 9px;
+  transition: transform var(--transition);
+  display: inline-block;
+  transform: rotate(90deg);
+}
+.stream-terminal-wrap.collapsed .stream-terminal-toggle { transform: rotate(0deg); }
+.stream-terminal-wrap.collapsed .stream-terminal { display: none; }
+.stream-terminal {
+  padding: 8px 10px;
+  background: var(--bg-primary);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;
-  max-height: 150px;
+  max-height: 200px;
   overflow-y: auto;
   color: var(--text-secondary);
   white-space: pre-wrap;
   word-break: break-word;
 }
 .stream-terminal .stream-text { color: var(--text-primary); }
-.stream-terminal .stream-tool { color: var(--accent-cyan); }
+.stream-terminal .stream-tool { color: var(--accent-cyan); font-weight: 600; }
+.stream-terminal .stream-status { color: var(--accent-yellow); font-style: italic; }
 .stream-terminal .stream-time { color: var(--text-muted); font-size: 10px; }
 
 /* Error card */
@@ -2979,18 +3003,31 @@ function handleChatResponse(data) {
     if (pendingBlock) {
       var content = pendingBlock.querySelector('.runtime-block-content');
       if (content) {
-        var terminal = content.querySelector('.stream-terminal');
-        if (!terminal) {
-          terminal = document.createElement('div');
-          terminal.className = 'stream-terminal';
-          content.appendChild(terminal);
+        var termWrap = content.querySelector('.stream-terminal-wrap');
+        var terminal;
+        if (!termWrap) {
+          termWrap = document.createElement('div');
+          termWrap.className = 'stream-terminal-wrap';
+          termWrap.innerHTML =
+            '<div class="stream-terminal-header" onclick="this.parentElement.classList.toggle(\'collapsed\')">' +
+              '<span class="stream-terminal-toggle">&#9654;</span>' +
+              '<span>CLI Output</span>' +
+            '</div>' +
+            '<div class="stream-terminal"></div>';
+          content.appendChild(termWrap);
         }
+        terminal = termWrap.querySelector('.stream-terminal');
         var evt = data.event;
         var line = document.createElement('div');
+        var time = '<span class="stream-time">[' + evt.elapsed + 's]</span> ';
         if (evt.type === 'text') {
-          line.innerHTML = '<span class="stream-time">[' + evt.elapsed + 's]</span> <span class="stream-text">' + escHtml(evt.text || '') + '</span>';
+          line.innerHTML = time + '<span class="stream-text">' + escHtml(evt.text || '') + '</span>';
         } else if (evt.type === 'tool_use') {
-          line.innerHTML = '<span class="stream-time">[' + evt.elapsed + 's]</span> <span class="stream-tool">' + escHtml(evt.tool || '?') + '</span> ' + escHtml(evt.input || '');
+          line.innerHTML = time + '<span class="stream-tool">$ ' + escHtml(evt.tool || '?') + '</span> <span class="stream-text">' + escHtml(evt.input || '') + '</span>';
+        } else if (evt.type === 'status') {
+          line.innerHTML = time + '<span class="stream-status">' + escHtml(evt.text || '') + '</span>';
+        } else {
+          line.innerHTML = time + escHtml(evt.text || evt.type || '');
         }
         terminal.appendChild(line);
         terminal.scrollTop = terminal.scrollHeight;
