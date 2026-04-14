@@ -74,6 +74,10 @@ _runtime_lock = threading.Lock()
 _follow_up_queues: dict[str, queue.Queue] = {}
 _follow_up_lock = threading.Lock()
 
+# Track running tasks so refresh can recover them
+_running_tasks: dict[str, dict] = {}  # conv_id → {msg_id, func_name, started_at}
+_running_tasks_lock = threading.Lock()
+
 # Legacy aliases
 _default_provider = None
 _default_runtime = None
@@ -829,7 +833,7 @@ def _inject_runtime(loaded_func, kwargs: dict, runtime: Runtime):
             loaded_func._fn.__globals__['runtime'] = runtime
 
 
-def _format_result(result) -> str:
+def _format_result(result, action: str = "create") -> str:
     """Format function result for display."""
     if callable(result):
         result_name = getattr(result, '__name__', 'unknown')
@@ -839,7 +843,13 @@ def _format_result(result) -> str:
             params = [p for p in result_sig.parameters if p not in ('runtime', 'callback', 'self')]
         except (ValueError, TypeError):
             params = []
-        msg = f"Created function `{result_name}`."
+        action_labels = {
+            "create": "Created",
+            "fix": "Fixed",
+            "improve": "Improved",
+        }
+        label = action_labels.get(action, "Created")
+        msg = f"{label} function `{result_name}`."
         if params:
             param_str = ' '.join(p + '="..."' for p in params)
             msg += f"\nUsage: `run {result_name} {param_str}`"
@@ -848,6 +858,8 @@ def _format_result(result) -> str:
         functions = _discover_functions()
         _broadcast(json.dumps({"type": "functions_list", "data": functions}, default=str))
         return msg
+    elif isinstance(result, dict) and "summary" in result:
+        return result["summary"]
     elif isinstance(result, str):
         return result
     else:
@@ -921,9 +933,52 @@ def _retry_node(conv_id: str, msg_id: str, node_path: str, params_override: dict
                 if resolved_function is not None:
                     call_kwargs[param_key] = resolved_function
         _inject_runtime(loaded_func, call_kwargs, exec_rt)
+
+        # Register event-driven tree updates (same as main execution path)
+        def _tree_event_callback(event_type: str, data: dict):
+            try:
+                ctx = _get_last_ctx(loaded_func)
+                if ctx is None:
+                    ctx = getattr(loaded_func, 'context', None)
+                if ctx is not None:
+                    partial_tree = ctx._to_dict()
+                    partial_tree["_in_progress"] = True
+                    _broadcast_chat_response(conv_id, msg_id, {
+                        "type": "tree_update",
+                        "tree": partial_tree,
+                        "function": func_name,
+                    })
+            except Exception:
+                pass
+
+        on_event(_tree_event_callback)
+
+        # Register ask_user handler for follow-up questions
+        _fq = queue.Queue()
+        with _follow_up_lock:
+            _follow_up_queues[conv_id] = _fq
+
+        def _ask_user_handler(question: str) -> str:
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "follow_up_question",
+                "question": question,
+                "function": func_name,
+            })
+            _tree_event_callback("follow_up", {})
+            try:
+                return _fq.get(timeout=300)
+            except queue.Empty:
+                return ""
+
+        set_ask_user(_ask_user_handler)
+
         try:
-            result = _format_result(loaded_func(**call_kwargs))
+            result = _format_result(loaded_func(**call_kwargs), action=func_name)
         finally:
+            set_ask_user(None)
+            off_event(_tree_event_callback)
+            with _follow_up_lock:
+                _follow_up_queues.pop(conv_id, None)
             if hasattr(exec_rt, 'close'):
                 exec_rt.close()
 
@@ -1339,6 +1394,8 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         pass
 
                 _log(f"[exec] running function: {func_name}({', '.join(f'{k}=...' for k in (kwargs or {}))})")
+                with _running_tasks_lock:
+                    _running_tasks[conv_id] = {"msg_id": msg_id, "func_name": func_name, "started_at": time.time()}
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "status",
                     "content": f"Running {func_name}...",
@@ -1402,12 +1459,14 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 set_ask_user(_ask_user_handler)
 
                 try:
-                    result = _format_result(loaded_func(**call_kwargs))
+                    result = _format_result(loaded_func(**call_kwargs), action=func_name)
                 finally:
                     set_ask_user(None)
                     off_event(_tree_event_callback)
                     with _follow_up_lock:
                         _follow_up_queues.pop(conv_id, None)
+                    with _running_tasks_lock:
+                        _running_tasks.pop(conv_id, None)
                     if hasattr(exec_rt, 'close'):
                         exec_rt.close()
 
@@ -1484,6 +1543,8 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
         _save_sessions()
 
     except Exception as e:
+        with _running_tasks_lock:
+            _running_tasks.pop(conv_id, None)
         error_content = f"Error: {e}\n\n{traceback.format_exc()}"
         # Persist error to conversation messages
         try:
@@ -1829,6 +1890,13 @@ async def _handle_ws_command(ws, cmd: dict):
                 kwargs={"func_name": parsed["function"], "kwargs": parsed["kwargs"], "thinking_effort": thinking_effort},
                 daemon=True,
             ).start()
+        else:
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "error",
+                "content": f"Could not parse retry command: {text[:100]}",
+                "function": func_name,
+                "display": "runtime",
+            })
 
     elif action == "switch_attempt":
         conv_id = cmd.get("conv_id")
@@ -1923,6 +1991,19 @@ async def _handle_ws_command(ws, cmd: dict):
                     "provider_info": _get_provider_info(conv_id),
                 },
             }, default=str))
+            # If a task is currently running for this conversation, notify the client
+            with _running_tasks_lock:
+                task_info = _running_tasks.get(conv_id)
+            if task_info:
+                await ws.send_text(json.dumps({
+                    "type": "running_task",
+                    "data": {
+                        "conv_id": conv_id,
+                        "msg_id": task_info["msg_id"],
+                        "func_name": task_info["func_name"],
+                        "started_at": task_info["started_at"],
+                    },
+                }, default=str))
         else:
             await ws.send_text(json.dumps({
                 "type": "conversation_loaded",

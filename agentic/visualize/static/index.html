@@ -1572,6 +1572,7 @@ select.fn-form-input {
 }
 
 .detail-badge.running { background: rgba(97,175,239,0.12); color: var(--accent-blue); }
+.detail-badge.paused { background: rgba(229,192,123,0.12); color: var(--accent-yellow); }
 .detail-badge.success { background: rgba(152,195,121,0.12); color: var(--accent-green); }
 .detail-badge.error { background: rgba(224,108,117,0.12); color: var(--accent-red); }
 
@@ -1619,6 +1620,7 @@ select.fn-form-input {
 .node-name:hover { text-decoration: underline; }
 .node-status { font-size: 10px; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; }
 .node-status.running { background: rgba(97,175,239,0.12); color: var(--accent-blue); }
+.node-status.paused { background: rgba(229,192,123,0.12); color: var(--accent-yellow); }
 .node-status.success { background: rgba(152,195,121,0.12); color: var(--accent-green); }
 .node-status.error { background: rgba(224,108,117,0.12); color: var(--accent-red); }
 .node-duration { font-size: 11px; color: var(--text-secondary); flex-shrink: 0; }
@@ -2073,6 +2075,34 @@ function handleMessage(msg) {
     case 'status':
       isPaused = msg.paused;
       updatePauseBtn();
+      refreshInlineTrees();
+      break;
+    case 'running_task':
+      // A task is still running after page refresh — replace interrupted block or create pending
+      if (msg.data) {
+        var rt = msg.data;
+        setRunning(true);
+        // Remove any "interrupted" block for this function — it's actually still running
+        var interruptedBlock = document.querySelector('.runtime-block.interrupted[data-function="' + rt.func_name + '"]');
+        if (interruptedBlock) interruptedBlock.remove();
+        // Create pending runtime block if not already present
+        if (!document.getElementById('runtime_pending')) {
+          var div = document.createElement('div');
+          div.className = 'runtime-block runtime-block-pending';
+          div.id = 'runtime_pending';
+          div.setAttribute('data-msg-id', rt.msg_id);
+          var hdr = '<div class="runtime-block-header" onclick="toggleRuntimeBlock(this)">' +
+            '<span class="runtime-icon">&#9654;</span>' +
+            '<span class="runtime-func">' + escHtml(rt.func_name) + '()</span>' +
+          '</div>';
+          div.innerHTML = hdr +
+            '<div class="runtime-block-body"><div class="runtime-block-content">' +
+              '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
+            '</div></div>';
+          appendToChat(div);
+          scrollToBottom();
+        }
+      }
       break;
     case 'provider_info':
     case 'provider_changed':
@@ -2117,6 +2147,41 @@ function renderLiveTree() {
   // Clean up any leftover global tree element.
   var old = document.getElementById('liveExecTree');
   if (old) old.remove();
+}
+
+// Timer to refresh elapsed time on running nodes every second
+var _elapsedTimer = null;
+function startElapsedTimer() {
+  if (_elapsedTimer) return;
+  _elapsedTimer = setInterval(function() {
+    // Only refresh if there are running nodes visible
+    var runningDurs = document.querySelectorAll('.node-duration[data-running]');
+    if (runningDurs.length === 0) {
+      clearInterval(_elapsedTimer);
+      _elapsedTimer = null;
+      return;
+    }
+    runningDurs.forEach(function(el) {
+      var startTime = parseFloat(el.getAttribute('data-start'));
+      if (startTime > 0) {
+        var elapsed = Math.round(Date.now() / 1000 - startTime);
+        el.textContent = elapsed + 's...';
+      }
+    });
+  }, 1000);
+}
+
+function refreshInlineTrees() {
+  // Re-render all visible inline trees so paused/running status updates visually
+  var treeBodies = document.querySelectorAll('.inline-tree-body');
+  treeBodies.forEach(function(body) {
+    var path = body.getAttribute('data-root-path');
+    if (path && _nodeCache[path]) {
+      body.innerHTML = renderTreeNode(_nodeCache[path]);
+    }
+  });
+  // Also clear the last tree JSON cache so next tree_update isn't skipped
+  window._lastTreeJson = null;
 }
 
 function _treeHasRunning(node) {
@@ -2534,12 +2599,10 @@ function submitFollowUp() {
   if (!inp) return;
   var answer = inp.value.trim();
   if (!answer) return;
-  // Replace the input UI with the submitted answer
+  // Remove the follow-up container after submitting
   var container = inp.closest('.follow-up-container');
   if (container) {
-    container.innerHTML =
-      '<div style="color:var(--accent-cyan);font-weight:600;margin-bottom:4px">&#10003; Answer submitted</div>' +
-      '<div style="color:var(--text-secondary)">' + escHtml(answer) + '</div>';
+    container.remove();
   }
   // Send answer to server
   if (ws && ws.readyState === 1) {
@@ -2554,7 +2617,8 @@ function submitFollowUp() {
 function retryCurrentBlock(funcName) {
   // Overwrite retry: replace current error/interrupted block with running state,
   // then backend re-runs and result replaces in-place
-  if (!currentConvId || !conversations[currentConvId]) return;
+  console.log('[retry] retryCurrentBlock called, funcName:', funcName);
+  if (!currentConvId || !conversations[currentConvId]) { console.log('[retry] no conversation'); return; }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     addSystemMessage('Retry failed: not connected to server.');
     return;
@@ -2562,10 +2626,12 @@ function retryCurrentBlock(funcName) {
 
   // Find the ORIGINAL user command for this function (ignoring retry modifications)
   var msgs = conversations[currentConvId].messages || [];
+  console.log('[retry] searching', msgs.length, 'messages for funcName:', funcName);
   var userCmd = null;
   for (var i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role === 'user' && msgs[i].display === 'runtime') {
       var parsed = parseRunCommandForDisplay(msgs[i].content || '');
+      console.log('[retry] candidate msg:', msgs[i].content, '-> parsed funcName:', parsed.funcName);
       if (parsed.funcName === funcName || !funcName) {
         userCmd = msgs[i].original_content || msgs[i].content;
         break;
@@ -2573,7 +2639,8 @@ function retryCurrentBlock(funcName) {
     }
   }
   if (!userCmd && _lastRunCommand) userCmd = _lastRunCommand;
-  if (!userCmd) return;
+  if (!userCmd) { console.log('[retry] no userCmd found, aborting'); return; }
+  console.log('[retry] found userCmd:', userCmd);
 
   // Turn the existing block into "running" state with typing indicator
   var existingBlock = document.querySelector('.runtime-block[data-function="' + funcName + '"]');
@@ -2582,7 +2649,8 @@ function retryCurrentBlock(funcName) {
     existingBlock = document.querySelector('.runtime-block.interrupted');
   }
   if (existingBlock) {
-    existingBlock.className = 'runtime-block';
+    existingBlock.className = 'runtime-block runtime-block-pending';
+    existingBlock.id = 'runtime_pending';
     existingBlock.setAttribute('data-function', funcName);
     var parsedDisplay = parseRunCommandForDisplay(userCmd);
     existingBlock.innerHTML =
@@ -2687,8 +2755,21 @@ function executeRetry(path, paramsOverride) {
     return;
   }
 
-  var msgId = 'retry_' + Date.now();
-  addAssistantPlaceholder(msgId);
+  // Mark the closest runtime block as pending so tree_update and follow_up can find it
+  var retryBtn = document.querySelector('.retry-field-input[data-path="' + path + '"]');
+  var runtimeBlock = retryBtn ? retryBtn.closest('.runtime-block') : null;
+  if (!runtimeBlock) {
+    // Fallback: find the last runtime block
+    var allBlocks = document.querySelectorAll('.runtime-block');
+    if (allBlocks.length > 0) runtimeBlock = allBlocks[allBlocks.length - 1];
+  }
+  if (runtimeBlock) {
+    // Remove old pending id if exists
+    var oldPending = document.getElementById('runtime_pending');
+    if (oldPending && oldPending !== runtimeBlock) oldPending.id = '';
+    runtimeBlock.id = 'runtime_pending';
+  }
+
   setRunning(true);
 
   ws.send(JSON.stringify({
@@ -2946,6 +3027,7 @@ function handleChatResponse(data) {
           }
         }
         scrollToBottom();
+        startElapsedTimer();
       }
     }
     return;
@@ -3309,7 +3391,7 @@ function renderInlineTree(tree, treeId) {
       '<span>' + statusIcon + 'Execution Tree</span>' +
       '<span class="inline-tree-toggle" id="itoggle_' + id + '">&#9654;</span>' +
     '</div>' +
-    '<div class="inline-tree-body" id="ibody_' + id + '">' +
+    '<div class="inline-tree-body" id="ibody_' + id + '" data-root-path="' + escAttr(tree.path || '') + '">' +
       renderTreeNode(tree) +
     '</div>' +
   '</div>';
@@ -3336,13 +3418,27 @@ function renderTreeNode(node) {
   var isExpanded = expandedNodes.has(node.path);
   var isSelected = node.path === selectedPath;
 
-  var icon = node.status === 'success'
+  // Show running nodes as paused when globally paused
+  var displayStatus = (isPaused && node.status === 'running') ? 'paused' : node.status;
+
+  var icon = displayStatus === 'success'
     ? '<span style="color:var(--accent-green)">&#10003;</span>'
-    : node.status === 'error'
+    : displayStatus === 'error'
     ? '<span style="color:var(--accent-red)">&#10007;</span>'
+    : displayStatus === 'paused'
+    ? '<span style="color:var(--accent-yellow)">&#10074;&#10074;</span>'
     : '<span class="pulse" style="color:var(--accent-blue)">&#9679;</span>';
 
-  var dur = node.duration_ms > 0 ? Math.round(node.duration_ms) + 'ms' : '';
+  var dur = '';
+  if (node.duration_ms > 0) {
+    dur = node.duration_ms >= 1000 ? (node.duration_ms / 1000).toFixed(1) + 's' : Math.round(node.duration_ms) + 'ms';
+  } else if (displayStatus === 'running' && node.start_time > 0) {
+    var elapsed = Math.round(Date.now() / 1000 - node.start_time);
+    dur = elapsed + 's...';
+  } else if (displayStatus === 'paused' && node.start_time > 0) {
+    var elapsed = Math.round(Date.now() / 1000 - node.start_time);
+    dur = elapsed + 's (paused)';
+  }
   var output = node.output != null ? truncate(JSON.stringify(node.output), 30) : '';
   var toggleClass = hasChildren ? (isExpanded ? 'expanded' : '') : 'leaf';
   var childrenClass = isExpanded ? '' : 'collapsed';
@@ -3358,8 +3454,8 @@ function renderTreeNode(node) {
       '<span class="node-toggle ' + toggleClass + '" onclick="toggleExpand(event, \'' + escAttr(node.path) + '\')">&#9654;</span>' +
       '<span class="node-icon">' + icon + '</span>' +
       '<span class="node-name" onclick="event.stopPropagation();viewSource(\'' + escAttr(node.name) + '\')" title="View source" style="cursor:pointer">' + escHtml(node.name) + '</span>' +
-      '<span class="node-status ' + node.status + '">' + node.status + '</span>' +
-      (dur ? '<span class="node-duration">' + dur + '</span>' : '') +
+      '<span class="node-status ' + displayStatus + '">' + displayStatus + '</span>' +
+      (dur ? '<span class="node-duration"' + ((displayStatus === 'running' || displayStatus === 'paused') && node.start_time > 0 ? ' data-running="1" data-start="' + node.start_time + '"' : '') + '>' + dur + '</span>' : '') +
       (output ? '<span class="node-output-preview">' + escHtml(output) + '</span>' : '') +
       (canRetry ? '<span class="retry-icon" onclick="event.stopPropagation();toggleRetryPanel(\'' + escAttr(node.path) + '\')" title="Modify">modify</span>' : '') +
     '</div>';

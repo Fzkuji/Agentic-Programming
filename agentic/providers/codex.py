@@ -287,6 +287,12 @@ class CodexRuntime(Runtime):
             else:
                 cmd.append("-")
 
+            # Remove unrelated API keys so CLI doesn't pick up wrong credentials
+            env = os.environ.copy()
+            env.pop("ANTHROPIC_API_KEY", None)
+            env.pop("GEMINI_API_KEY", None)
+            env.pop("GOOGLE_API_KEY", None)
+
             try:
                 proc = subprocess.run(
                     cmd,
@@ -294,6 +300,7 @@ class CodexRuntime(Runtime):
                     capture_output=True,
                     text=True,
                     timeout=self.timeout,
+                    env=env,
                 )
             except subprocess.TimeoutExpired:
                 raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")

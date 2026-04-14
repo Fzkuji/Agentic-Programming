@@ -149,12 +149,18 @@ class GeminiCLIRuntime(Runtime):
         if self._session_id and self._turn_count > 0:
             cmd.extend(["--resume", self._session_id])
 
+        # Remove unrelated API keys so CLI doesn't pick up wrong credentials
+        env = os.environ.copy()
+        env.pop("ANTHROPIC_API_KEY", None)
+        env.pop("OPENAI_API_KEY", None)
+
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
+                env=env,
             )
         except subprocess.TimeoutExpired:
             raise TimeoutError(f"Gemini CLI timed out after {self.timeout}s")

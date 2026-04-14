@@ -487,32 +487,6 @@ def follow_up(question: str, runtime: Runtime) -> str:
 
 # ── Clarify — pre-check before code generation ───────────────
 
-_PRIOR_CONTEXT_MARKERS = (
-    "previous attempt feedback",
-    "retry feedback",
-    "follow-up context",
-    "prior clarification context",
-    "clarification context",
-)
-
-
-def _has_prior_clarification_context(task: str) -> bool:
-    """Detect already-answered clarification context in the task text.
-
-    Clarify should short-circuit when the task already carries a Q/A block or
-    retry-feedback block so we do not re-ask the same question.
-    """
-    if not task:
-        return False
-
-    lower = task.lower()
-    if any(marker in lower for marker in _PRIOR_CONTEXT_MARKERS):
-        return True
-
-    # A trailing Q/A block is the common serialized follow-up format.
-    return bool(re.search(r"(?ms)^\s*Q:\s*.+?\n\s*A:\s*.+\s*$", task))
-
-
 def _reply_looks_like_follow_up(reply: str) -> bool:
     """Heuristically detect a non-JSON clarification request.
 
@@ -549,17 +523,20 @@ def _reply_looks_like_follow_up(reply: str) -> bool:
 
 @agentic_function(summarize={"depth": 0, "siblings": 0})
 def clarify(task: str, runtime: Runtime) -> dict:
-    """Judge whether the task description has enough information to generate code.
+    """Review a task before code generation and decide whether to ask the user first.
 
-    Analyze the task and determine if you can proceed to write code,
-    or if you need to ask the user a clarifying question first.
+    Ask a clarifying question if:
+    - The instruction is vague, investigative, or open-ended
+    - Critical details are missing
+    - The intent is ambiguous
+
+    Proceed without asking if:
+    - The instruction is specific and actionable
+    - A prior Q/A pair already clarified the ambiguity
 
     Return JSON:
-    - {"ready": true} if you have enough information
-    - {"ready": false, "question": "your specific question"} if not
-
-    If the task contains prior Q/A or retry feedback, treat it as resolved
-    context and do not ask the same question again.
+    - {"ready": false, "question": "your specific question"}
+    - {"ready": true}
 
     Args:
         task: The full task description (code, errors, instructions, etc.).
@@ -568,18 +545,20 @@ def clarify(task: str, runtime: Runtime) -> dict:
     Returns:
         dict with "ready" (bool) and optionally "question" (str).
     """
-    if _has_prior_clarification_context(task):
-        return {"ready": True}
-
     reply = runtime.exec(content=[
         {"type": "text", "text": (
-            "Judge whether the task description has enough information to "
-            "generate code.\n\n"
-            "Return ONLY JSON in one of these forms:\n"
-            '{"ready": true}\n'
-            '{"ready": false, "question": "specific question"}\n\n'
-            "If the task already contains a prior Q/A clarification pair, "
-            "treat it as answered and set ready=true.\n\n"
+            "You are reviewing a task before code generation begins.\n\n"
+            "Ask a clarifying question if:\n"
+            "- The instruction is vague, investigative, or open-ended "
+            "(e.g. 'look into this', 'why is this happening', 'improve it')\n"
+            "- Critical details are missing (what to change, expected behavior, constraints)\n"
+            "- The intent is ambiguous (multiple valid interpretations)\n\n"
+            "Proceed without asking if:\n"
+            "- The instruction is specific and actionable\n"
+            "- A prior Q/A pair already clarified the ambiguity\n\n"
+            "Return ONLY JSON:\n"
+            '{"ready": false, "question": "your specific question"}\n'
+            '{"ready": true}\n\n'
             f"Task:\n{task}"
         )},
     ])
@@ -592,9 +571,18 @@ def clarify(task: str, runtime: Runtime) -> dict:
     except ValueError:
         pass
 
-    # Fallback: if the reply clearly asks for more information, treat as not ready.
+    # Fallback: if the reply looks like code, treat as ready (LLM skipped the JSON step)
+    if reply.strip().startswith(("```", "def ", "import ", "@", "from ")):
+        return {"ready": True}
+
+    # If the reply clearly asks for more information, treat as not ready.
     if _reply_looks_like_follow_up(reply):
-        return {"ready": False, "question": reply[:500]}
+        # Extract just the question part, not the whole reply
+        lines = [l.strip() for l in reply.strip().splitlines() if l.strip()]
+        # Take only lines that look like natural language questions, not code
+        question_lines = [l for l in lines if not l.startswith(("def ", "import ", "@", "```", "#"))]
+        question = "\n".join(question_lines[:3]) if question_lines else reply[:200]
+        return {"ready": False, "question": question}
 
     # Default: ready to proceed
     return {"ready": True}

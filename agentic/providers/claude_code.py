@@ -152,6 +152,10 @@ class ClaudeCodeRuntime(Runtime):
         if self._tools is not None:
             cmd.extend(["--tools", self._tools])
 
+        # Remove ANTHROPIC_API_KEY so CLI uses subscription, not API credits
+        env = os.environ.copy()
+        env.pop("ANTHROPIC_API_KEY", None)
+
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -159,6 +163,7 @@ class ClaudeCodeRuntime(Runtime):
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # Line buffered
+            env=env,
         )
         self._turn_count = 0
 
