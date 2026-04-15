@@ -50,6 +50,33 @@ PROVIDERS = {
 }
 
 
+# Model name prefix → provider mapping for inference
+_MODEL_PREFIXES = {
+    "claude-": "anthropic",
+    "sonnet": "anthropic",
+    "opus": "anthropic",
+    "haiku": "anthropic",
+    "gpt-": "openai",
+    "o1": "openai",
+    "o3": "openai",
+    "o4": "openai",
+    "gemini-": "gemini",
+}
+
+
+def infer_provider_from_model(model: str) -> str | None:
+    """Infer the provider name from a model name string.
+
+    Uses known model name prefixes to determine which provider a model
+    belongs to.  Returns the provider name or None if unrecognised.
+    """
+    model_lower = model.lower()
+    for prefix, provider in _MODEL_PREFIXES.items():
+        if model_lower.startswith(prefix):
+            return provider
+    return None
+
+
 def _detect_caller_env() -> tuple[str, str] | None:
     """Detect if we're running inside a known LLM agent environment.
 
@@ -81,6 +108,12 @@ def _load_provider_config() -> tuple[str, str] | None:
         default_model = PROVIDERS.get(provider, (None, None, None))[2]
         return provider, model or default_model
 
+    # Model-only: infer provider from model name
+    if model:
+        inferred = infer_provider_from_model(model)
+        if inferred:
+            return inferred, model
+
     # Config file
     try:
         config_path = os.path.join(os.path.expanduser("~"), ".agentic", "config.json")
@@ -92,6 +125,10 @@ def _load_provider_config() -> tuple[str, str] | None:
         if provider:
             default_model = PROVIDERS.get(provider, (None, None, None))[2]
             return provider, model or default_model
+        if model:
+            inferred = infer_provider_from_model(model)
+            if inferred:
+                return inferred, model
     except (FileNotFoundError, json.JSONDecodeError, KeyError):
         pass
 
@@ -273,7 +310,9 @@ def __getattr__(name):
 __all__ = [
     "PROVIDERS",
     "detect_provider",
+    "check_providers",
     "create_runtime",
+    "infer_provider_from_model",
     "AnthropicRuntime",
     "OpenAIRuntime",
     "GeminiRuntime",
