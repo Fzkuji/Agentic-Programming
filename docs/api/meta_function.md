@@ -79,16 +79,23 @@ def fix(
 
 ### 返回值
 
-- `callable` — 修复后的函数。
-- `dict` — `{"type": "follow_up", "question": "..."}` 当 LLM 信息不足需要提问时。
+- `callable` — 修复后的函数（仅当 verify 通过时）。
+- `str` — 自然语言总结（当所有 `max_rounds` 耗尽仍未通过 verify 时，返回失败原因的总结文本而非抛异常）。
+- `dict` — `{"type": "follow_up", "question": "..."}` 当 LLM 信息不足需要提问且无 `ask_user` handler 时。
+
+### 内部循环
+
+`fix()` 运行一个 **clarify → generate → verify** 循环：
+
+1. **clarify** — 第一轮（round 0）始终返回 follow-up 问题让用户确认/澄清需求
+2. **generate** — 调用 LLM 生成修复代码
+3. **verify** — 让 LLM 审查修复是否解决了根本原因
+
+如果 verify 拒绝（rejected）或代码编译失败（error），feedback 会传入下一轮作为上下文。循环最多执行 `max_rounds` 轮。
 
 ### 异常
 
-| 异常 | 原因 |
-|------|------|
-| `SyntaxError` | 修复后的代码仍有语法错误 |
-| `ValueError` | 修复后的代码包含不允许的 import、async、或无法执行 |
-| `RuntimeError` | 超过 `max_rounds` 仍未得到可编译代码 |
+`fix()` 本身不抛异常——内部的编译/验证错误会被捕获并作为 feedback 传入下一轮。如果所有轮次耗尽，返回总结字符串。
 
 ---
 

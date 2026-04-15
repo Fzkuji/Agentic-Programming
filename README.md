@@ -60,14 +60,19 @@ pip install "agentic-programming[openai]" # add API provider (or [anthropic], [g
 ```python
 from agentic import agentic_function, create_runtime
 
+# Auto-detects the best available provider (checks API keys and CLIs)
 runtime = create_runtime()
+# Or be explicit: create_runtime(provider="anthropic", model="claude-sonnet-4-20250514")
 
 @agentic_function
-def login_flow(username, password):
-    """Complete login flow."""
-    observe(task="find login form")       # Python decides what to do
-    click(element="login button")         # Python decides the order
-    return verify(expected="dashboard")   # Python decides when to stop
+def summarize(text):
+    """Summarize the given text into 3 bullet points."""
+    return runtime.exec(content=[
+        {"type": "text", "text": f"Summarize this into 3 bullet points:\n{text}"},
+    ])
+
+result = summarize(text="Agentic Programming is a paradigm where ...")
+print(result)
 ```
 
 ### Option B: Skills — let your LLM agent use it
@@ -218,6 +223,7 @@ create_app("Summarize articles from URLs", runtime=runtime, name="summarizer")
 # → agentic/apps/summarizer.py
 
 # Fix a broken function — auto-reads source & error history
+# Runs a clarify → generate → verify loop (up to max_rounds=5 by default)
 fixed = fix(fn=broken_fn, runtime=runtime, instruction="return JSON, not plain text")
 ```
 
@@ -241,7 +247,7 @@ Agentic Programming ships with two built-in apps under `agentic/apps/`:
 | `from agentic import agentic_function` | Decorator. Records execution into Context tree |
 | `from agentic import Runtime` | LLM runtime. `exec()` calls the LLM with auto-context |
 | `from agentic import Context` | Execution tree. `tree()`, `save()`, `traceback()` |
-| `from agentic import create_runtime` | Create a Runtime with auto-detection or explicit provider |
+| `from agentic import create_runtime` | Create a Runtime with auto-detection or explicit provider (`create_runtime()` checks API keys and CLIs in priority order) |
 
 ### Meta Functions
 
@@ -249,7 +255,7 @@ Agentic Programming ships with two built-in apps under `agentic/apps/`:
 |--------|-------------|
 | `from agentic.meta_functions import create` | Generate a new `@agentic_function` from description |
 | `from agentic.meta_functions import create_app` | Generate a complete runnable app with `main()` |
-| `from agentic.meta_functions import fix` | Fix broken functions via LLM analysis |
+| `from agentic.meta_functions import fix` | Fix broken functions via multi-round LLM analysis (clarify → generate → verify loop, up to `max_rounds`) |
 | `from agentic.meta_functions import create_skill` | Generate a SKILL.md for agent discovery |
 
 ### Built-in Functions

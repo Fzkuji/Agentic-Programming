@@ -243,7 +243,7 @@ Attempt 3: ConnectionError: timeout
 
 ### 与 `fix()` 的配合
 
-推荐模式：让 `Runtime(max_retries=N)` 先处理短暂 API 波动；如果函数本身逻辑或输出格式有问题，再用 `fix()` 做结构性修复。
+推荐模式：让 `Runtime(max_retries=N)` 先处理短暂 API 波动（网络超时、速率限制等临时错误）；如果函数本身逻辑或输出格式有问题，再用 `fix()` 做结构性修复。两者是互补的——`max_retries` 处理 API 层面的瞬态故障，`fix()` 处理代码层面的结构性问题。
 
 ```python
 runtime = Runtime(call=my_llm, max_retries=3)
