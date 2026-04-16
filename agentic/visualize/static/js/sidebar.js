@@ -703,7 +703,7 @@ function _showFnFormSwitch(fn, wrapper, sendBtn) {
     });
   });
 
-  // Setup textarea auto-resize + focus
+  // Setup textarea auto-resize
   setTimeout(function() {
     var textareas = wrapper.querySelectorAll('.fn-form-textarea');
     for (var i = 0; i < textareas.length; i++) {
@@ -712,8 +712,6 @@ function _showFnFormSwitch(fn, wrapper, sendBtn) {
         this.style.height = Math.min(this.scrollHeight, 160) + 'px';
       });
     }
-    var firstInput = wrapper.querySelector('.fn-form-input');
-    if (firstInput) firstInput.focus();
   }, 50);
 }
 
@@ -829,7 +827,7 @@ function showFnForm(fn) {
     });
   });
 
-  // --- Setup textarea auto-resize + focus ---
+  // --- Setup textarea auto-resize ---
   setTimeout(function() {
     var textareas = wrapper.querySelectorAll('.fn-form-textarea');
     for (var i = 0; i < textareas.length; i++) {
@@ -838,8 +836,6 @@ function showFnForm(fn) {
         this.style.height = Math.min(this.scrollHeight, 160) + 'px';
       });
     }
-    var firstInput = wrapper.querySelector('.fn-form-input');
-    if (firstInput) firstInput.focus();
   }, 50);
 }
 
@@ -956,7 +952,6 @@ function closeFnForm() {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
         });
         chatInput.addEventListener('input', function() { autoResize(chatInput); });
-        chatInput.focus();
       }
       if (typeof buildThinkingMenu === 'function') buildThinkingMenu();
     });

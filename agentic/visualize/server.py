@@ -341,6 +341,8 @@ def _save_sessions():
                 "context_tree": root_ctx._to_dict(),
                 "messages": conv.get("messages", []),
                 "function_trees": conv.get("function_trees", []),
+                "_chat_usage": conv.get("_chat_usage"),
+                "_last_context_stats": conv.get("_last_context_stats"),
             }
     try:
         os.makedirs(os.path.dirname(_SESSIONS_PATH), exist_ok=True)
@@ -394,6 +396,8 @@ def _restore_sessions():
                     "function_trees": conv_data.get("function_trees", []),
                     "created_at": conv_data.get("created_at", time.time()),
                     "_titled": True,
+                    "_chat_usage": conv_data.get("_chat_usage"),
+                    "_last_context_stats": conv_data.get("_last_context_stats"),
                 }
             _log(f"[restore] conv {conv_id}: {conv_data.get('title')} (session={session_id})")
         except Exception as e:

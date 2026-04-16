@@ -1738,8 +1738,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   transition: box-shadow var(--transition), border-color var(--transition);
 }
 
-.input-wrapper:focus-within,
-.input-wrapper.fn-form-mode {
+.input-wrapper:focus-within {
   border-color: var(--border-light);
   box-shadow: rgba(0,0,0,0.035) 0px 4px 20px, var(--border) 0px 0px 0px 1px;
 }
