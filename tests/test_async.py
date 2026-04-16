@@ -208,18 +208,20 @@ class TestAsyncExec:
         texts = [b.get("text", "") for b in received if b["type"] == "text"]
         assert any("Parent." in t for t in texts)
 
-    def test_async_exec_double_call_raises(self):
-        """Calling async_exec twice in one function raises."""
+    def test_async_exec_multiple_calls(self):
+        """Multiple async_exec calls in one function work."""
         runtime = Runtime(call=async_echo)
 
         @agentic_function
-        async def double():
-            """Bad."""
-            await runtime.async_exec(content=[{"type": "text", "text": "first"}])
-            await runtime.async_exec(content=[{"type": "text", "text": "second"}])
+        async def multi():
+            """Multiple calls."""
+            r1 = await runtime.async_exec(content=[{"type": "text", "text": "first"}])
+            r2 = await runtime.async_exec(content=[{"type": "text", "text": "second"}])
+            return f"{r1}+{r2}"
 
-        with pytest.raises(RuntimeError, match="twice"):
-            asyncio.run(double())
+        result = asyncio.run(multi())
+        assert result == "first+second"
+        assert len(multi.context.exchanges) == 2
 
     def test_async_exec_retry_on_failure(self):
         """async_exec retries on transient failure."""

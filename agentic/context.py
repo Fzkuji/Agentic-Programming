@@ -112,6 +112,7 @@ def _emit_event(event_type: str, ctx: "Context") -> None:
 # ---------------------------------------------------------------------------
 # User interaction — ask_user for follow-up questions during execution
 # ---------------------------------------------------------------------------
+import queue as _queue
 import threading as _ask_threading
 
 _ask_user_handler_global: Optional[Callable] = None
@@ -133,8 +134,14 @@ def set_ask_user(handler: Optional[Callable[[str], str]]):
 def ask_user(question: str) -> Optional[str]:
     """Ask the user a question during function execution.
 
-    If a handler is registered (e.g. by the visualizer server), blocks until
-    the user responds. If no handler is registered, returns None.
+    Resolution order:
+      1. Handler on current Context (set by caller via ctx.ask_user_handler)
+      2. Walk up parent chain — nearest ancestor with a handler wins
+      3. Global handler (set by server via set_ask_user())
+      4. Default terminal handler (input()) — only if stdin is a TTY
+
+    The handler receives a question string and must return the user's answer.
+    It may block (e.g. waiting for WebSocket response or terminal input).
 
     Args:
         question: The question to ask the user.
@@ -142,11 +149,147 @@ def ask_user(question: str) -> Optional[str]:
     Returns:
         The user's answer, or None if no handler is available.
     """
+    # 1-2. Walk up context tree
+    ctx = _current_ctx.get(None)
+    while ctx is not None:
+        if ctx.ask_user_handler is not None:
+            return ctx.ask_user_handler(question)
+        ctx = ctx.parent
+
+    # 3. Global handler (backward compat, used by web server)
     with _ask_user_lock:
         handler = _ask_user_handler_global
-    if handler is None:
-        return None
-    return handler(question)
+    if handler is not None:
+        return handler(question)
+
+    # 4. Default: terminal input (only if interactive)
+    import sys
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            return input(f"[follow-up] {question}\n> ")
+        except EOFError:
+            return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# FollowUp — non-blocking follow-up for agents and external callers
+# ---------------------------------------------------------------------------
+
+class FollowUp:
+    """A pending follow-up question from a running function.
+
+    Returned by run_with_follow_up() when the function calls ask_user().
+    The function's thread is alive but sleeping, waiting for an answer.
+
+    Call .answer(text) to provide the answer. The function resumes from
+    exactly where it paused — all local variables and call stack intact.
+    Returns the next result: either the final return value, another FollowUp,
+    or raises an exception if the function failed.
+
+    Usage:
+        result = run_with_follow_up(my_func, arg1, arg2)
+        while isinstance(result, FollowUp):
+            print(f"Question: {result.question}")
+            answer = get_answer_somehow(result.question)
+            result = result.answer(answer)
+        # result is now the final return value
+    """
+
+    def __init__(self, question: str, _answer_q: _queue.Queue, _result_q: _queue.Queue):
+        self.question = question
+        self._answer_q = _answer_q
+        self._result_q = _result_q
+
+    def answer(self, text: str):
+        """Provide the answer and wait for the next result.
+
+        Returns:
+            The function's final return value, or another FollowUp
+            if the function asks another question.
+
+        Raises:
+            Whatever exception the function raised, if it failed.
+        """
+        self._answer_q.put(text)
+        result = self._result_q.get()
+        if isinstance(result, _WrappedException):
+            raise result.exception
+        return result
+
+    def __repr__(self):
+        return f"FollowUp(question={self.question!r})"
+
+
+class _WrappedException:
+    """Internal wrapper so we can distinguish exceptions from normal results in the queue."""
+    __slots__ = ("exception",)
+    def __init__(self, exc: BaseException):
+        self.exception = exc
+
+
+def run_with_follow_up(func, *args, **kwargs):
+    """Run a function that may call ask_user(), with non-blocking follow-up support.
+
+    Instead of blocking the caller when ask_user() is called, this returns a
+    FollowUp object. The caller can inspect the question, decide the answer
+    (manually, via LLM, etc.), and call follow_up.answer(text) to resume.
+
+    The function runs in a background thread. Its full execution state
+    (local variables, call stack, context tree) is preserved while waiting.
+
+    Args:
+        func: The function to call (typically an @agentic_function).
+        *args, **kwargs: Arguments forwarded to func.
+
+    Returns:
+        The function's return value, or a FollowUp if a question is pending.
+
+    Raises:
+        Whatever exception the function raised.
+
+    Examples:
+        # Agent auto-answering follow-ups:
+        result = run_with_follow_up(fix, fn=broken_func, runtime=rt)
+        while isinstance(result, FollowUp):
+            answer = runtime.exec(f"Answer: {result.question}")
+            result = result.answer(answer)
+
+        # Simple blocking (equivalent to calling func directly with terminal handler):
+        result = run_with_follow_up(my_func, x=1)
+        if isinstance(result, FollowUp):
+            result = result.answer(input(f"{result.question}\\n> "))
+    """
+    answer_q: _queue.Queue = _queue.Queue()
+    result_q: _queue.Queue = _queue.Queue()
+
+    def _handler(question: str) -> str:
+        # Send FollowUp to caller via result_q
+        result_q.put(FollowUp(question, answer_q, result_q))
+        # Block until caller provides answer via answer_q
+        return answer_q.get()
+
+    def _run():
+        prev_handler = None
+        with _ask_user_lock:
+            prev_handler = _ask_user_handler_global
+        set_ask_user(_handler)
+        try:
+            val = func(*args, **kwargs)
+            result_q.put(val)
+        except BaseException as e:
+            result_q.put(_WrappedException(e))
+        finally:
+            set_ask_user(prev_handler)
+
+    thread = _ask_threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    result = result_q.get()
+    if isinstance(result, _WrappedException):
+        raise result.exception
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +370,21 @@ class Context:
     # show the complete structure.
 
     # --- LLM call record (set by runtime.exec()) ---
-    raw_reply: str = None            # Raw LLM response text (None = not called yet)
+    raw_reply: str = None            # Latest LLM response text (None = not called yet)
+    exchanges: list = field(default_factory=list)
+    # All exec() round-trips within this function:
+    # [{"content": "text sent to LLM", "reply": "LLM response"}, ...]
+    # Allows multiple exec() calls per function. raw_reply always points
+    # to the latest reply for backward compatibility.
     attempts: list = field(default_factory=list)
     # Each exec() attempt is recorded here, whether it succeeds or fails:
     # {"attempt": 1, "reply": "LLM response" or None, "error": "error msg" or None}
+
+    # --- Follow-up handler (per-context) ---
+    ask_user_handler: Optional[Callable] = field(default=None, repr=False)
+    # If set, ask_user() calls this handler when triggered from this context
+    # or any descendant that doesn't have its own handler.
+    # Signature: fn(question: str) -> str
 
     # --- Internal: decorator config ---
     _summarize_kwargs: Optional[dict] = field(default=None, repr=False)
@@ -556,7 +710,12 @@ class Context:
         lines.append(f"{indent}    Status: {self.status}{dur}")
 
         # detail adds LLM interaction
-        if level == "detail" and self.raw_reply is not None:
+        if level == "detail" and self.exchanges:
+            for i, ex in enumerate(self.exchanges):
+                if len(self.exchanges) > 1:
+                    lines.append(f"{indent}    [exec {i + 1}] → {ex['content'][:200]}")
+                lines.append(f"{indent}    LLM reply: {ex['reply'][:500]}")
+        elif level == "detail" and self.raw_reply is not None:
             lines.append(f"{indent}    LLM reply: {self.raw_reply[:500]}")
 
         return "\n".join(lines)
@@ -756,6 +915,7 @@ class Context:
                        if k not in ("runtime", "callback")} if self.params else {},
             "output": self.output,
             "raw_reply": self.raw_reply,
+            "exchanges": self.exchanges,
             "attempts": self.attempts,
             "error": self.error,
             "status": self.status,
@@ -782,6 +942,7 @@ class Context:
         )
         ctx.output = data.get("output")
         ctx.raw_reply = data.get("raw_reply")
+        ctx.exchanges = data.get("exchanges", [])
         ctx.attempts = data.get("attempts", [])
         ctx.error = data.get("error")
         ctx.status = data.get("status", "running")

@@ -272,7 +272,6 @@ function _buildRestoredRuntimeBlock(userMsg, assistantMsg, mi) {
   var display = _getDisplayContent(assistantMsg);
 
   var resultContentHtml = renderMd(display.content);
-  var followUpHtml = renderFollowUpIfNeeded(display.content, assistantMsg.function || parsed.funcName) || '';
   var treeHtml = '';
   var attemptNavHtml = '';
   var isError = assistantMsg.type === 'error';
@@ -301,7 +300,7 @@ function _buildRestoredRuntimeBlock(userMsg, assistantMsg, mi) {
     var _curAttempt = assistantMsg.attempts[assistantMsg.current_attempt || 0];
     _usage = _curAttempt && _curAttempt.usage || null;
   }
-  blockDiv.innerHTML = buildRuntimeBlockHtml(assistantMsg.function || parsed.funcName, parsed.params, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, followUpHtml, _usage);
+  blockDiv.innerHTML = buildRuntimeBlockHtml(assistantMsg.function || parsed.funcName, parsed.params, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, _usage);
   return blockDiv;
 }
 
@@ -322,7 +321,6 @@ function _buildInterruptedRuntimeBlock(msg) {
 function _buildOrphanRuntimeBlock(msg, mi) {
   var display = _getDisplayContent(msg);
   var resultContentHtml = renderMd(display.content);
-  var followUpHtml = renderFollowUpIfNeeded(display.content, msg.function || '') || '';
   var treeHtml = '';
   var attemptNavHtml = '';
   var isError = msg.type === 'error';
@@ -349,7 +347,7 @@ function _buildOrphanRuntimeBlock(msg, mi) {
     var _curAttempt = msg.attempts[msg.current_attempt || 0];
     _usage = _curAttempt && _curAttempt.usage || null;
   }
-  div.innerHTML = buildRuntimeBlockHtml(msg.function || '', '', resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, followUpHtml, _usage);
+  div.innerHTML = buildRuntimeBlockHtml(msg.function || '', '', resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, _usage);
   return div;
 }
 
@@ -368,8 +366,7 @@ function _buildAssistantMessage(msg, mi) {
       cHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
         escHtml(msg.function) + '()</span> completed</div>';
     }
-    var fuHtml = renderFollowUpIfNeeded(display.content, msg.function || '');
-    cHtml += (fuHtml || renderMd(display.content)) + '</div>';
+    cHtml += renderMd(display.content) + '</div>';
 
     if (msg.attempts && msg.attempts.length > 1) {
       cHtml += renderAttemptNav(msg.function, msg.current_attempt || 0, msg.attempts.length);

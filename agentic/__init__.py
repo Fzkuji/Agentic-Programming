@@ -30,7 +30,7 @@ Quick start:
         return verify(target)
 """
 
-from agentic.context import Context
+from agentic.context import Context, FollowUp, run_with_follow_up, ask_user
 from agentic.function import agentic_function, traced, auto_trace_module, auto_trace_package
 from agentic.runtime import Runtime
 from agentic.meta_functions import create, create_app, fix, improve, create_skill
@@ -47,6 +47,9 @@ __all__ = [
     "auto_trace_module",
     "Runtime",
     "Context",
+    "FollowUp",
+    "run_with_follow_up",
+    "ask_user",
     "create",
     "create_app",
     "fix",

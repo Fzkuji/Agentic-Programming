@@ -200,7 +200,19 @@ function showDetail(node) {
     '</div>';
   }
 
-  if (node.raw_reply != null) {
+  if (node.exchanges && node.exchanges.length > 0) {
+    for (var i = 0; i < node.exchanges.length; i++) {
+      var ex = node.exchanges[i];
+      var label = node.exchanges.length > 1 ? 'LLM Exchange ' + (i + 1) : 'Raw LLM Reply';
+      html += '<div class="detail-section">' +
+        '<div class="detail-section-title">' + escHtml(label) + '</div>';
+      if (node.exchanges.length > 1) {
+        html += '<div class="detail-code" style="margin-bottom:4px;opacity:0.7">→ ' + escHtml(ex.content || '').substring(0, 500) + '</div>';
+      }
+      html += '<div class="detail-code">' + escHtml(ex.reply || '') + '</div>' +
+      '</div>';
+    }
+  } else if (node.raw_reply != null) {
     html += '<div class="detail-section">' +
       '<div class="detail-section-title">Raw LLM Reply</div>' +
       '<div class="detail-code">' + escHtml(node.raw_reply) + '</div>' +

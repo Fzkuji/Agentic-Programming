@@ -1,15 +1,11 @@
 {
   "favorites": [
-    "create",
     "fix",
     "agentic_research",
-    "sentiment",
     "_research_step",
     "gui_agent",
-    "test_framework",
-    "deep_work",
-    "chat",
-    "research_agent"
+    "research_agent",
+    "test_resume"
   ],
   "folders": {}
 }

@@ -59,7 +59,18 @@ def create(description: str, runtime: Runtime, name: str = None, as_skill: bool 
     # Step 1: Clarify — enough info?
     check = clarify(task=task, runtime=runtime)
     if not check.get("ready", True):
-        return {"type": "follow_up", "question": check.get("question", "Need more information.")}
+        from agentic.context import ask_user
+        question = check.get("question", "Need more information.")
+        answer = ask_user(question)
+        if answer and answer.strip():
+            task += f"\n\nUser clarification: {answer}"
+            generation_task = (
+                f"{task}\n\n"
+                f"Respond with ONLY the Python code inside a ```python code fence. "
+                f"No explanation, no commentary, no markdown outside the fence."
+            )
+        else:
+            return {"type": "follow_up", "question": question}
 
     # Step 2: Generate code
     response = generate_code(task=generation_task, runtime=runtime)

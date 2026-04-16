@@ -138,15 +138,8 @@ class Runtime:
         ctx = _current_ctx.get(None)
         use_model = model or self.model
 
-        # --- Guard: one exec() per function ---
-        if ctx is not None and ctx.raw_reply is not None:
-            raise RuntimeError(
-                f"exec() called twice in {ctx.name}(). "
-                f"Each @agentic_function should call exec() at most once. "
-                f"Split into separate @agentic_function calls."
-            )
-
         # --- Read: auto-generate context from the tree ---
+        is_continuation = ctx is not None and ctx.raw_reply is not None
         if context is None and ctx is not None:
             func_is_new = ctx.name not in self._prompted_functions
 
@@ -175,6 +168,16 @@ class Runtime:
                 base = node._depth()
                 node = node.parent
             exec_indent = "    " * (ctx._depth() - base + 1)
+
+            # Append previous exchanges for continuation calls
+            if is_continuation and ctx.exchanges:
+                for ex in ctx.exchanges:
+                    context += (
+                        "\n" + exec_indent + "→ Task:\n"
+                        + "\n".join(exec_indent + "    " + line for line in ex["content"].splitlines())
+                        + "\n" + exec_indent + "← Reply:\n"
+                        + "\n".join(exec_indent + "    " + line for line in ex["reply"].splitlines())
+                    )
 
             # Merge text content into context
             text_parts = []
@@ -225,6 +228,11 @@ class Runtime:
                 # Record successful attempt
                 attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
                 if ctx is not None:
+                    # Extract text content for exchange record
+                    content_text = "\n".join(
+                        b["text"] for b in content if b.get("type") == "text"
+                    )
+                    ctx.exchanges.append({"content": content_text, "reply": reply})
                     ctx.raw_reply = reply
                 return reply
             except (TypeError, NotImplementedError):
@@ -249,12 +257,7 @@ class Runtime:
         ctx = _current_ctx.get(None)
         use_model = model or self.model
 
-        if ctx is not None and ctx.raw_reply is not None:
-            raise RuntimeError(
-                f"async_exec() called twice in {ctx.name}(). "
-                f"Each @agentic_function should call exec/async_exec at most once. "
-                f"Split into separate @agentic_function calls."
-            )
+        is_continuation = ctx is not None and ctx.raw_reply is not None
 
         if context is None and ctx is not None:
             if self.has_session:
@@ -265,6 +268,14 @@ class Runtime:
                     context = ctx.summarize(**ctx._summarize_kwargs)
                 else:
                     context = ctx.summarize()
+
+        # Append previous exchanges for continuation
+        if is_continuation and ctx is not None and ctx.exchanges and context:
+            for ex in ctx.exchanges:
+                context += (
+                    "\n→ Task:\n" + ex["content"]
+                    + "\n← Reply:\n" + ex["reply"]
+                )
 
         full_content = []
         if context:
@@ -277,6 +288,10 @@ class Runtime:
                 reply = await self._async_call(full_content, model=use_model, response_format=response_format)
                 attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
                 if ctx is not None:
+                    content_text = "\n".join(
+                        b["text"] for b in content if b.get("type") == "text"
+                    )
+                    ctx.exchanges.append({"content": content_text, "reply": reply})
                     ctx.raw_reply = reply
                 return reply
             except (TypeError, NotImplementedError):

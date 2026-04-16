@@ -95,32 +95,48 @@ def test_runtime_no_context_outside_function():
     assert received[0]["text"] == "bare call"
 
 
-def test_runtime_double_exec_raises():
-    """Calling exec() twice in one function raises RuntimeError."""
+def test_runtime_multiple_exec():
+    """Multiple exec() calls in one function work and record exchanges."""
     runtime = Runtime(call=echo_call)
 
     @agentic_function
-    def double():
-        """Bad function."""
-        runtime.exec(content=[{"type": "text", "text": "first"}])
-        runtime.exec(content=[{"type": "text", "text": "second"}])
+    def multi():
+        """Function with multiple exec calls."""
+        r1 = runtime.exec(content=[{"type": "text", "text": "first"}])
+        r2 = runtime.exec(content=[{"type": "text", "text": "second"}])
+        return f"{r1}+{r2}"
 
-    with pytest.raises(RuntimeError, match="exec.*twice"):
-        double()
+    result = multi()
+    assert result == "first+second"
+    assert multi.context.raw_reply == "second"  # latest reply
+    assert len(multi.context.exchanges) == 2
+    assert multi.context.exchanges[0]["content"] == "first"
+    assert multi.context.exchanges[0]["reply"] == "first"
+    assert multi.context.exchanges[1]["content"] == "second"
+    assert multi.context.exchanges[1]["reply"] == "second"
 
 
-def test_runtime_double_exec_empty_reply():
-    """Double exec guard works even when first reply is empty string."""
-    runtime = Runtime(call=lambda content, model="test", response_format=None: "")
+def test_runtime_multiple_exec_context_carries_over():
+    """Second exec() sees previous exchanges in context."""
+    received_contents = []
+
+    def capture_call(content, model="test", response_format=None):
+        text = "\n".join(b["text"] for b in content if b.get("type") == "text")
+        received_contents.append(text)
+        return f"reply_{len(received_contents)}"
+
+    runtime = Runtime(call=capture_call)
 
     @agentic_function
-    def double_empty():
-        """Bad function with empty reply."""
-        runtime.exec(content=[{"type": "text", "text": "first"}])
-        runtime.exec(content=[{"type": "text", "text": "second"}])
+    def multi_with_context():
+        """Test function."""
+        runtime.exec(content=[{"type": "text", "text": "question 1"}])
+        runtime.exec(content=[{"type": "text", "text": "question 2"}])
 
-    with pytest.raises(RuntimeError, match="exec.*twice"):
-        double_empty()
+    multi_with_context()
+    # Second call should contain previous exchange
+    assert "question 1" in received_contents[1]
+    assert "reply_1" in received_contents[1]
 
 
 def test_runtime_model_override():

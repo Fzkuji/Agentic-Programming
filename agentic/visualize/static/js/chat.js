@@ -1,6 +1,6 @@
 // ===== Chat Messaging =====
 
-function buildRuntimeBlockHtml(funcName, params, contentHtml, treeHtml, attemptNavHtml, rerunHtml, followUpHtml, usage) {
+function buildRuntimeBlockHtml(funcName, params, contentHtml, treeHtml, attemptNavHtml, rerunHtml, usage) {
   var tempDiv = document.createElement('div');
   tempDiv.innerHTML = contentHtml;
   var plainPreview = (tempDiv.textContent || '').trim().substring(0, 60);
@@ -15,7 +15,6 @@ function buildRuntimeBlockHtml(funcName, params, contentHtml, treeHtml, attemptN
     '<div class="runtime-result"><span class="runtime-return-label">return:</span></div>' +
     '<div class="runtime-output">' + contentHtml + '</div>' +
     (treeHtml || '') +
-    (followUpHtml || '') +
   '</div></div>';
   var usageFooter = formatUsageFooterLabel(usage);
   var footerHtml = '';
@@ -30,121 +29,6 @@ function buildRuntimeBlockHtml(funcName, params, contentHtml, treeHtml, attemptN
 }
 
 // ===== Follow-up =====
-
-function renderFollowUpIfNeeded(content, funcName) {
-  if (!content) return null;
-  var parsed = null;
-  try { parsed = JSON.parse(content); } catch(e) {}
-  if (!parsed) {
-    try { parsed = JSON.parse(content.replace(/'/g, '"')); } catch(e) {}
-  }
-  if (!parsed) {
-    var typeMatch = content.match(/['"]type['"]\s*:\s*['"]follow_up['"]/);
-    var qMatch = content.match(/['"]question['"]\s*:\s*['"]((?:[^'"\\]|\\.)*)['"]/)
-    if (typeMatch && qMatch) {
-      parsed = {type: 'follow_up', question: qMatch[1]};
-    }
-  }
-  if (parsed && parsed.type === 'follow_up' && parsed.question) {
-    return '<div class="follow-up-result" style="margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg-secondary)">' +
-      '<div style="color:var(--accent-yellow);font-weight:600;margin-bottom:8px">&#9888; Follow-up Question</div>' +
-      '<div style="margin-bottom:12px;color:var(--text-primary);font-size:15px">' + escHtml(parsed.question) + '</div>' +
-      '<div style="display:flex;gap:8px">' +
-        '<input type="text" id="followUpResultInput" placeholder="Type your answer..." ' +
-          'style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-primary);color:var(--text-primary);font-size:14px" ' +
-          'onkeydown="if(event.key===\'Enter\')submitFollowUpAnswer(\'' + escAttr(funcName) + '\')">' +
-        '<button onclick="submitFollowUpAnswer(\'' + escAttr(funcName) + '\')" ' +
-          'style="padding:8px 16px;border:none;border-radius:6px;background:var(--accent-blue);color:white;cursor:pointer;font-size:14px;white-space:nowrap">Answer &amp; Retry</button>' +
-      '</div>' +
-    '</div>';
-  }
-  return null;
-}
-
-function submitFollowUpAnswer(funcName) {
-  var inp = document.getElementById('followUpResultInput');
-  if (!inp) return;
-  var answer = inp.value.trim();
-  if (!answer) return;
-
-  var question = '';
-  var fuContainer = inp.closest('.follow-up-result');
-  try {
-    if (fuContainer) {
-      var qDiv = fuContainer.querySelectorAll('div')[1];
-      if (qDiv) question = qDiv.textContent;
-    }
-  } catch(e) {}
-
-  if (fuContainer) {
-    fuContainer.innerHTML =
-      '<div style="color:var(--accent-cyan);font-weight:600;margin-bottom:4px">&#10003; Answer submitted — re-running...</div>' +
-      '<div style="color:var(--text-secondary)">' + escHtml(answer) + '</div>';
-  }
-
-  var originalCmd = '';
-  if (currentConvId && conversations[currentConvId]) {
-    var msgs = conversations[currentConvId].messages || [];
-    for (var i = msgs.length - 1; i >= 0; i--) {
-      if (msgs[i].role === 'user' && msgs[i].display === 'runtime') {
-        originalCmd = msgs[i].original_content || msgs[i].content || '';
-        break;
-      }
-    }
-  }
-
-  var qaText = question
-    ? ('Q: ' + question + ' A: ' + answer)
-    : ('Additional info: ' + answer);
-
-  var runCmd = originalCmd;
-  var parsed = parseRunCommandForDisplay(originalCmd);
-  if (parsed.funcName) {
-    var kwargs = {};
-    var paramStr = originalCmd.replace(/^run\s+\S+\s*/, '');
-    var paramRegex = /(\w+)=(?:"([^"]*)"|'([^']*)'|(\S+))/g;
-    var pm;
-    while ((pm = paramRegex.exec(paramStr)) !== null) {
-      kwargs[pm[1]] = pm[2] !== undefined ? pm[2] : (pm[3] !== undefined ? pm[3] : pm[4]);
-    }
-    kwargs['instruction'] = (kwargs['instruction'] || '') + ' [' + qaText + ']';
-    var parts = ['run', parsed.funcName];
-    for (var k in kwargs) {
-      var v = kwargs[k];
-      if (v.indexOf(' ') !== -1 || v.indexOf('"') !== -1) {
-        parts.push(k + '="' + v.replace(/"/g, '\\"') + '"');
-      } else {
-        parts.push(k + '=' + v);
-      }
-    }
-    runCmd = parts.join(' ');
-  } else if (!runCmd) {
-    runCmd = 'run ' + funcName + ' instruction="' + qaText + '"';
-  }
-
-  var block = document.querySelector('.runtime-block[data-function="' + funcName + '"]');
-  if (block) {
-    block.className = 'runtime-block runtime-block-pending';
-    block.id = 'runtime_pending';
-    var body = block.querySelector('.runtime-block-body');
-    if (body) {
-      body.innerHTML = '<div class="runtime-block-content">' +
-        '<div class="typing-indicator"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>' +
-      '</div>';
-    }
-  }
-  setRunning(true);
-
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({
-      action: 'retry_overwrite',
-      conv_id: currentConvId,
-      function: funcName,
-      text: runCmd,
-      original_content: originalCmd,
-    }));
-  }
-}
 
 function submitFollowUp() {
   var inp = document.getElementById('followUpInput');
@@ -763,7 +647,6 @@ function _handleRuntimeResult(data, type) {
   var treeHtml = '';
   var attemptNavHtml = '';
   var rerunHtml = data.function ? '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(data.function) + '\')">&#8634; Retry</button>' : '';
-  var followUpHtml = renderFollowUpIfNeeded(content, data.function || '') || '';
 
   if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
     var ct = data.context_tree;
@@ -778,7 +661,7 @@ function _handleRuntimeResult(data, type) {
     attemptNavHtml = renderAttemptNav(data.function, data.current_attempt || 0, data.attempts.length);
   }
 
-  var blockHtml = buildRuntimeBlockHtml(data.function, runtimeParams, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, followUpHtml, data.usage);
+  var blockHtml = buildRuntimeBlockHtml(data.function, runtimeParams, resultContentHtml, treeHtml, attemptNavHtml, rerunHtml, data.usage);
   var blockClass = 'runtime-block' + (type === 'error' ? ' error' : '');
 
   if (pendingBlock) {

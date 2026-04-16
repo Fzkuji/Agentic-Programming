@@ -131,14 +131,7 @@ class CodexRuntime(Runtime):
 
         if self.cli_path is None:
             raise FileNotFoundError(
-                "Codex CLI not found. Install and authenticate:\n"
-                "  1. Install:  npm install -g @openai/codex\n"
-                "  2. Auth (subscription, recommended):\n"
-                "     - Go to chatgpt.com → Settings → Security\n"
-                "     - Enable 'Device code authorization for Codex'\n"
-                "     - Run:  codex login --device-auth\n"
-                "  3. Auth (API key, alternative):\n"
-                "     - Run:  echo $OPENAI_API_KEY | codex login --with-api-key"
+                "Codex CLI not found. Install: npm install -g @openai/codex"
             )
 
     def list_models(self) -> list[str]:
@@ -269,8 +262,6 @@ class CodexRuntime(Runtime):
     def _run_codex(self, prompt: str, image_paths: list[str], model: str) -> str:
         """Build and run the codex exec command."""
         is_resume = bool(self._session_id and self._turn_count > 0)
-        import sys
-        print(f"[codex-debug] _turn_count={self._turn_count} _session_id={self._session_id} is_resume={is_resume}", file=sys.stderr, flush=True)
 
         cmd = [self.cli_path]
 
@@ -338,71 +329,52 @@ class CodexRuntime(Runtime):
             start_time = _time.time()
 
             try:
-                proc = subprocess.Popen(
+                result = subprocess.run(
                     cmd,
-                    stdin=subprocess.PIPE,
+                    input=None if is_resume else prompt,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
                     env=env,
+                    timeout=self.timeout,
                 )
-                # Send prompt via stdin for non-resume
-                if not is_resume:
-                    proc.stdin.write(prompt)
-                    proc.stdin.close()
-                else:
-                    proc.stdin.close()
+            except subprocess.TimeoutExpired:
+                raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
             except Exception as e:
                 raise RuntimeError(f"Failed to start Codex CLI: {e}")
 
-            # Read JSONL stdout line by line for streaming
             stdout_lines = []
-            try:
-                for line in proc.stdout:
-                    stdout_lines.append(line)
-                    line = line.strip()
-                    if not line:
-                        continue
-                    # Parse JSONL events (always, for usage/session tracking)
-                    if line.startswith("{"):
-                        try:
-                            event = json.loads(line)
-                            elapsed = round(_time.time() - start_time, 1)
-                            etype = event.get("type", "")
+            for line in result.stdout.splitlines(keepends=True):
+                stdout_lines.append(line)
+                stripped = line.strip()
+                if not stripped or not stripped.startswith("{"):
+                    continue
+                try:
+                    event = json.loads(stripped)
+                    elapsed = round(_time.time() - start_time, 1)
+                    etype = event.get("type", "")
 
-                            # Extract thread_id from session events
-                            if etype in ("thread.started", "thread.resumed"):
-                                thread_id = event.get("thread_id")
-                                if thread_id:
-                                    self.last_thread_id = thread_id  # always track
-                                    # Only capture session ID once; don't overwrite
-                                    # on resume (CLI may return a new thread_id).
-                                    if self._auto_session and not self._session_id:
-                                        self._session_id = thread_id
-                                        self.has_session = True
+                    # Extract thread_id from session events
+                    if etype in ("thread.started", "thread.resumed"):
+                        thread_id = event.get("thread_id")
+                        if thread_id:
+                            self.last_thread_id = thread_id  # always track
+                            # Only capture session ID once; don't overwrite
+                            # on resume (CLI may return a new thread_id).
+                            if self._auto_session and not self._session_id:
+                                self._session_id = thread_id
+                                self.has_session = True
 
-                            streamed = self._stream_codex_event(event, elapsed)
-                            if streamed and self.on_stream:
-                                self.on_stream(streamed)
-                        except json.JSONDecodeError:
-                            pass
-
-                proc.wait(timeout=self.timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
-
-            stderr_output = proc.stderr.read() if proc.stderr else ""
-
-            if proc.returncode != 0:
-                # Build a result-like object for _handle_error
-                class _Result:
+                    streamed = self._stream_codex_event(event, elapsed)
+                    if streamed and self.on_stream:
+                        self.on_stream(streamed)
+                except json.JSONDecodeError:
                     pass
-                r = _Result()
-                r.returncode = proc.returncode
-                r.stderr = stderr_output
-                r.stdout = "".join(stdout_lines)
-                self._handle_error(r)
+
+            if result.returncode != 0:
+                self._handle_error(result)
+
+            stderr_output = result.stderr
 
             # Extract thread_id from stdout (always track, only resume if auto-session)
             if not self.last_thread_id:
@@ -538,33 +510,17 @@ class CodexRuntime(Runtime):
 
         return None
 
-    _AUTH_HINT = (
-        "To authenticate Codex CLI:\n"
-        "  Subscription (recommended):\n"
-        "    1. chatgpt.com → Settings → Security → Enable 'Device code authorization for Codex'\n"
-        "    2. codex login --device-auth\n"
-        "  API key (alternative):\n"
-        "    echo $OPENAI_API_KEY | codex login --with-api-key"
-    )
-
     def _handle_error(self, result):
-        """Handle CLI errors with actionable setup instructions."""
+        """Handle CLI errors with concise messages."""
         error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
         error_lower = error_msg.lower()
         if "auth" in error_lower or "login" in error_lower or "api key" in error_lower:
             raise ConnectionError(
-                f"Codex CLI authentication error.\n"
-                f"{self._AUTH_HINT}\n\n"
-                f"Original error: {error_msg}"
+                "Codex authentication expired. Please re-login: codex login --device-auth"
             )
         if "quota" in error_lower or "rate limit" in error_lower:
             raise ConnectionError(
-                f"Codex CLI quota/rate limit exceeded.\n"
-                f"If you're on a ChatGPT subscription, make sure you're using device auth\n"
-                f"(not API key) so requests consume subscription quota:\n"
-                f"  codex login status        # check current auth mode\n"
-                f"  codex login --device-auth  # switch to subscription\n\n"
-                f"Original error: {error_msg}"
+                "Codex rate limited. Try again later, or re-login: codex login --device-auth"
             )
         raise RuntimeError(f"Codex CLI error (exit {result.returncode}): {error_msg}")
 

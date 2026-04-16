@@ -323,15 +323,14 @@ def deep_work(
         state["plan_summary"] = clarify_result.get("plan_summary", "")
 
         if not clarify_result.get("clear") and clarify_result.get("questions"):
+            from agentic.context import ask_user
             questions = clarify_result["questions"]
-            print("\nBefore starting, I need to clarify a few things:\n")
             answers = []
-            for i, q in enumerate(questions, 1):
-                print(f"  {i}. {q}")
-                try:
-                    ans = input(f"     → ")
+            for q in questions:
+                ans = ask_user(q)
+                if ans and ans.strip():
                     answers.append(f"Q: {q}\nA: {ans}")
-                except EOFError:
+                else:
                     break
 
             if answers:

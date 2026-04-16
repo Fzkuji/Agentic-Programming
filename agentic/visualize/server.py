@@ -81,8 +81,54 @@ _running_tasks_lock = threading.Lock()
 # Legacy aliases
 _default_provider = None
 _default_runtime = None
+_providers_initialized = False
 
 _CLI_PROVIDERS = {"codex", "claude-code", "gemini-cli"}
+
+
+# ---------------------------------------------------------------------------
+# Follow-up context manager — shared by run / fix / any command handler
+# ---------------------------------------------------------------------------
+from contextlib import contextmanager as _contextmanager
+
+
+@_contextmanager
+def _web_follow_up(conv_id: str, msg_id: str, func_name: str, tree_cb=None):
+    """Set up follow-up question support for a web UI command execution.
+
+    Registers a global ask_user handler that sends follow-up questions to
+    the browser via WebSocket and blocks until the user answers.
+
+    Args:
+        conv_id:   Conversation ID (for routing the answer back).
+        msg_id:    Message ID (for associating with the right chat message).
+        func_name: Function name (for display in the frontend).
+        tree_cb:   Optional tree event callback to trigger on follow-up.
+    """
+    fq = queue.Queue()
+    with _follow_up_lock:
+        _follow_up_queues[conv_id] = fq
+
+    def _handler(question: str) -> str:
+        _broadcast_chat_response(conv_id, msg_id, {
+            "type": "follow_up_question",
+            "question": question,
+            "function": func_name,
+        })
+        if tree_cb is not None:
+            tree_cb("follow_up", {})
+        try:
+            return fq.get(timeout=300)
+        except queue.Empty:
+            return ""
+
+    set_ask_user(_handler)
+    try:
+        yield
+    finally:
+        set_ask_user(None)
+        with _follow_up_lock:
+            _follow_up_queues.pop(conv_id, None)
 
 
 def _prev_rt_closed(rt) -> bool:
@@ -143,7 +189,8 @@ def _detect_default_provider() -> tuple:
                 except Exception:
                     pass
             continue
-    raise RuntimeError("No provider available")
+    _log("[detect] No provider available — server will start without LLM support")
+    return None, None
 
 
 _available_providers = {}
@@ -154,22 +201,23 @@ def _init_providers():
     global _chat_provider, _chat_model, _chat_runtime
     global _exec_provider, _exec_model
     global _default_provider, _default_runtime
-    global _available_providers
+    global _available_providers, _providers_initialized
 
     with _runtime_lock:
-        if _chat_runtime is not None:
+        if _providers_initialized:
             return  # already initialized
+        _providers_initialized = True
 
         provider_name, rt = _detect_default_provider()
 
-        # Chat: use detected provider
+        # Chat: use detected provider (may be None if nothing available)
         _chat_provider = provider_name
-        _chat_model = rt.model
+        _chat_model = rt.model if rt else None
         _chat_runtime = rt
 
         # Exec: same provider by default (user can change later)
         _exec_provider = provider_name
-        _exec_model = rt.model
+        _exec_model = rt.model if rt else None
 
         # Legacy
         _default_provider = provider_name
@@ -204,6 +252,9 @@ def _get_conv_runtime(conv_id: str, msg_id: str = None):
     if conv and conv.get("runtime"):
         return conv["runtime"]
 
+    if not _chat_provider:
+        raise RuntimeError("No provider available. Install a CLI (codex/claude/gemini) or set an API key.")
+
     # Create runtime for this conversation using chat provider + model
     rt = _create_runtime_for_visualizer(_chat_provider)
     if _chat_model:
@@ -222,6 +273,8 @@ def _get_exec_runtime(no_tools: bool = False):
                   Used for pure-text functions like chat().
     """
     _init_providers()
+    if not _exec_provider:
+        raise RuntimeError("No provider available. Install a CLI (codex/claude/gemini) or set an API key.")
     if no_tools and _exec_provider == "codex":
         from agentic.providers import create_runtime
         func_dir = os.path.join(os.path.dirname(__file__), "..", "functions")
@@ -253,6 +306,8 @@ def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
         try:
             if provider == "auto":
                 name, rt = _detect_default_provider()
+                if name is None:
+                    raise RuntimeError("No provider available")
             else:
                 name, rt = provider, _create_runtime_for_visualizer(provider)
         except Exception as e:
@@ -1091,34 +1146,14 @@ def _retry_node(conv_id: str, msg_id: str, node_path: str, params_override: dict
 
         on_event(_tree_event_callback)
 
-        # Register ask_user handler for follow-up questions
-        _fq = queue.Queue()
-        with _follow_up_lock:
-            _follow_up_queues[conv_id] = _fq
-
-        def _ask_user_handler(question: str) -> str:
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "follow_up_question",
-                "question": question,
-                "function": func_name,
-            })
-            _tree_event_callback("follow_up", {})
+        # Follow-up support + execution
+        with _web_follow_up(conv_id, msg_id, func_name, tree_cb=_tree_event_callback):
             try:
-                return _fq.get(timeout=300)
-            except queue.Empty:
-                return ""
-
-        set_ask_user(_ask_user_handler)
-
-        try:
-            result = _format_result(loaded_func(**call_kwargs), action=func_name)
-        finally:
-            set_ask_user(None)
-            off_event(_tree_event_callback)
-            with _follow_up_lock:
-                _follow_up_queues.pop(conv_id, None)
-            with _running_tasks_lock:
-                _running_tasks.pop(conv_id, None)
+                result = _format_result(loaded_func(**call_kwargs), action=func_name)
+            finally:
+                off_event(_tree_event_callback)
+                with _running_tasks_lock:
+                    _running_tasks.pop(conv_id, None)
             # Update session id and cumulative usage for next modify
             _new_sid = getattr(exec_rt, 'last_thread_id', None) or getattr(exec_rt, '_session_id', None)
             if _new_sid:
@@ -1711,36 +1746,14 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
 
                 on_event(_tree_event_callback)
 
-                # Register ask_user handler for follow-up questions
-                _fq = queue.Queue()
-                with _follow_up_lock:
-                    _follow_up_queues[conv_id] = _fq
-
-                def _ask_user_handler(question: str) -> str:
-                    """Send follow-up question to frontend, block for answer."""
-                    _broadcast_chat_response(conv_id, msg_id, {
-                        "type": "follow_up_question",
-                        "question": question,
-                        "function": func_name,
-                    })
-                    # Also trigger a tree update so the UI shows current state
-                    _tree_event_callback("follow_up", {})
+                # Follow-up support + execution
+                with _web_follow_up(conv_id, msg_id, func_name, tree_cb=_tree_event_callback):
                     try:
-                        return _fq.get(timeout=300)  # 5 min timeout
-                    except queue.Empty:
-                        return ""  # Empty = no answer, fix() will stop the loop
-
-                set_ask_user(_ask_user_handler)
-
-                try:
-                    result = _format_result(loaded_func(**call_kwargs), action=func_name)
-                finally:
-                    set_ask_user(None)
-                    off_event(_tree_event_callback)
-                    with _follow_up_lock:
-                        _follow_up_queues.pop(conv_id, None)
-                    with _running_tasks_lock:
-                        _running_tasks.pop(conv_id, None)
+                        result = _format_result(loaded_func(**call_kwargs), action=func_name)
+                    finally:
+                        off_event(_tree_event_callback)
+                        with _running_tasks_lock:
+                            _running_tasks.pop(conv_id, None)
                     # Store session id for modify/resume before closing
                     _last_session_id = getattr(exec_rt, 'last_thread_id', None) or getattr(exec_rt, '_session_id', None)
                     # For Claude Code: keep runtime alive for modify reuse
@@ -2460,12 +2473,24 @@ def create_app():
         from starlette.responses import RedirectResponse
         return RedirectResponse(url="/new", status_code=302)
 
+    def _inject_sidebar(html: str) -> str:
+        """Replace <!-- SIDEBAR --> placeholder with shared sidebar HTML."""
+        if "<!-- SIDEBAR -->" not in html:
+            return html
+        sidebar_path = os.path.join(os.path.dirname(__file__), "static", "_sidebar.html")
+        try:
+            with open(sidebar_path) as f:
+                sidebar_html = f.read()
+        except FileNotFoundError:
+            return html
+        return html.replace("<!-- SIDEBAR -->", sidebar_html)
+
     @app.get("/new", response_class=HTMLResponse)
     async def index():
         from starlette.responses import Response
         html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
         with open(html_path) as f:
-            content = f.read()
+            content = _inject_sidebar(f.read())
         return Response(
             content=content,
             media_type="text/html",
@@ -2497,7 +2522,7 @@ def create_app():
         from starlette.responses import Response
         html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
         with open(html_path) as f:
-            content = f.read()
+            content = _inject_sidebar(f.read())
         return Response(
             content=content,
             media_type="text/html",
@@ -2513,7 +2538,7 @@ def create_app():
         from starlette.responses import Response
         html_path = os.path.join(os.path.dirname(__file__), "static", "settings.html")
         with open(html_path) as f:
-            content = f.read()
+            content = _inject_sidebar(f.read())
         return Response(
             content=content,
             media_type="text/html",
@@ -2529,7 +2554,7 @@ def create_app():
         from starlette.responses import Response
         html_path = os.path.join(os.path.dirname(__file__), "static", "programs.html")
         with open(html_path) as f:
-            content = f.read()
+            content = _inject_sidebar(f.read())
         return Response(
             content=content,
             media_type="text/html",
@@ -2690,12 +2715,12 @@ def create_app():
         # Ensure runtime is initialized
         global _default_provider, _default_runtime
         with _runtime_lock:
-            if _default_runtime is None:
+            if _default_provider is None:
                 _default_provider, _default_runtime = _detect_default_provider()
 
-        provider = _default_provider or "unknown"
+        provider = _default_provider or "none"
         runtime = _default_runtime
-        current_model = runtime.model if runtime else "default"
+        current_model = runtime.model if runtime else None
 
         # Auto-detect models from the runtime
         model_list = []

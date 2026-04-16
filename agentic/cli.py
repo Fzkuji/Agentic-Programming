@@ -83,6 +83,14 @@ def main():
                         help="Skip clarification questions, start immediately")
     _add_provider_args(p_deep)
 
+    # resume
+    p_resume = sub.add_parser("resume", help="Resume a waiting follow-up session with an answer")
+    p_resume.add_argument("session_id", help="Session ID from a previous follow-up")
+    p_resume.add_argument("answer", help="Answer to the follow-up question")
+
+    # sessions
+    sub.add_parser("sessions", help="List active follow-up sessions")
+
     # install-skills
     p_skills = sub.add_parser("install-skills", help="Install skills for Claude Code / Gemini CLI")
     p_skills.add_argument("--target", "-t", default=None,
@@ -104,7 +112,13 @@ def main():
         return
 
     # Lazy imports — only load when needed
-    if args.command == "install-skills":
+    if args.command == "resume":
+        _cmd_resume(args.session_id, args.answer)
+        return
+    elif args.command == "sessions":
+        _cmd_sessions()
+        return
+    elif args.command == "install-skills":
         _cmd_install_skills(args.target)
         return
     elif args.command == "visualize":
@@ -131,6 +145,37 @@ def main():
             args.max_steps, args.max_revisions,
             not args.no_interactive,
         )
+
+
+def _cmd_resume(session_id, answer):
+    """Resume a waiting follow-up session."""
+    from agentic.session import Session
+    session = Session(session_id)
+    if not session.exists():
+        print(json.dumps({"type": "error", "message": f"Session not found: {session_id}"}))
+        sys.exit(1)
+    meta = session.read_meta()
+    if not meta:
+        print(json.dumps({"type": "error", "message": f"Session metadata unreadable: {session_id}"}))
+        sys.exit(1)
+    session.send_answer(answer)
+    print(json.dumps({"type": "ok", "message": f"Answer sent to session {session_id}"}))
+
+
+def _cmd_sessions():
+    """List active follow-up sessions."""
+    from agentic.session import list_sessions
+    sessions = list_sessions()
+    if not sessions:
+        print("No active sessions.")
+        return
+    print(f"Active sessions ({len(sessions)}):\n")
+    for s in sessions:
+        sid = s.get("session_id", "?")
+        q = s.get("question", "?")
+        status = s.get("status", "?")
+        print(f"  {sid}  [{status}]  {q[:80]}")
+    print(f"\nResume with: agentic resume <session_id> \"your answer\"")
 
 
 def _cmd_install_skills(target=None):

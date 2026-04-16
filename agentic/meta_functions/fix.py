@@ -12,7 +12,6 @@ Loop pattern:
 
 from __future__ import annotations
 
-import re
 from typing import Optional
 
 from agentic.function import agentic_function
@@ -25,60 +24,10 @@ from agentic.meta_functions._helpers import (
 )
 
 
-_INLINE_FOLLOW_UP_RE = re.compile(
-    r"^(?P<instruction>.*?)(?:\s*\[(?P<follow_up>Q:.*)\]\s*)$",
-    re.DOTALL,
-)
-_FOLLOW_UP_QA_RE = re.compile(
-    r"Q:\s*(?P<question>.*?)\s+A:\s*(?P<answer>.*)$",
-    re.DOTALL,
-)
-
 _FIX_GENERATION_SUFFIX = (
     "\n\nFix the root cause, not just the symptom. "
     "Respond with ONLY the fixed Python code in a ```python fence."
 )
-
-
-def _split_follow_up_instruction(instruction: str | None) -> tuple[str, Optional[str]]:
-    """Split a trailing inline follow-up block off an instruction string.
-
-    The visualizer currently serializes follow-up answers as:
-        "<instruction> [Q: ... A: ...]"
-
-    That inline form is easy to misread as part of the main instruction, so
-    we normalize it into a separate prompt section before calling the LLM.
-    """
-    if not instruction:
-        return "", None
-
-    text = instruction.strip()
-    match = _INLINE_FOLLOW_UP_RE.match(text)
-    if not match:
-        return text, None
-
-    main_instruction = match.group("instruction").strip()
-    follow_up = match.group("follow_up").strip()
-    if not main_instruction or "Q:" not in follow_up or "A:" not in follow_up:
-        return text, None
-    return main_instruction, follow_up
-
-
-def _format_follow_up_context(follow_up: str) -> str:
-    """Render follow-up context in a clearer, multi-line form."""
-    follow_up = follow_up.strip()
-    if not follow_up:
-        return ""
-
-    match = _FOLLOW_UP_QA_RE.search(follow_up)
-    if not match:
-        return follow_up
-
-    question = match.group("question").strip()
-    answer = match.group("answer").strip()
-    if question and answer:
-        return f"Q: {question}\nA: {answer}"
-    return follow_up
 
 
 # ---------------------------------------------------------------------------
@@ -293,7 +242,7 @@ def fix(
     code = get_source(fn)
     error_log = get_error_log(fn)
     fn_name = name or getattr(fn, '__name__', 'fixed')
-    instruction_text, follow_up_context = _split_follow_up_instruction(instruction)
+    instruction_text = (instruction or "").strip()
 
     # Resolve file path for context
     try:
@@ -312,12 +261,6 @@ def fix(
         base_parts.append(f"Error log:\n{error_log}")
     if instruction_text:
         base_parts.append(f"Instruction:\n{instruction_text}")
-    if follow_up_context:
-        base_parts.append(
-            "Follow-up context:\n"
-            f"{_format_follow_up_context(follow_up_context)}\n"
-            "Treat this as prior clarification context, not as a new instruction."
-        )
     base_task = "\n\n".join(base_parts)
 
     compiled_fn = None

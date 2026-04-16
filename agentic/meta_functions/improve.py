@@ -83,7 +83,18 @@ def improve(
     # Step 1: Clarify — enough info?
     check = clarify(task=task, runtime=runtime)
     if not check.get("ready", True):
-        return {"type": "follow_up", "question": check.get("question", "Need more information.")}
+        from agentic.context import ask_user
+        question = check.get("question", "Need more information.")
+        answer = ask_user(question)
+        if answer and answer.strip():
+            task += f"\n\nUser clarification: {answer}"
+            generation_task = (
+                f"{task}\n\n"
+                f"Respond with ONLY the improved Python code in a ```python fence. "
+                f"No explanation, no commentary."
+            )
+        else:
+            return {"type": "follow_up", "question": question}
 
     # Step 2: Generate code
     response = generate_code(task=generation_task, runtime=runtime)
