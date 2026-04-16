@@ -304,3 +304,27 @@ class TestAnthropicRuntime:
         assert len(content) == 1
         assert content[0]["type"] == "text"
 
+    def test_usage_is_normalized(self):
+        """Usage metadata keeps a consistent shape across providers.
+
+        Anthropic reports input_tokens as non-cached only, so total input
+        = input_tokens + cache_read + cache_create.
+        """
+        usage = MagicMock()
+        usage.input_tokens = 50
+        usage.output_tokens = 30
+        usage.cache_read_input_tokens = 100
+        usage.cache_creation_input_tokens = 20
+        response = self.mock_client.messages.create.return_value
+        response.usage = usage
+
+        rt = self._make_runtime()
+        rt._call([{"type": "text", "text": "hello"}], model="claude-sonnet-4-20250514")
+
+        assert rt.last_usage == {
+            "input_tokens": 170,  # 50 + 100 + 20
+            "output_tokens": 30,
+            "cache_read": 100,
+            "cache_create": 20,
+        }
+

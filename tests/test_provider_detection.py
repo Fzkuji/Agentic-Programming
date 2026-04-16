@@ -1,6 +1,8 @@
-"""Tests for provider auto-detection and lazy imports."""
+"""Tests for provider auto-detection, create_runtime, and lazy imports."""
 
 import importlib
+import json
+import os
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -68,6 +70,107 @@ class TestProviderDetection:
         statuses = providers.check_providers()
         assert statuses["gemini"]["default"] is True
         assert statuses["gemini"]["model"] == "gemini-2.5-flash"
+
+
+    def test_detect_provider_raises_when_nothing_available(self, monkeypatch):
+        """detect_provider() raises RuntimeError when no provider is found."""
+        monkeypatch.setattr("shutil.which", lambda name: None)
+        monkeypatch.delenv("AGENTIC_PROVIDER", raising=False)
+        monkeypatch.delenv("AGENTIC_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_GENERATIVE_AI_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+        monkeypatch.delenv("CODEX_CLI", raising=False)
+        monkeypatch.delenv("CODEX_SANDBOX_TYPE", raising=False)
+
+        from agentic import providers
+        importlib.reload(providers)
+
+        with pytest.raises(RuntimeError, match="No LLM provider found"):
+            providers.detect_provider()
+
+    def test_detect_provider_inside_claude_code_env(self, monkeypatch):
+        """Caller env detection picks up CLAUDECODE=1."""
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/claude" if name == "claude" else None)
+        monkeypatch.setenv("CLAUDECODE", "1")
+        monkeypatch.delenv("AGENTIC_PROVIDER", raising=False)
+        monkeypatch.delenv("AGENTIC_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_GENERATIVE_AI_API_KEY", raising=False)
+
+        from agentic import providers
+        importlib.reload(providers)
+
+        assert providers.detect_provider() == ("claude-code", "sonnet")
+
+    def test_load_provider_config_from_file(self, monkeypatch, tmp_path):
+        """_load_provider_config reads ~/.agentic/config.json."""
+        monkeypatch.delenv("AGENTIC_PROVIDER", raising=False)
+        monkeypatch.delenv("AGENTIC_MODEL", raising=False)
+
+        config_dir = tmp_path / ".agentic"
+        config_dir.mkdir()
+        config_file = config_dir / "config.json"
+        config_file.write_text(json.dumps({
+            "default_provider": "openai",
+            "default_model": "gpt-4.1-nano"
+        }))
+        monkeypatch.setattr("os.path.expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+        from agentic import providers
+        importlib.reload(providers)
+
+        result = providers._load_provider_config()
+        assert result == ("openai", "gpt-4.1-nano")
+
+    def test_load_provider_config_file_uses_default_model(self, monkeypatch, tmp_path):
+        """Config file without default_model falls back to registry default."""
+        monkeypatch.delenv("AGENTIC_PROVIDER", raising=False)
+        monkeypatch.delenv("AGENTIC_MODEL", raising=False)
+
+        config_dir = tmp_path / ".agentic"
+        config_dir.mkdir()
+        config_file = config_dir / "config.json"
+        config_file.write_text(json.dumps({"default_provider": "anthropic"}))
+        monkeypatch.setattr("os.path.expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+        from agentic import providers
+        importlib.reload(providers)
+
+        result = providers._load_provider_config()
+        assert result == ("anthropic", "claude-sonnet-4-6")
+
+
+class TestCreateRuntime:
+    """Tests for create_runtime() factory."""
+
+    def test_unknown_provider_raises(self):
+        """create_runtime raises ValueError for unknown provider names."""
+        from agentic import providers
+        with pytest.raises(ValueError, match="Unknown provider"):
+            providers.create_runtime(provider="nonexistent")
+
+    def test_explicit_provider_loads_correct_class(self, monkeypatch):
+        """create_runtime with explicit provider loads the right module."""
+        # Mock the codex module since it doesn't need an API key, just a CLI path
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+
+        from agentic import providers
+        rt = providers.create_runtime(provider="codex")
+        assert type(rt).__name__ == "CodexRuntime"
+
+    def test_model_override(self, monkeypatch):
+        """create_runtime passes model override to the runtime."""
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+
+        from agentic import providers
+        rt = providers.create_runtime(provider="codex", model="o4-mini")
+        assert rt.model == "o4-mini"
 
 
 class TestProviderLazyImport:
