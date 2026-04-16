@@ -557,6 +557,21 @@ def _get_full_tree() -> list[dict]:
         return list(_root_contexts)
 
 
+def _cleanup_conv_resources(conv_id: str, conv: dict):
+    """Clean up all resources associated with a deleted conversation."""
+    # Remove root_contexts entries — match by the conversation's root_context name
+    root_ctx = conv.get("root_context")
+    if root_ctx:
+        root_name = getattr(root_ctx, 'name', None) or (root_ctx.get("name") if isinstance(root_ctx, dict) else None)
+        if root_name:
+            with _root_contexts_lock:
+                _root_contexts[:] = [r for r in _root_contexts if r.get("name") != root_name]
+    # Clean up follow-up queues and running tasks
+    _follow_up_queues.pop(conv_id, None)
+    with _running_tasks_lock:
+        _running_tasks.pop(conv_id, None)
+
+
 def _find_node_by_path(tree: dict, path: str) -> Optional[dict]:
     """Find a node in a tree dict by its path."""
     if tree.get("path") == path:
@@ -2307,16 +2322,28 @@ async def _handle_ws_command(ws, cmd: dict):
         if conv_id:
             with _conversations_lock:
                 conv = _conversations.pop(conv_id, None)
-            if conv and conv.get("runtime") and hasattr(conv["runtime"], 'close'):
-                conv["runtime"].close()
+            if conv:
+                if conv.get("runtime") and hasattr(conv["runtime"], 'close'):
+                    conv["runtime"].close()
+                # Clean up root_contexts entries belonging to this conversation
+                _cleanup_conv_resources(conv_id, conv)
             _save_sessions()
 
     elif action == "clear_conversations":
         with _conversations_lock:
-            for conv in _conversations.values():
+            conv_ids = list(_conversations.keys())
+            convs = list(_conversations.values())
+            for conv in convs:
                 if conv.get("runtime") and hasattr(conv["runtime"], 'close'):
                     conv["runtime"].close()
             _conversations.clear()
+        # Clean up all root_contexts and queues
+        with _root_contexts_lock:
+            _root_contexts.clear()
+        for cid in conv_ids:
+            _follow_up_queues.pop(cid, None)
+            with _running_tasks_lock:
+                _running_tasks.pop(cid, None)
         _save_sessions()
 
     elif action == "load_conversation":
