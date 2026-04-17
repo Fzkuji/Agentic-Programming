@@ -22,8 +22,8 @@ pip install -e .
 ### Step 2: Write Your First Agentic Function
 
 ```python
-from agentic import agentic_function, Runtime
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function, Runtime
+from openprogram.providers import ClaudeCodeRuntime
 
 # ClaudeCodeRuntime uses Claude Code CLI — no API key needed
 runtime = ClaudeCodeRuntime(model="haiku")
@@ -65,7 +65,7 @@ claude login
 
 **Usage:**
 ```python
-from agentic.providers import ClaudeCodeRuntime
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 ```
@@ -87,7 +87,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 **Usage:**
 ```python
-from agentic.providers import AnthropicRuntime
+from openprogram.providers import AnthropicRuntime
 
 runtime = AnthropicRuntime(
     model="claude-sonnet-4-20250514",
@@ -109,7 +109,7 @@ export OPENAI_API_KEY="sk-..."
 
 **Usage:**
 ```python
-from agentic.providers import OpenAIRuntime
+from openprogram.providers import OpenAIRuntime
 
 runtime = OpenAIRuntime(
     model="gpt-4o",
@@ -131,7 +131,7 @@ export GOOGLE_API_KEY="..."
 
 **Usage:**
 ```python
-from agentic.providers import GeminiRuntime
+from openprogram.providers import GeminiRuntime
 
 runtime = GeminiRuntime(
     model="gemini-2.5-flash",
@@ -155,7 +155,7 @@ codex login
 
 **Usage:**
 ```python
-from agentic.providers import CodexRuntime
+from openprogram.providers import CodexRuntime
 
 runtime = CodexRuntime(model="o4-mini")
 ```
@@ -177,7 +177,7 @@ gemini
 
 **Usage:**
 ```python
-from agentic.providers import GeminiCLIRuntime
+from openprogram.providers import GeminiCLIRuntime
 
 runtime = GeminiCLIRuntime()
 ```
@@ -196,8 +196,8 @@ Here's a full script you can copy, paste, and run:
 Full working example: Task decomposition with Agentic Programming.
 Uses ClaudeCodeRuntime (no API key needed, just `claude` CLI).
 """
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 # Initialize runtime (no API key needed)
 runtime = ClaudeCodeRuntime(model="haiku")
@@ -305,8 +305,8 @@ pip install -e .
 ### 第 2 步：写你的第一个 Agentic Function
 
 ```python
-from agentic import agentic_function, Runtime
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function, Runtime
+from openprogram.providers import ClaudeCodeRuntime
 
 # ClaudeCodeRuntime 使用 Claude Code CLI，不需要 API key
 runtime = ClaudeCodeRuntime(model="haiku")
@@ -348,7 +348,7 @@ claude login
 
 **用法：**
 ```python
-from agentic.providers import ClaudeCodeRuntime
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 ```
@@ -370,7 +370,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 **用法：**
 ```python
-from agentic.providers import AnthropicRuntime
+from openprogram.providers import AnthropicRuntime
 
 runtime = AnthropicRuntime(
     model="claude-sonnet-4-20250514",
@@ -392,7 +392,7 @@ export OPENAI_API_KEY="sk-..."
 
 **用法：**
 ```python
-from agentic.providers import OpenAIRuntime
+from openprogram.providers import OpenAIRuntime
 
 runtime = OpenAIRuntime(
     model="gpt-4o",
@@ -414,7 +414,7 @@ export GOOGLE_API_KEY="..."
 
 **用法：**
 ```python
-from agentic.providers import GeminiRuntime
+from openprogram.providers import GeminiRuntime
 
 runtime = GeminiRuntime(
     model="gemini-2.5-flash",
@@ -438,7 +438,7 @@ codex login
 
 **用法：**
 ```python
-from agentic.providers import CodexRuntime
+from openprogram.providers import CodexRuntime
 
 runtime = CodexRuntime(model="o4-mini")
 ```
@@ -460,7 +460,7 @@ gemini
 
 **用法：**
 ```python
-from agentic.providers import GeminiCLIRuntime
+from openprogram.providers import GeminiCLIRuntime
 
 runtime = GeminiCLIRuntime()
 ```
@@ -479,8 +479,8 @@ runtime = GeminiCLIRuntime()
 完整示例：用 Agentic Programming 做任务分解。
 使用 ClaudeCodeRuntime（不需要 API key，只需 claude CLI）。
 """
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 # 初始化 runtime（不需要 API key）
 runtime = ClaudeCodeRuntime(model="haiku")

@@ -1,6 +1,6 @@
 ---
 name: run-function
-description: "Run a saved agentic function by name with arguments. Use 'agentic list' to see available functions. Triggers: 'run function', 'execute function', 'call function', 'use function', 'run sentiment', 'run extract'."
+description: "Run a saved agentic function by name with arguments. Use 'openprogram list' to see available functions. Triggers: 'run function', 'execute function', 'call function', 'use function', 'run sentiment', 'run extract'."
 ---
 
 # Run Function
@@ -8,21 +8,21 @@ description: "Run a saved agentic function by name with arguments. Use 'agentic 
 Run a previously created agentic function.
 
 ```bash
-agentic run <NAME> --arg key=value
+openprogram run <NAME> --arg key=value
 ```
 
 List available functions first:
 
 ```bash
-agentic list
+openprogram list
 ```
 
 ## Examples
 
 ```bash
-agentic run sentiment --arg text="I love this project"
-agentic run extract_domain --arg url="https://github.com/Fzkuji"
-agentic run word_count --arg text="hello world"
+openprogram run sentiment --arg text="I love this project"
+openprogram run extract_domain --arg url="https://github.com/Fzkuji"
+openprogram run word_count --arg text="hello world"
 ```
 
 ## Options

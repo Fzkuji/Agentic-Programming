@@ -6,5 +6,5 @@ description: "Analyze text sentiment using LLM. Returns positive, negative, or n
 # Sentiment Analysis
 
 ```bash
-agentic run sentiment --arg text="<TEXT>"
+openprogram run sentiment --arg text="<TEXT>"
 ```

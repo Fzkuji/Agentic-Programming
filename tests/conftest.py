@@ -45,12 +45,12 @@ def noop_call(content, model="test", response_format=None):
 @pytest.fixture
 def echo_runtime():
     """A Runtime that echoes the last text block back."""
-    from agentic import Runtime
+    from openprogram import Runtime
     return Runtime(call=echo_call, model="test")
 
 
 @pytest.fixture
 def noop_runtime():
     """A Runtime that always returns 'ok'."""
-    from agentic import Runtime
+    from openprogram import Runtime
     return Runtime(call=noop_call, model="test")

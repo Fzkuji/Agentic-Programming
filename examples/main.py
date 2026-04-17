@@ -10,7 +10,7 @@ Usage:
 
 import os
 import google.generativeai as genai
-from agentic import agentic_function, Runtime
+from openprogram import agentic_function, Runtime
 
 
 # ── LLM Provider ────────────────────────────────────────────────

@@ -10,7 +10,7 @@ Usage:
 
 import subprocess
 import json
-from agentic import agentic_function, Runtime
+from openprogram import agentic_function, Runtime
 
 
 # ── LLM Provider: Claude Code CLI ───────────────────────────────

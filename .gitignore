@@ -9,28 +9,21 @@ dist/
 build/
 .pytest_cache/
 .DS_Store
-*.egg-info/
 
 # Local scratch / agent artifacts
 tmp/
 
-# Runtime/generated artifacts
-agentic/logs/
-agentic/functions/
+# Runtime/generated artifacts — generated functions live in third_party/
+# (the framework-provided buildin/meta functions are always tracked)
+openprogram/programs/functions/third_party/*.py
+!openprogram/programs/functions/third_party/__init__.py
+!openprogram/programs/functions/third_party/llm_call_example.py
+!openprogram/programs/functions/third_party/sentiment.py
+!openprogram/programs/functions/third_party/sentiment_v2.py
+!openprogram/programs/functions/third_party/word_count.py
+!openprogram/programs/functions/third_party/test.py
+!openprogram/programs/functions/third_party/test_framework.py
+!openprogram/programs/functions/third_party/test_resume.py
 
-# But keep built-in functions
-!agentic/functions/__init__.py
-!agentic/functions/_utils.py
-!agentic/functions/general_action.py
-!agentic/functions/agent_loop.py
-!agentic/functions/wait.py
-!agentic/functions/deep_work.py
-!agentic/functions/init_research.py
-!agentic/functions/parse_action.py
-!agentic/functions/prepare_args.py
-!agentic/functions/build_catalog.py
-!agentic/functions/conclusion.py
-!agentic/functions/llm_call_example.py
-!agentic/functions/sentiment.py
-!agentic/functions/word_count.py
+# Scratch skill
 skills/init-research/

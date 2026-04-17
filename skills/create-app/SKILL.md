@@ -8,7 +8,7 @@ description: "Generate a complete runnable Python app with LLM runtime, agentic 
 Generate a self-contained Python script with `create_runtime()`, `@agentic_function` definitions, argparse, and a `main()` entry point.
 
 ```bash
-agentic create-app "<DESCRIPTION>" --name <NAME>
+openprogram create-app "<DESCRIPTION>" --name <NAME>
 ```
 
 The generated app:
@@ -19,16 +19,16 @@ The generated app:
 ## Examples
 
 ```bash
-agentic create-app "A tool that summarizes articles from URLs" --name summarizer
-agentic create-app "A CLI that takes a topic and generates a mini-lesson" --name mini_lesson
-agentic create-app "Analyze a codebase and generate a review report" --name code_reviewer
+openprogram create-app "A tool that summarizes articles from URLs" --name summarizer
+openprogram create-app "A CLI that takes a topic and generates a mini-lesson" --name mini_lesson
+openprogram create-app "Analyze a codebase and generate a review report" --name code_reviewer
 ```
 
 Run the generated app:
 
 ```bash
-python agentic/apps/summarizer.py "https://example.com/article"
-python agentic/apps/mini_lesson.py "quantum computing" --provider openai
+python openprogram/programs/applications/summarizer.py "https://example.com/article"
+python openprogram/programs/applications/mini_lesson.py "quantum computing" --provider openai
 ```
 
 ## Options

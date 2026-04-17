@@ -278,4 +278,4 @@ runtime.exec(content=[{"type": "text", "text": f"Please analyze: {text}. Return 
 
 ## 完整样例
 
-见 `agentic/functions/llm_call_example.py`。
+见 `openprogram/programs/functions/third_party/llm_call_example.py`。

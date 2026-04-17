@@ -271,7 +271,7 @@ research_assistant          ← exec 一次，选了 polish_text 但漏了 style
 
 ## 样例
 
-完整样例见 `agentic/functions/llm_call_example.py`，包含：
+完整样例见 `openprogram/programs/functions/third_party/llm_call_example.py`，包含：
 - 三个叶子函数：`summarize_text`、`translate_to_chinese`、`polish_text`
 - 一个补全函数：`fix_call_params`
 - 一个入口函数：`research_assistant`

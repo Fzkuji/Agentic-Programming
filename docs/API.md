@@ -15,7 +15,7 @@
 ## 导入
 
 ```python
-from agentic import (
+from openprogram import (
     agentic_function,
     Runtime,
     Context,
@@ -29,7 +29,7 @@ from agentic import (
 ## 快速示例
 
 ```python
-from agentic import agentic_function, Runtime
+from openprogram import agentic_function, Runtime
 
 # 1. 创建 Runtime
 runtime = Runtime(call=my_llm_func, model="haiku")

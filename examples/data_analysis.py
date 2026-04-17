@@ -15,7 +15,7 @@ Usage:
     # The example below uses a mock for demonstration.
 """
 
-from agentic import agentic_function, Runtime
+from openprogram import agentic_function, Runtime
 
 
 # ── Mock LLM ───────────────────────────────────────────────────

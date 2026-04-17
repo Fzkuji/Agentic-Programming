@@ -15,8 +15,8 @@ Usage:
     python examples/meta_chain.py
 """
 
-from agentic import agentic_function, Runtime
-from agentic.meta_functions import create
+from openprogram import agentic_function, Runtime
+from openprogram.programs.functions.meta import create
 
 
 # ── Mock LLM that generates code ──────────────────────────────

@@ -147,5 +147,5 @@ Thread 2: gui_agent(task="B")  → runtime B
 
 - Runtime 基类：`agentic/runtime.py`
 - 自动注入逻辑：`agentic/function.py`（`_inject_runtime`、`_current_runtime`）
-- Provider 实现：`agentic/providers/` 下各文件
-- 自动检测：`agentic/providers/__init__.py`（`detect_provider`、`create_runtime`）
+- Provider 实现：`openprogram/providers/` 下各文件
+- 自动检测：`openprogram/providers/__init__.py`（`detect_provider`、`create_runtime`）

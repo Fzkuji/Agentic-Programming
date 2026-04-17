@@ -51,7 +51,7 @@ def extract_emails(text: str) -> list[str]:
 如果希望在 execution tree 中看到调用记录，可以加 `@traced`：
 
 ```python
-from agentic.function import traced
+from openprogram.agentic_programming.function import traced
 
 @traced
 def word_count(text: str) -> int:

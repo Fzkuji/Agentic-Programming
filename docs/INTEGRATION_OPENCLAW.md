@@ -55,8 +55,8 @@ import os
 # Add Agentic Programming to path (adjust if installed differently)
 sys.path.insert(0, os.path.expanduser("~/.openclaw/workspace/Agentic-Programming"))
 
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 
@@ -124,8 +124,8 @@ If your OpenClaw agent runs Python scripts, you can import agentic functions dir
 """
 Script called by OpenClaw agent to analyze code quality.
 """
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 
@@ -171,8 +171,8 @@ OpenClaw can discover and call these tools via MCP protocol.
 import json
 import sys
 
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 
@@ -277,8 +277,8 @@ import os
 # 把 Agentic Programming 加到 path（根据安装方式调整）
 sys.path.insert(0, os.path.expanduser("~/.openclaw/workspace/Agentic-Programming"))
 
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 
@@ -342,8 +342,8 @@ python3 ~/.openclaw/workspace/skills/my-agentic-skill/scripts/analyze.py "任务
 """
 OpenClaw agent 调用的代码审查脚本。
 """
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 
@@ -384,8 +384,8 @@ MCP 兼容的 tool server，暴露 agentic function。
 import json
 import sys
 
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 

@@ -34,8 +34,8 @@ That's all the setup needed. No API keys, no environment variables.
 ## Basic Usage
 
 ```python
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 # No API key needed — uses Claude Code subscription
 runtime = ClaudeCodeRuntime(model="haiku")
@@ -104,8 +104,8 @@ Your Python code
 Claude Code integration demo — no API key needed.
 Demonstrates multi-step agentic workflow with context tracking.
 """
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 
@@ -192,8 +192,8 @@ if __name__ == "__main__":
 ## 基本用法
 
 ```python
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 # 不需要 API key，使用 Claude Code 订阅
 runtime = ClaudeCodeRuntime(model="haiku")
@@ -262,8 +262,8 @@ runtime = ClaudeCodeRuntime(
 Claude Code 集成 demo — 不需要 API key。
 演示带上下文追踪的多步 agentic 工作流。
 """
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 runtime = ClaudeCodeRuntime(model="haiku")
 

@@ -66,7 +66,7 @@ summarize={"depth": 0, "siblings": 0}     # 不看任何上下文
 ### 基本用法（无参数）
 
 ```python
-from agentic import agentic_function
+from openprogram import agentic_function
 
 @agentic_function
 def observe(task):

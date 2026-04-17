@@ -1,6 +1,6 @@
 # create, fix & improve
 
-> Source: [`agentic/meta_functions/`](../../agentic/meta_functions/)
+> Source: [`openprogram/programs/functions/meta/`](../../openprogram/programs/functions/meta/)
 
 Meta function。用自然语言描述生成新的 `@agentic_function`，以及修复和改进现有函数。
 
@@ -152,8 +152,8 @@ def improve(
 ### 基本用法
 
 ```python
-from agentic import Runtime
-from agentic.meta_functions import create
+from openprogram import Runtime
+from openprogram.programs.functions.meta import create
 
 runtime = Runtime(call=my_llm, model="sonnet")
 
@@ -171,7 +171,7 @@ print(result)
 ### fix 修复
 
 ```python
-from agentic.meta_functions import create, fix
+from openprogram.programs.functions.meta import create, fix
 
 analyze = create("Analyze sentiment of text", runtime=runtime)
 
@@ -189,7 +189,7 @@ except Exception:
 ### improve 优化
 
 ```python
-from agentic.meta_functions import improve
+from openprogram.programs.functions.meta import improve
 
 better_analyze = improve(
     fn=analyze,

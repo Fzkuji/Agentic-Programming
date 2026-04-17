@@ -6,8 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — Rebrand to **OpenProgram**
+- **Package renamed**: `agentic-programming` → `openprogram` (PyPI), `agentic/` → `openprogram/` (import path).
+- **Repository renamed**: `Agentic-Programming` → `OpenProgram`.
+- **CLI command renamed**: `agentic` → `openprogram`.
+- **Internal reorganization**:
+  - `openprogram/agentic_programming/` — core engine (Context / Runtime / @agentic_function), the philosophy's home.
+  - `openprogram/providers/` — LLM provider runtimes (unchanged content).
+  - `openprogram/programs/applications/` — end-user apps (was `agentic/apps/`).
+  - `openprogram/programs/functions/{meta,buildin,third_party}/` — function library, split by origin.
+  - `openprogram/webui/` — web UI (was standalone `agentic_web/`, now a sub-package).
+- **`@agentic_function` decorator name preserved** — the paradigm's hallmark symbol stays, OpenProgram is its product realization.
+- **MCP sub-package removed** — not part of the product scope.
+- **Philosophy doc** added at `docs/philosophy/agentic-programming.md`.
+
 ### Added
-- **Real-time web UI** (`python -m agentic.web`, also accepts `agentic.visualize` alias) — interactive Context tree viewer with WebSocket streaming
+- **Real-time web UI** (`python -m openprogram.webui`, also accepts `openprogram.webui.visualize` alias) — interactive Context tree viewer with WebSocket streaming
 - **Built-in agentic functions**: `general_action`, `agent_loop`, `wait`, `deep_work`
 - **`deep_work`** — autonomous plan-execute-evaluate loop with quality levels (high_school → professor)
 - **Session continuity** for CLI providers (Claude Code, Codex, Gemini CLI)
@@ -51,7 +65,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.3.0] - 2025-04-04
 
 ### Added
-- **Built-in providers**: `AnthropicRuntime`, `OpenAIRuntime`, `GeminiRuntime` in `agentic/providers/`
+- **Built-in providers**: `AnthropicRuntime`, `OpenAIRuntime`, `GeminiRuntime` in `openprogram/providers/`
   - Each provider is an optional dependency (SDK not required by core)
   - Anthropic: text + image, prompt caching (`cache_control`)
   - OpenAI: text + image (base64/URL), `response_format` (JSON mode / structured output)

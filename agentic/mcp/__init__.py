@@ -1,1 +1,0 @@
-# Agentic Programming MCP server

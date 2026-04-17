@@ -8,15 +8,15 @@ description: "Fix a broken agentic function using LLM analysis. Reads source cod
 Rewrite a broken function by analyzing its source code and error history. The LLM diagnoses the root cause and produces a corrected version.
 
 ```bash
-agentic fix <NAME> --instruction "<WHAT_TO_CHANGE>"
+openprogram fix <NAME> --instruction "<WHAT_TO_CHANGE>"
 ```
 
 ## Examples
 
 ```bash
-agentic fix sentiment --instruction "return JSON with score instead of plain text"
-agentic fix extract_emails --instruction "handle URLs that contain @ symbols"
-agentic fix word_count
+openprogram fix sentiment --instruction "return JSON with score instead of plain text"
+openprogram fix extract_emails --instruction "handle URLs that contain @ symbols"
+openprogram fix word_count
 ```
 
 If `--instruction` is omitted, the LLM infers what to fix from the error history.

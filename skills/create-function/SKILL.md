@@ -8,21 +8,21 @@ description: "Generate a Python function from a natural language description usi
 Generate an `@agentic_function` from a description. If the task is purely deterministic (no LLM reasoning needed), a plain Python function is generated instead.
 
 ```bash
-agentic create "<DESCRIPTION>" --name <NAME>
+openprogram create "<DESCRIPTION>" --name <NAME>
 ```
 
 Add `--as-skill` to also generate a SKILL.md so this function becomes discoverable as a skill:
 
 ```bash
-agentic create "<DESCRIPTION>" --name <NAME> --as-skill
+openprogram create "<DESCRIPTION>" --name <NAME> --as-skill
 ```
 
 ## Examples
 
 ```bash
-agentic create "Analyze text sentiment, return positive/negative/neutral" --name sentiment
-agentic create "Extract all email addresses from text" --name extract_emails
-agentic create "Count words in a text string" --name word_count
+openprogram create "Analyze text sentiment, return positive/negative/neutral" --name sentiment
+openprogram create "Extract all email addresses from text" --name extract_emails
+openprogram create "Count words in a text string" --name word_count
 ```
 
 ## Options

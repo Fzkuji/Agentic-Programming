@@ -1,4 +1,4 @@
-# No runtime dependencies — agentic is pure Python.
+# No runtime dependencies — openprogram core is pure Python.
 # Install your LLM provider SDK separately:
 #   pip install anthropic    # for Anthropic
 #   pip install openai       # for OpenAI

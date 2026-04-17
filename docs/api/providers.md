@@ -1,6 +1,6 @@
 # Providers
 
-> Source: [`agentic/providers/`](../../agentic/providers/)
+> Source: [`openprogram/providers/`](../../openprogram/providers/)
 
 内置 Runtime 子类，开箱即用。每个 provider 都是**可选依赖**——只在你 import 对应类时才需要安装 SDK。
 
@@ -37,7 +37,7 @@ npm install -g @google/gemini-cli
 Anthropic Claude API。支持 text + image content blocks、`response_format` JSON 约束，自动 prompt caching。
 
 ```python
-from agentic.providers import AnthropicRuntime
+from openprogram.providers import AnthropicRuntime
 
 rt = AnthropicRuntime(
     api_key="sk-ant-...",      # 或设置 ANTHROPIC_API_KEY 环境变量
@@ -122,7 +122,7 @@ rt.exec(content=[
 OpenAI GPT API。支持 text + image，response_format（JSON mode / structured output）。
 
 ```python
-from agentic.providers import OpenAIRuntime
+from openprogram.providers import OpenAIRuntime
 
 rt = OpenAIRuntime(
     api_key="sk-...",          # 或设置 OPENAI_API_KEY 环境变量
@@ -201,7 +201,7 @@ rt = OpenAIRuntime(
 Google Gemini API。支持 text + image。
 
 ```python
-from agentic.providers import GeminiRuntime
+from openprogram.providers import GeminiRuntime
 
 rt = GeminiRuntime(
     api_key="...",             # 或设置 GOOGLE_API_KEY 环境变量
@@ -243,7 +243,7 @@ result = rt.exec(
 Claude Code CLI。适合本地开发机 / 订阅账号场景，不需要在 Python 里单独配置 API key。
 
 ```python
-from agentic.providers import ClaudeCodeRuntime
+from openprogram.providers import ClaudeCodeRuntime
 
 rt = ClaudeCodeRuntime(
     model="haiku",
@@ -270,7 +270,7 @@ claude login
 Codex CLI。适合已经在本机登录 `codex` 的开发环境。
 
 ```python
-from agentic.providers import CodexRuntime
+from openprogram.providers import CodexRuntime
 
 rt = CodexRuntime(
     model="o4-mini",
@@ -311,7 +311,7 @@ codex login
 Gemini CLI。适合本机已登录 Google 账号的轻量场景，不需要在 Python 里单独传 API key。
 
 ```python
-from agentic.providers import GeminiCLIRuntime
+from openprogram.providers import GeminiCLIRuntime
 
 rt = GeminiCLIRuntime(
     model="gemini-2.5-flash",
@@ -351,7 +351,7 @@ gemini
 所有内置 provider 都是 `Runtime` 的子类。你可以用同样的方式创建自己的：
 
 ```python
-from agentic import Runtime
+from openprogram import Runtime
 
 class MyRuntime(Runtime):
     def __init__(self, api_key, model="my-model"):

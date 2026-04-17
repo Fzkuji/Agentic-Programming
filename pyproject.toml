@@ -3,16 +3,16 @@ requires = ["setuptools>=68,<75", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agentic-programming"
+name = "openprogram"
 version = "0.4.0"
-description = "Agentic Programming — Python functions that call LLMs with automatic context tracking."
+description = "OpenProgram — Agentic Programming as a product: write Python functions that call LLMs with automatic context tracking."
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Fzkuji"},
 ]
-keywords = ["llm", "agentic", "ai", "function", "decorator", "context"]
+keywords = ["llm", "agentic", "agentic-programming", "ai", "function", "decorator", "context"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -42,9 +42,6 @@ openai = [
 gemini = [
     "google-genai>=1.0.0",
 ]
-mcp = [
-    "mcp[cli]>=1.0.0",
-]
 web = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
@@ -60,23 +57,30 @@ all = [
     "anthropic>=0.30.0",
     "openai>=1.30.0",
     "google-genai>=1.0.0",
-    "mcp[cli]>=1.0.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
     "websockets>=12.0",
 ]
 
 [project.scripts]
-agentic = "agentic.cli:main"
+openprogram = "openprogram.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Fzkuji/Agentic-Programming"
-Repository = "https://github.com/Fzkuji/Agentic-Programming"
-Documentation = "https://github.com/Fzkuji/Agentic-Programming/tree/main/docs"
+Homepage = "https://github.com/Fzkuji/OpenProgram"
+Repository = "https://github.com/Fzkuji/OpenProgram"
+Documentation = "https://github.com/Fzkuji/OpenProgram/tree/main/docs"
 
 [tool.setuptools.packages.find]
-include = ["agentic*"]
+include = ["openprogram*"]
+exclude = [
+    "openprogram.programs.applications.GUI-Agent-Harness*",
+    "openprogram.programs.applications.Research-Agent-Harness*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "slow: real-subprocess integration tests (deselect with '-m \"not slow\"')",
+]
+addopts = "-m 'not slow'"

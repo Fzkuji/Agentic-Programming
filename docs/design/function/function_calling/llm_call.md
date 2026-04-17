@@ -257,4 +257,4 @@ research_assistant
 
 ## 完整样例
 
-见 `agentic/functions/llm_call_example.py`。
+见 `openprogram/programs/functions/third_party/llm_call_example.py`。

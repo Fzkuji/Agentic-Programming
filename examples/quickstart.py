@@ -15,8 +15,8 @@ Prerequisites:
     claude login
 """
 
-from agentic import agentic_function
-from agentic.providers import ClaudeCodeRuntime
+from openprogram import agentic_function
+from openprogram.providers import ClaudeCodeRuntime
 
 # ── Step 1: Create a runtime (no API key needed) ────────────────
 

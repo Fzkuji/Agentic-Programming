@@ -23,7 +23,7 @@ function/
 
 ## 相关文件
 
-- 工具函数：`agentic/functions/build_catalog.py`、`parse_action.py`、`prepare_args.py`
-- 完整样例：`agentic/functions/llm_call_example.py`
+- 工具函数：`openprogram/programs/functions/third_party/build_catalog.py`、`parse_action.py`、`prepare_args.py`
+- 完整样例：`openprogram/programs/functions/third_party/llm_call_example.py`
 - 框架核心：`agentic/function.py`（`@agentic_function` 装饰器）
 - 框架核心：`agentic/runtime.py`（`Runtime.exec()` 方法）

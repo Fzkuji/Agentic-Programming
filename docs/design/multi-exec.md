@@ -242,7 +242,7 @@ if self.node_type == "exec":
 pytest tests/ -v
 
 python -c "
-from agentic import agentic_function, Runtime
+from openprogram import agentic_function, Runtime
 rt = Runtime(call=lambda c, **kw: 'ok')
 
 @agentic_function

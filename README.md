@@ -1,34 +1,33 @@
 <p align="center">
-  <img src="docs/images/banner.png" alt="Agentic Programming" width="800">
+  <img src="docs/images/banner.png" alt="OpenProgram" width="800">
 </p>
 
-<h1 align="center">Agentic Programming</h1>
+<h1 align="center">OpenProgram</h1>
 
 <p align="center">
   <strong>Python functions that think.</strong><br>
-  A programming paradigm where Python controls flow and LLM handles reasoning.
+  The product implementation of <a href="docs/philosophy/agentic-programming.md">Agentic Programming</a> — a paradigm where Python controls flow and LLM handles reasoning.
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/agentic-programming/"><img src="https://img.shields.io/pypi/v/agentic-programming?color=blue" alt="PyPI"></a>
-  <a href="https://pepy.tech/project/agentic-programming"><img src="https://static.pepy.tech/badge/agentic-programming" alt="Downloads"></a>
-  <a href="https://github.com/Fzkuji/Agentic-Programming/actions/workflows/ci.yml"><img src="https://github.com/Fzkuji/Agentic-Programming/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/Fzkuji/Agentic-Programming/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fzkuji/Agentic-Programming" alt="License"></a>
-  <a href="https://www.python.org/"><img src="https://img.shields.io/pypi/pyversions/agentic-programming" alt="Python"></a>
+  <a href="https://pypi.org/project/openprogram/"><img src="https://img.shields.io/pypi/v/openprogram?color=blue" alt="PyPI"></a>
+  <a href="https://github.com/Fzkuji/OpenProgram/blob/main/LICENSE"><img src="https://img.shields.io/github/license/Fzkuji/OpenProgram" alt="License"></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/pypi/pyversions/openprogram" alt="Python"></a>
 </p>
 
 <p align="center">
   <a href="docs/GETTING_STARTED.md">Getting Started</a> &middot;
   <a href="docs/API.md">API Reference</a> &middot;
+  <a href="docs/philosophy/agentic-programming.md">Philosophy</a> &middot;
   <a href="docs/README_CN.md">中文</a>
 </p>
 
 ---
 
-> **This is a paradigm proposal.** Current LLM agent frameworks let the LLM control everything — what to do, when, and how. The result? Unpredictable execution, context explosion, and no output guarantees. We flip this: **Python controls the flow, LLM only reasons when asked.**
+> **Built on the Agentic Programming paradigm.** Current LLM agent frameworks let the LLM control everything — what to do, when, and how. The result? Unpredictable execution, context explosion, and no output guarantees. OpenProgram flips this: **Python controls the flow, LLM only reasons when asked.** See [philosophy](docs/philosophy/agentic-programming.md) for the full rationale.
 
 <p align="center">
-  <img src="docs/images/code_hero.png" alt="Agentic Programming code example" width="800">
+  <img src="docs/images/code_hero.png" alt="OpenProgram code example" width="800">
 </p>
 
 ## Quick Start
@@ -58,7 +57,7 @@ pip install "agentic-programming[openai]" # add API provider (or [anthropic], [g
 ```
 
 ```python
-from agentic import agentic_function, create_runtime
+from openprogram import agentic_function, create_runtime
 
 # Auto-detects the best available provider (checks API keys and CLIs)
 runtime = create_runtime()
@@ -92,7 +91,7 @@ cp -r Agentic-Programming/skills/* ~/.gemini/skills/    # Gemini CLI
 
 Then talk to your agent: *"Create a function that extracts emails from text"*
 
-The agent picks up the skill, calls `agentic create`, and the generated function handles everything from there.
+The agent picks up the skill, calls `openprogram create`, and the generated function handles everything from there.
 
 ### Option C: MCP — connect any MCP client
 
@@ -107,7 +106,7 @@ pip install "agentic-programming[mcp]"
     "mcpServers": {
         "agentic": {
             "command": "python",
-            "args": ["-m", "agentic.mcp"]
+            "args": ["-m", "openprogram.mcp"]
         }
     }
 }
@@ -132,17 +131,17 @@ This opens `http://localhost:8765` with a chat interface where you can create, r
 
 `create_runtime()` auto-detects the first available provider in this order:
 
-1. Anthropic API (`ANTHROPIC_API_KEY`)
-2. OpenAI API (`OPENAI_API_KEY`)
-3. Gemini API (`GOOGLE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`)
-4. Claude Code CLI (`claude`)
-5. Codex CLI (`codex`)
-6. Gemini CLI (`gemini`)
+1. Claude Code CLI (`claude`)
+2. Codex CLI (`codex`)
+3. Gemini CLI (`gemini`)
+4. Anthropic API (`ANTHROPIC_API_KEY`)
+5. OpenAI API (`OPENAI_API_KEY`)
+6. Gemini API (`GOOGLE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`)
 
 You can always override detection explicitly:
 
 ```python
-from agentic import create_runtime
+from openprogram import create_runtime
 
 runtime = create_runtime(provider="openai", model="gpt-5")
 # or: provider="anthropic" | "gemini" | "claude_code" | "codex" | "gemini_cli"
@@ -159,7 +158,7 @@ agentic providers
 Transient provider failures are handled at the `Runtime` layer, so you can retry just the LLM call instead of restarting the whole workflow:
 
 ```python
-from agentic import Runtime
+from openprogram import Runtime
 
 runtime = Runtime(call=my_llm_call, max_retries=3)
 ```
@@ -188,7 +187,7 @@ That retry history also feeds into `fix()`, which means a later repair pass can 
 When a generated function fails, `fix()` uses the function source plus recent error context to rewrite it:
 
 ```python
-from agentic.meta_functions import create, fix
+from openprogram.programs.functions.meta import create, fix
 
 extract_emails = create("Extract all emails from text as a JSON array", runtime=runtime)
 
@@ -281,7 +280,7 @@ When `verify` calls the LLM, it automatically sees what `observe` and `click` re
 For complex tasks that demand sustained effort and high standards, `deep_work` runs an autonomous plan-execute-evaluate loop until the result meets the specified quality level:
 
 ```python
-from agentic.functions.deep_work import deep_work
+from openprogram.programs.functions.buildin.deep_work import deep_work
 
 result = deep_work(
     task="Write a survey on context management in LLM agents.",
@@ -297,7 +296,7 @@ The agent clarifies requirements upfront, then works fully autonomously — exec
 Functions can generate new functions, fix broken ones, and scaffold complete apps — all at runtime:
 
 ```python
-from agentic.meta_functions import create, create_app, fix
+from openprogram.programs.functions.meta import create, create_app, fix
 
 # Generate a function from description
 sentiment = create("Analyze text sentiment", runtime=runtime, name="sentiment")
@@ -305,7 +304,7 @@ sentiment(text="I love this!")  # → "positive"
 
 # Generate a complete app (runtime + argparse + main)
 create_app("Summarize articles from URLs", runtime=runtime, name="summarizer")
-# → agentic/apps/summarizer.py
+# → openprogram/programs/applications/summarizer.py
 
 # Fix a broken function — auto-reads source & error history
 # Runs a clarify → generate → verify loop (up to max_rounds=5 by default)
@@ -316,7 +315,7 @@ The `create → run → fail → fix → run` cycle means programs improve thems
 
 ## Ecosystem
 
-Agentic Programming ships with two built-in apps under `agentic/apps/`:
+Agentic Programming ships with two built-in apps under `openprogram/programs/applications/`:
 
 | App | Description |
 |-----|-------------|
@@ -329,28 +328,28 @@ Agentic Programming ships with two built-in apps under `agentic/apps/`:
 
 | Import | What it does |
 |--------|-------------|
-| `from agentic import agentic_function` | Decorator. Records execution into Context tree |
-| `from agentic import Runtime` | LLM runtime. `exec()` calls the LLM with auto-context |
-| `from agentic import Context` | Execution tree. `tree()`, `save()`, `traceback()` |
-| `from agentic import create_runtime` | Create a Runtime with auto-detection or explicit provider (`create_runtime()` checks API keys and CLIs in priority order) |
+| `from openprogram import agentic_function` | Decorator. Records execution into Context tree |
+| `from openprogram import Runtime` | LLM runtime. `exec()` calls the LLM with auto-context |
+| `from openprogram import Context` | Execution tree. `tree()`, `save()`, `traceback()` |
+| `from openprogram import create_runtime` | Create a Runtime with auto-detection or explicit provider (`create_runtime()` checks API keys and CLIs in priority order) |
 
 ### Meta Functions
 
 | Import | What it does |
 |--------|-------------|
-| `from agentic.meta_functions import create` | Generate a new `@agentic_function` from description |
-| `from agentic.meta_functions import create_app` | Generate a complete runnable app with `main()` |
-| `from agentic.meta_functions import fix` | Fix broken functions via multi-round LLM analysis (clarify → generate → verify loop, up to `max_rounds`) |
-| `from agentic.meta_functions import create_skill` | Generate a SKILL.md for agent discovery |
+| `from openprogram.programs.functions.meta import create` | Generate a new `@agentic_function` from description |
+| `from openprogram.programs.functions.meta import create_app` | Generate a complete runnable app with `main()` |
+| `from openprogram.programs.functions.meta import fix` | Fix broken functions via multi-round LLM analysis (clarify → generate → verify loop, up to `max_rounds`) |
+| `from openprogram.programs.functions.meta import create_skill` | Generate a SKILL.md for agent discovery |
 
 ### Built-in Functions
 
 | Import | What it does |
 |--------|-------------|
-| `from agentic.functions.deep_work import deep_work` | Autonomous plan-execute-evaluate loop with quality levels |
-| `from agentic.functions.agent_loop import agent_loop` | General-purpose autonomous agent loop |
-| `from agentic.functions.general_action import general_action` | Give the LLM full freedom to complete a single task |
-| `from agentic.functions.wait import wait` | LLM decides how long to wait based on context |
+| `from openprogram.programs.functions.buildin.deep_work import deep_work` | Autonomous plan-execute-evaluate loop with quality levels |
+| `from openprogram.programs.functions.buildin.agent_loop import agent_loop` | General-purpose autonomous agent loop |
+| `from openprogram.programs.functions.buildin.general_action import general_action` | Give the LLM full freedom to complete a single task |
+| `from openprogram.programs.functions.buildin.wait import wait` | LLM decides how long to wait based on context |
 
 ### Providers
 
@@ -388,7 +387,7 @@ agentic/
 │   ├── fix.py               #   fix() — rewrite broken functions
 │   └── create_skill.py      #   create_skill() — generate SKILL.md
 ├── providers/               # Anthropic, OpenAI, Gemini, Claude Code, Codex, Gemini CLI
-├── mcp/                     # MCP server (python -m agentic.mcp)
+├── mcp/                     # MCP server (python -m openprogram.mcp)
 ├── functions/               # Built-in agentic functions
 │   ├── deep_work.py         #   Autonomous quality loop
 │   ├── agent_loop.py        #   General agent loop
