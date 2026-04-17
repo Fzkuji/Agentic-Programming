@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.venv*/
 .env
 *.egg-info/
 dist/
@@ -9,6 +10,9 @@ build/
 .pytest_cache/
 .DS_Store
 *.egg-info/
+
+# Local scratch / agent artifacts
+tmp/
 
 # Runtime/generated artifacts
 agentic/logs/

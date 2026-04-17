@@ -45,6 +45,7 @@ __all__ = [
     "agentic_function",
     "traced",
     "auto_trace_module",
+    "auto_trace_package",
     "Runtime",
     "Context",
     "FollowUp",

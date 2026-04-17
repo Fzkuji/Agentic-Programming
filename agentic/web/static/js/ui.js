@@ -86,7 +86,17 @@ function togglePause() {
 }
 
 function stopExecution() {
-  fetch('/api/pause', { method: 'POST' })
+  if (!currentConvId) {
+    isPaused = false;
+    isRunning = false;
+    updateSendBtn();
+    return;
+  }
+  fetch('/api/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ conv_id: currentConvId }),
+  })
     .then(function(r) { return r.json(); })
     .then(function() {
       isPaused = false;
@@ -94,7 +104,11 @@ function stopExecution() {
       updateSendBtn();
       addSystemMessage('Execution stopped.');
     })
-    .catch(function() {});
+    .catch(function() {
+      isPaused = false;
+      isRunning = false;
+      updateSendBtn();
+    });
 }
 
 // ===== Thinking Effort =====
@@ -149,48 +163,6 @@ function setThinkingEffort(level) {
 // ===== Detail Panel =====
 
 var _detailNode = null;
-
-function copyNodeJson() {
-  if (!_detailNode) return;
-  var clean = {};
-  for (var k in _detailNode) {
-    if (k === 'children') continue;
-    clean[k] = _detailNode[k];
-  }
-  if (clean.params && typeof clean.params === 'object') {
-    var p = {};
-    for (var pk in clean.params) {
-      if (pk !== 'runtime' && pk !== 'callback') p[pk] = clean.params[pk];
-    }
-    clean.params = p;
-  }
-  var json = JSON.stringify(clean, null, 2);
-  var btn = document.getElementById('detailCopyBtn');
-  var done = function() {
-    if (!btn) return;
-    var prev = btn.textContent;
-    btn.textContent = 'Copied';
-    btn.classList.add('copied');
-    setTimeout(function() { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
-  };
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(json).then(done, function() { _fallbackCopy(json); done(); });
-  } else {
-    _fallbackCopy(json);
-    done();
-  }
-}
-
-function _fallbackCopy(text) {
-  var ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.position = 'fixed';
-  ta.style.top = '-1000px';
-  document.body.appendChild(ta);
-  ta.select();
-  try { document.execCommand('copy'); } catch(e) {}
-  document.body.removeChild(ta);
-}
 
 function showDetail(node) {
   _detailNode = node;

@@ -45,6 +45,12 @@ gemini = [
 mcp = [
     "mcp[cli]>=1.0.0",
 ]
+web = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "websockets>=12.0",
+]
+# Back-compat alias
 visualize = [
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",

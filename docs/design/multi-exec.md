@@ -232,7 +232,7 @@ if self.node_type == "exec":
 
 1. **`agentic/context.py`** — 添加 node_type, 修改 summarize() 的 _prompted_functions 逻辑, 更新 _render_traceback, 序列化, 移除 exchanges/_frozen_preamble
 2. **`agentic/runtime.py`** — exec() 创建 exec 节点 + 用 summarize(), async_exec() 同步, 提取 _merge_content
-3. **`agentic/visualize/static/js/ui.js`** — exec 节点视觉区分
+3. **`agentic/web/static/js/ui.js`** — exec 节点视觉区分
 4. **`tests/test_runtime.py`** — 多次 exec 测试
 5. **`tests/test_async.py`** — 异步多次 exec 测试
 

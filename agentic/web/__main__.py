@@ -1,5 +1,5 @@
 """
-Allow running the visualizer with: python -m agentic.visualize
+Allow running the web UI with: python -m agentic.web
 
 Starts the server and keeps it alive until interrupted.
 """
@@ -11,8 +11,8 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(
-        prog="python -m agentic.visualize",
-        description="Start the Agentic Programming real-time visualizer.",
+        prog="python -m agentic.web",
+        description="Start the Agentic Programming web UI.",
     )
     parser.add_argument(
         "--port", "-p", type=int, default=8765,
@@ -24,15 +24,15 @@ def main():
     )
     args = parser.parse_args()
 
-    from agentic.visualize import start_visualizer
+    from agentic.web import start_web
 
-    thread = start_visualizer(port=args.port, open_browser=not args.no_browser)
+    thread = start_web(port=args.port, open_browser=not args.no_browser)
 
     print("Press Ctrl+C to stop.")
     try:
         thread.join()
     except KeyboardInterrupt:
-        print("\nStopping visualizer.")
+        print("\nStopping web UI.")
         sys.exit(0)
 
 

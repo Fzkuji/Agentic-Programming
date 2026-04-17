@@ -97,8 +97,12 @@ def main():
                           choices=["claude", "gemini"],
                           help="Target CLI tool (default: auto-detect)")
 
-    # visualize
-    p_viz = sub.add_parser("visualize", help="Start real-time execution visualizer")
+    # web UI
+    p_web = sub.add_parser("web", help="Start the web UI")
+    p_web.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
+    p_web.add_argument("--no-browser", action="store_true", help="Don't open browser")
+    # Back-compat alias: accept old `agentic visualize` but point to same handler
+    p_viz = sub.add_parser("visualize", help="(alias of 'web')")
     p_viz.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
     p_viz.add_argument("--no-browser", action="store_true", help="Don't open browser")
 
@@ -121,8 +125,8 @@ def main():
     elif args.command == "install-skills":
         _cmd_install_skills(args.target)
         return
-    elif args.command == "visualize":
-        _cmd_visualize(args.port, not args.no_browser)
+    elif args.command in ("web", "visualize"):
+        _cmd_web(args.port, not args.no_browser)
         return
     elif args.command == "list":
         _cmd_list()
@@ -482,21 +486,21 @@ def _cmd_create_skill(name, provider=None, model=None):
     print(f"  Skill created at {path}")
 
 
-def _cmd_visualize(port, open_browser):
-    """Start the real-time visualizer."""
+def _cmd_web(port, open_browser):
+    """Start the web UI."""
     try:
-        from agentic.visualize import start_visualizer
+        from agentic.web import start_web
     except ImportError:
-        print("Visualizer dependencies not installed.")
-        print("Install with: pip install agentic-programming[visualize]")
+        print("Web UI dependencies not installed.")
+        print("Install with: pip install agentic-programming[web]")
         sys.exit(1)
 
-    thread = start_visualizer(port=port, open_browser=open_browser)
+    thread = start_web(port=port, open_browser=open_browser)
     print("Press Ctrl+C to stop.")
     try:
         thread.join()
     except KeyboardInterrupt:
-        print("\nStopping visualizer.")
+        print("\nStopping web UI.")
 
 
 def _cmd_deep_work(task, level, provider, model,

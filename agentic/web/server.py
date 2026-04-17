@@ -25,26 +25,19 @@ from agentic.context import Context, _current_ctx, on_event, off_event, set_ask_
 from agentic.function import agentic_function
 from agentic.runtime import Runtime
 
-# ---------------------------------------------------------------------------
-# Pause/resume machinery
-# ---------------------------------------------------------------------------
-_pause_event = threading.Event()
-_pause_event.set()  # starts un-paused
-
-
-def pause_execution():
-    """Block agentic functions from proceeding (cooperative)."""
-    _pause_event.clear()
-
-
-def resume_execution():
-    """Resume blocked agentic functions."""
-    _pause_event.set()
-
-
-def wait_if_paused():
-    """Called by the event hook; blocks until resumed."""
-    _pause_event.wait()
+# Pause / stop / cancel primitives live in agentic.web._pause_stop
+from agentic.web._pause_stop import (
+    pause_execution,
+    resume_execution,
+    wait_if_paused,
+    mark_cancelled as _mark_cancelled,
+    is_cancelled as _is_cancelled,
+    clear_cancel as _clear_cancel,
+    register_active_runtime as _register_active_runtime,
+    unregister_active_runtime as _unregister_active_runtime,
+    kill_active_runtime as _kill_active_runtime,
+    mark_context_cancelled as _mark_context_cancelled,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -61,29 +54,8 @@ _conversations: dict[str, dict] = {}
 _conversations_lock = threading.Lock()
 
 # Global default providers (used when creating new conversations)
-_chat_provider = None
-_chat_model = None
-_chat_runtime = None  # template for detecting default
-_exec_provider = None
-_exec_model = None
-_runtime_lock = threading.Lock()
+# (Provider state moved to agentic.web._runtime_mgmt)
 
-# Follow-up answer queues — keyed by conversation ID.
-# When a function calls ask_user(), the handler puts the question on WebSocket
-# and blocks on this queue. The frontend sends the answer back via WebSocket.
-_follow_up_queues: dict[str, queue.Queue] = {}
-_follow_up_lock = threading.Lock()
-
-# Track running tasks so refresh can recover them
-_running_tasks: dict[str, dict] = {}  # conv_id → {msg_id, func_name, started_at}
-_running_tasks_lock = threading.Lock()
-
-# Legacy aliases
-_default_provider = None
-_default_runtime = None
-_providers_initialized = False
-
-_CLI_PROVIDERS = {"codex", "claude-code", "gemini-cli"}
 
 
 # ---------------------------------------------------------------------------
@@ -131,311 +103,111 @@ def _web_follow_up(conv_id: str, msg_id: str, func_name: str, tree_cb=None):
             _follow_up_queues.pop(conv_id, None)
 
 
-def _prev_rt_closed(rt) -> bool:
-    """Check if a Claude Code runtime's process has exited."""
-    proc = getattr(rt, '_proc', None)
-    return proc is None or proc.poll() is not None
 
+# ---------------------------------------------------------------------------
+# Runtime / provider management lives in agentic.web._runtime_mgmt
+# ---------------------------------------------------------------------------
+from agentic.web import _runtime_mgmt as _rm
+from agentic.web._runtime_mgmt import (
+    _CLI_PROVIDERS,
+    _prev_rt_closed,
+    _create_runtime_for_visualizer,
+    _detect_default_provider,
+    _init_providers,
+    _get_conv_runtime,
+    _get_exec_runtime,
+    _switch_runtime,
+    _get_provider_info,
+)
 
-def _create_runtime_for_visualizer(provider: str):
-    """Create a runtime appropriate for the visualizer.
-
-    Strategy per provider:
-      - Codex CLI:       session_id=None + search=True → stateless, Context tree
-                         injects history, Codex handles current-info lookups
-      - Claude Code CLI: default (persistent process), has_session=True → process
-                         manages its own context, summarize() skipped
-      - Gemini CLI:      default → session auto-managed by CLI
-      - API providers:   default → stateless, Context tree injects history
-    """
-    from agentic.providers import create_runtime
-    if provider == "codex":
-        # Keep visualizer chat stateless so Context tree stays source of truth.
-        # Restrict workdir to functions/ to prevent Codex from modifying
-        # framework source files during edit()/generate_code() execution.
-        func_dir = os.path.join(os.path.dirname(__file__), "..", "functions")
-        func_dir = os.path.abspath(func_dir)
-        return create_runtime(provider=provider, session_id=None, search=True,
-                              workdir=func_dir)
-    # Claude Code, Gemini CLI, APIs: use default behavior
-    return create_runtime(provider=provider)
-
-
-def _detect_default_provider() -> tuple:
-    """Auto-detect best provider, return (provider_name, runtime).
-
-    Tries each provider in order. For CLI providers, runs a quick health
-    check (a trivial LLM call) to verify the provider is actually usable
-    (not just installed). This catches quota exhaustion, auth expiry, etc.
-    """
-    for p in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
-        rt = None
-        try:
-            rt = _create_runtime_for_visualizer(p)
-            # For CLI providers, verify they are installed (not a full LLM call)
-            if p in _CLI_PROVIDERS:
-                import shutil
-                cli_names = {"codex": "codex", "claude-code": "claude", "gemini-cli": "gemini"}
-                cli_bin = cli_names.get(p, p)
-                if not shutil.which(cli_bin):
-                    raise RuntimeError(f"{cli_bin} not installed")
-            _log(f"[detect] {p} OK")
-            return p, rt
-        except Exception as e:
-            _log(f"[detect] {p} failed: {e}")
-            if rt and hasattr(rt, 'close'):
-                try:
-                    rt.close()
-                except Exception:
-                    pass
-            continue
-    _log("[detect] No provider available — server will start without LLM support")
-    return None, None
-
-
-_available_providers = {}
-
-
-def _init_providers():
-    """Initialize chat and exec provider defaults + probe available providers."""
-    global _chat_provider, _chat_model, _chat_runtime
-    global _exec_provider, _exec_model
-    global _default_provider, _default_runtime
-    global _available_providers, _providers_initialized
-
-    with _runtime_lock:
-        if _providers_initialized:
-            return  # already initialized
-        _providers_initialized = True
-
-        provider_name, rt = _detect_default_provider()
-
-        # Chat: use detected provider (may be None if nothing available)
-        _chat_provider = provider_name
-        _chat_model = rt.model if rt else None
-        _chat_runtime = rt
-
-        # Exec: same provider by default (user can change later)
-        _exec_provider = provider_name
-        _exec_model = rt.model if rt else None
-
-        # Legacy
-        _default_provider = provider_name
-        _default_runtime = rt
-
-        # Probe all providers once at startup (only check if installed, no LLM calls)
-        import shutil as _shutil
-        _cli_bins = {"codex": "codex", "claude-code": "claude", "gemini-cli": "gemini"}
-        for p_name in ("codex", "claude-code", "gemini-cli", "gemini", "anthropic", "openai"):
-            try:
-                # For CLI providers, just check binary exists
-                if p_name in _CLI_PROVIDERS:
-                    if not _shutil.which(_cli_bins.get(p_name, p_name)):
-                        raise RuntimeError(f"{p_name} not installed")
-                probe_rt = _create_runtime_for_visualizer(p_name)
-                models = probe_rt.list_models() if hasattr(probe_rt, 'list_models') else []
-                if probe_rt.model and probe_rt.model not in models:
-                    models = [probe_rt.model] + models
-                _available_providers[p_name] = {"models": models, "default_model": probe_rt.model}
-                if hasattr(probe_rt, 'close'):
-                    probe_rt.close()
-            except Exception as e:
-                _log(f"[probe] {p_name} unavailable: {e}")
-                continue
-
-
-def _get_conv_runtime(conv_id: str, msg_id: str = None):
-    """Get chat runtime for a conversation, creating if needed."""
-    _init_providers()
-
-    conv = _conversations.get(conv_id)
-    if conv and conv.get("runtime"):
-        return conv["runtime"]
-
-    if not _chat_provider:
-        raise RuntimeError("No provider available. Install a CLI (codex/claude/gemini) or set an API key.")
-
-    # Create runtime for this conversation using chat provider + model
-    rt = _create_runtime_for_visualizer(_chat_provider)
-    if _chat_model:
-        rt.model = _chat_model
-    if conv:
-        conv["runtime"] = rt
-        conv["provider_name"] = _chat_provider
-    return rt
-
-
-def _get_exec_runtime(no_tools: bool = False):
-    """Create a fresh runtime for function execution.
-
-    Args:
-        no_tools: If True, create a restricted runtime without tool/shell access.
-                  Used for pure-text functions like chat().
-    """
-    _init_providers()
-    if not _exec_provider:
-        raise RuntimeError("No provider available. Install a CLI (codex/claude/gemini) or set an API key.")
-    if no_tools and _exec_provider == "codex":
-        from agentic.providers import create_runtime
-        func_dir = os.path.join(os.path.dirname(__file__), "..", "functions")
-        rt = create_runtime(
-            provider="codex", session_id=None, search=False,
-            full_auto=False, sandbox="read-only", workdir=os.path.abspath(func_dir),
-        )
-    elif no_tools and _exec_provider == "claude-code":
-        from agentic.providers import create_runtime
-        rt = create_runtime(provider="claude-code", tools="")
-    else:
-        rt = _create_runtime_for_visualizer(_exec_provider)
-    if _exec_model:
-        rt.model = _exec_model
-    return rt
-
-
-def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
-    """Switch provider. Updates current conversation + global default."""
-    global _default_provider, _default_runtime
-
-    with _runtime_lock:
-        if conv_id and msg_id:
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "status",
-                "content": f"Switching to {provider}...",
-            })
-
-        try:
-            if provider == "auto":
-                name, rt = _detect_default_provider()
-                if name is None:
-                    raise RuntimeError("No provider available")
-            else:
-                name, rt = provider, _create_runtime_for_visualizer(provider)
-        except Exception as e:
-            if conv_id and msg_id:
-                _broadcast_chat_response(conv_id, msg_id, {
-                    "type": "error",
-                    "content": f"Failed to set up {provider}: {e}",
-                })
-            raise
-
-        # Update global default
-        _default_provider = name
-        _default_runtime = rt
-
-        # Update current conversation's runtime
-        if conv_id:
-            with _conversations_lock:
-                conv = _conversations.get(conv_id)
-            if conv:
-                conv["runtime"] = _create_runtime_for_visualizer(name)
-                conv["provider_name"] = name
-
-        if conv_id and msg_id:
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "status",
-                "content": f"Using {name} ({rt.model})",
-            })
-
-        # Broadcast to all clients
-        _broadcast(json.dumps({
-            "type": "provider_changed",
-            "data": _get_provider_info(conv_id),
-        }))
-
-        return rt
-
-
-def _get_provider_info(conv_id: str = None) -> dict:
-    """Get provider info. If conv_id given, return that conversation's provider."""
-    provider_name = _default_provider
-    runtime = _default_runtime
-
-    if conv_id:
-        with _conversations_lock:
-            conv = _conversations.get(conv_id)
-        if conv and conv.get("runtime"):
-            runtime = conv["runtime"]
-            provider_name = conv.get("provider_name", _default_provider)
-
-    if runtime is None:
-        return {"provider": None, "type": None, "model": None, "runtime": None, "session_id": None}
-
-    provider_type = "CLI" if provider_name in _CLI_PROVIDERS else "API"
-    session_id = getattr(runtime, '_session_id', None)
-    return {
-        "provider": provider_name,
-        "type": provider_type,
-        "model": runtime.model,
-        "runtime": type(runtime).__name__,
-        "session_id": session_id,
-    }
 
 
 _CONFIG_PATH = os.path.join(os.path.expanduser("~"), ".agentic", "config.json")
-_SESSIONS_PATH = os.path.join(os.path.expanduser("~"), ".agentic", "visualizer_sessions.json")
+
+from agentic.web import persistence as _persist
 
 
-def _save_sessions():
-    """Persist all conversations to disk so they survive restarts."""
-    data = {}
+def _save_conversation(conv_id: str):
+    """Persist one conversation's meta + messages.
+
+    Per-function execution trees are written incrementally by
+    ``append_tree_event`` in the tree event callback — we do not rewrite
+    them here.
+    """
+    if not conv_id:
+        return
     with _conversations_lock:
-        for conv_id, conv in _conversations.items():
-            root_ctx = conv.get("root_context")
-            if root_ctx is None:
-                continue
-            runtime = conv.get("runtime")
-            session_id = getattr(runtime, '_session_id', None)
-            model = getattr(runtime, 'model', None)
-            data[conv_id] = {
-                "id": conv_id,
-                "title": conv.get("title", "Untitled"),
-                "provider_name": conv.get("provider_name"),
-                "session_id": session_id,
-                "model": model,
-                "created_at": conv.get("created_at"),
-                "context_tree": root_ctx._to_dict(),
-                "messages": conv.get("messages", []),
-                "function_trees": conv.get("function_trees", []),
-                "_chat_usage": conv.get("_chat_usage"),
-                "_last_context_stats": conv.get("_last_context_stats"),
-            }
+        conv = _conversations.get(conv_id)
+        if conv is None:
+            return
+        root_ctx = conv.get("root_context")
+        runtime = conv.get("runtime")
+        meta = {
+            "id": conv_id,
+            "title": conv.get("title", "Untitled"),
+            "provider_name": conv.get("provider_name"),
+            "session_id": getattr(runtime, "_session_id", None),
+            "model": getattr(runtime, "model", None),
+            "created_at": conv.get("created_at"),
+            "context_tree": root_ctx._to_dict() if root_ctx is not None else None,
+            "_chat_usage": conv.get("_chat_usage"),
+            "_last_context_stats": conv.get("_last_context_stats"),
+            "_titled": conv.get("_titled", False),
+            "_last_exec_session": conv.get("_last_exec_session"),
+            "_last_exec_cumulative_usage": conv.get("_last_exec_cumulative_usage"),
+        }
+        messages = list(conv.get("messages", []))
     try:
-        os.makedirs(os.path.dirname(_SESSIONS_PATH), exist_ok=True)
-        with open(_SESSIONS_PATH, "w") as f:
-            json.dump(data, f, ensure_ascii=False, default=str, indent=2)
+        _persist.save_meta(conv_id, meta)
+        _persist.save_messages(conv_id, messages)
     except Exception as e:
-        _log(f"[save_sessions] error: {e}")
+        _log(f"[save_conversation] {conv_id} error: {e}")
+
+
+def _delete_conversation_files(conv_id: str):
+    try:
+        _persist.delete_conversation(conv_id)
+    except Exception as e:
+        _log(f"[delete_conversation_files] {conv_id} error: {e}")
 
 
 def _restore_sessions():
-    """Restore conversations from disk on startup."""
-    global _default_provider, _default_runtime
+    """Restore conversations from ~/.agentic/sessions/ on startup.
+
+    First migrates the legacy monolithic file if present.
+    """
     try:
-        with open(_SESSIONS_PATH) as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return
+        migrated = _persist.migrate_legacy_file()
+        if migrated:
+            _log(f"[restore] migrated {migrated} legacy conversation(s)")
+    except Exception as e:
+        _log(f"[restore] migration failed: {e}")
 
-    for conv_id, conv_data in data.items():
+    for conv_id in _persist.list_conversations():
         try:
-            root_ctx = Context.from_dict(conv_data.get("context_tree", {}))
-            root_ctx.status = "idle"
+            data = _persist.load_conversation(conv_id)
+            if data is None:
+                continue
 
-            provider_name = conv_data.get("provider_name")
-            session_id = conv_data.get("session_id")
-            model = conv_data.get("model")
+            root_ctx = None
+            ct = data.get("context_tree")
+            if ct:
+                root_ctx = Context.from_dict(ct)
+                root_ctx.status = "idle"
 
-            # Recreate runtime with the saved session_id so it can resume
+            provider_name = data.get("provider_name")
+            session_id = data.get("session_id")
+            model = data.get("model")
+
             runtime = None
             if provider_name:
                 try:
                     runtime = _create_runtime_for_visualizer(provider_name)
                     if model:
                         runtime.model = model
-                    # Restore Codex session state
-                    if session_id and hasattr(runtime, '_session_id'):
+                    if session_id and hasattr(runtime, "_session_id"):
                         runtime._session_id = session_id
-                        runtime._turn_count = 1  # so next call uses resume
+                        runtime._turn_count = 1
                         runtime.has_session = True
                 except Exception:
                     pass
@@ -443,18 +215,20 @@ def _restore_sessions():
             with _conversations_lock:
                 _conversations[conv_id] = {
                     "id": conv_id,
-                    "title": conv_data.get("title", "Untitled"),
+                    "title": data.get("title", "Untitled"),
                     "root_context": root_ctx,
                     "runtime": runtime,
                     "provider_name": provider_name,
-                    "messages": conv_data.get("messages", []),
-                    "function_trees": conv_data.get("function_trees", []),
-                    "created_at": conv_data.get("created_at", time.time()),
-                    "_titled": True,
-                    "_chat_usage": conv_data.get("_chat_usage"),
-                    "_last_context_stats": conv_data.get("_last_context_stats"),
+                    "messages": data.get("messages", []),
+                    "function_trees": data.get("function_trees", []),
+                    "created_at": data.get("created_at", time.time()),
+                    "_titled": data.get("_titled", True),
+                    "_chat_usage": data.get("_chat_usage"),
+                    "_last_context_stats": data.get("_last_context_stats"),
+                    "_last_exec_session": data.get("_last_exec_session"),
+                    "_last_exec_cumulative_usage": data.get("_last_exec_cumulative_usage"),
                 }
-            _log(f"[restore] conv {conv_id}: {conv_data.get('title')} (session={session_id})")
+            _log(f"[restore] conv {conv_id}: {data.get('title')} (session={session_id})")
         except Exception as e:
             _log(f"[restore] failed for {conv_id}: {e}")
 
@@ -515,7 +289,7 @@ def _list_providers() -> list[dict]:
             "name": name,
             "label": label,
             "available": available,
-            "active": name == _default_provider,
+            "active": name == _rm._default_provider,
             "configurable": env_keys is not None,
             "configured": available if env_keys else None,
             "env_keys": env_keys,
@@ -584,16 +358,6 @@ def _log(text: str):
         pass
 
 
-def _log(text: str):
-    """Print to terminal AND broadcast to frontend as a visible log."""
-    print(text)
-    try:
-        msg = json.dumps({"type": "server_log", "text": text}, default=str)
-        _broadcast(msg)
-    except Exception:
-        pass
-
-
 def _get_full_tree() -> list[dict]:
     """Get current root-level context trees by walking active contexts."""
     # First check if there's a currently running context
@@ -627,808 +391,25 @@ def _cleanup_conv_resources(conv_id: str, conv: dict):
         _running_tasks.pop(conv_id, None)
 
 
-def _find_node_by_path(tree: dict, path: str) -> Optional[dict]:
-    """Find a node in a tree dict by its path."""
-    if tree.get("path") == path:
-        return tree
-    for child in tree.get("children", []):
-        result = _find_node_by_path(child, path)
-        if result is not None:
-            return result
-    return None
+from agentic.web._functions import (
+    _discover_functions,
+    _extract_input_meta,
+    _extract_function_info,
+    _extract_all_functions,
+    _get_last_ctx,
+    _inject_runtime,
+    _format_result,
+    _find_node_by_path,
+    _find_in_tree,
+    _FunctionStub,
+    _make_stub_from_file,
+    _load_function,
+)
 
 
 # ---------------------------------------------------------------------------
-# Function discovery
+# (Function discovery & loading moved to agentic.web._functions)
 # ---------------------------------------------------------------------------
-
-def _discover_functions() -> list[dict]:
-    """Scan agentic/functions/ and agentic/meta_functions/ to build function list.
-
-    Supports three kinds of entries in functions/:
-      1. Single .py files (e.g. sentiment.py)
-      2. Subdirectories with a main.py entry point (e.g. Research-Agent-Harness/main.py)
-         The function name is extracted from the @agentic_function in main.py.
-    """
-    result = []
-    base = os.path.dirname(os.path.dirname(__file__))
-    _SKIP_DIRS = {"libs", "vendor", "node_modules", "desktop_env",
-                  "test", "tests", "examples", "docs", "build", "dist"}
-
-    # Meta functions
-    meta_dir = os.path.join(base, "meta_functions")
-    if os.path.isdir(meta_dir):
-        for f in sorted(os.listdir(meta_dir)):
-            if f.endswith(".py") and not f.startswith("_"):
-                info = _extract_function_info(os.path.join(meta_dir, f), f[:-3], "meta")
-                if info:
-                    result.append(info)
-
-    # Built-in functions (single files + subdirectory projects)
-    fn_dir = os.path.join(base, "functions")
-    if os.path.isdir(fn_dir):
-        for f in sorted(os.listdir(fn_dir)):
-            full_path = os.path.join(fn_dir, f)
-            if f.endswith(".py") and not f.startswith("_"):
-                # Scan for ALL @agentic_function decorated functions in file
-                infos = _extract_all_functions(full_path, "builtin")
-                result.extend(infos)
-            elif os.path.isdir(full_path) and not f.startswith("_"):
-                # Subdirectory project — find main.py at any depth
-                for root, dirs, files in os.walk(full_path):
-                    dirs[:] = [d for d in dirs
-                               if not d.startswith(("_", "."))
-                               and d not in _SKIP_DIRS]
-                    if "main.py" in files:
-                        main_py = os.path.join(root, "main.py")
-                        info = _extract_function_info(main_py, None, "app")
-                        if info:
-                            result.append(info)
-                            break  # found valid entry point
-
-    # Apps — scan apps/ for subdirectories with main.py at any depth
-    apps_dir = os.path.join(base, "apps")
-    if os.path.isdir(apps_dir):
-        for f in sorted(os.listdir(apps_dir)):
-            full_path = os.path.join(apps_dir, f)
-            if os.path.isdir(full_path) and not f.startswith(("_", ".")):
-                found = False
-                for root, dirs, files in os.walk(full_path):
-                    dirs[:] = [d for d in dirs
-                               if not d.startswith(("_", "."))
-                               and d not in _SKIP_DIRS]
-                    if "main.py" in files:
-                        main_py = os.path.join(root, "main.py")
-                        info = _extract_function_info(main_py, None, "app")
-                        if info:
-                            result.append(info)
-                            found = True
-                            break
-                        # main.py has no @agentic_function — scan package for first one
-                        pkg_dir = root
-                        for sub_root, sub_dirs, sub_files in os.walk(pkg_dir):
-                            sub_dirs[:] = [d for d in sub_dirs
-                                           if not d.startswith(("_", "."))
-                                           and d not in _SKIP_DIRS]
-                            for py_file in sorted(sub_files):
-                                if py_file.endswith(".py") and not py_file.startswith("_"):
-                                    info = _extract_function_info(os.path.join(sub_root, py_file), None, "app")
-                                    if info:
-                                        result.append(info)
-                                        found = True
-                                        break
-                            if found:
-                                break
-                        if found:
-                            break
-
-    return result
-
-
-def _extract_input_meta(source: str, func_name: str) -> dict | None:
-    """Extract input={...} from @agentic_function(input={...}) decorator via AST.
-
-    Returns the input dict if found, None otherwise.
-    """
-    import ast
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return None
-
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name != func_name:
-            continue
-        for dec in node.decorator_list:
-            # @agentic_function(input={...})
-            if isinstance(dec, ast.Call):
-                callee = dec.func
-                # Match agentic_function or x.agentic_function
-                callee_name = ""
-                if isinstance(callee, ast.Name):
-                    callee_name = callee.id
-                elif isinstance(callee, ast.Attribute):
-                    callee_name = callee.attr
-                if callee_name != "agentic_function":
-                    continue
-                for kw in dec.keywords:
-                    if kw.arg == "input":
-                        try:
-                            return ast.literal_eval(kw.value)
-                        except (ValueError, TypeError):
-                            return None
-    return None
-
-
-def _extract_function_info(filepath: str, name: Optional[str], category: str) -> Optional[dict]:
-    """Extract function name and docstring from a .py file.
-
-    Args:
-        filepath: Path to the .py file.
-        name:     Function name. If None, auto-detect from @agentic_function.
-        category: "meta", "builtin", "app", etc.
-    """
-    try:
-        import re
-
-        with open(filepath) as f:
-            content = f.read()
-
-        # If name not given, find the first public @agentic_function
-        # Use [\s\S]*? to support multi-line decorator arguments
-        if name is None:
-            # Prefer public functions (not starting with _)
-            for match in re.finditer(
-                r"@agentic_function[\s\S]*?def\s+(\w+)\s*\(",
-                content,
-            ):
-                if not match.group(1).startswith("_"):
-                    name = match.group(1)
-                    break
-            # Fallback to first @agentic_function (even private)
-            if name is None:
-                match = re.search(
-                    r"@agentic_function[\s\S]*?def\s+(\w+)\s*\(",
-                    content,
-                )
-                if not match:
-                    return None
-                name = match.group(1)
-
-        doc = ""
-        full_doc = ""
-        # Try to find the docstring of the specific function
-        func_doc_pattern = rf'def\s+{re.escape(name)}\s*\([^)]*\)[^:]*:\s*\n\s*(?:\'\'\'|""")(.+?)(?:\'\'\'|""")'
-        func_doc_match = re.search(func_doc_pattern, content, re.DOTALL)
-        if func_doc_match:
-            full_doc = func_doc_match.group(1).strip()
-            doc = full_doc.split("\n")[0]
-        elif '"""' in content:
-            # Fallback: first docstring in file (module-level)
-            start = content.index('"""') + 3
-            end = content.index('"""', start)
-            full_doc = content[start:end].strip()
-            doc = full_doc.split("\n")[0]
-
-        # Auto-generated functions get their own category
-        effective_category = category
-        if category == "builtin" and "Auto-generated by " in content:
-            effective_category = "generated"
-
-        # Try to extract parameter names from function signature
-        params = []
-        params_detail = []
-        pattern = rf"def\s+{re.escape(name)}\s*\(([^)]*)\)"
-        match = re.search(pattern, content)
-        if match:
-            param_str = match.group(1)
-            for p in param_str.split(","):
-                p = p.strip()
-                if p and p != "self" and not p.startswith("*"):
-                    pname = p.split(":")[0].split("=")[0].strip()
-                    if pname:
-                        params.append(pname)
-                        # Extract type hint
-                        ptype = ""
-                        if ":" in p:
-                            type_part = p.split(":", 1)[1]
-                            if "=" in type_part:
-                                ptype = type_part.split("=", 1)[0].strip()
-                            else:
-                                ptype = type_part.strip()
-                        # Extract default value
-                        pdefault = None
-                        has_default = False
-                        if "=" in p:
-                            default_str = p.rsplit("=", 1)[1].strip()
-                            has_default = True
-                            pdefault = default_str
-                        params_detail.append({
-                            "name": pname,
-                            "type": ptype,
-                            "default": pdefault,
-                            "required": not has_default,
-                            "description": "",
-                        })
-
-        # Extract per-param descriptions from docstring Args: section
-        if full_doc:
-            args_match = re.search(r'Args:\s*\n((?:\s+\w+.*\n?)+)', full_doc)
-            if args_match:
-                args_block = args_match.group(1)
-                for pd in params_detail:
-                    arg_pat = rf'^\s+{re.escape(pd["name"])}(?:\s*\([^)]*\))?\s*:\s*(.+)'
-                    arg_m = re.search(arg_pat, args_block, re.MULTILINE)
-                    if arg_m:
-                        pd["description"] = arg_m.group(1).strip()
-
-        # Extract input= metadata from @agentic_function(input={...}) via AST
-        input_meta = _extract_input_meta(content, name)
-        if input_meta:
-            for pd in params_detail:
-                if pd["name"] in input_meta:
-                    meta = input_meta[pd["name"]]
-                    # Merge: input_meta overrides docstring-derived values
-                    if "description" in meta:
-                        pd["description"] = meta["description"]
-                    if "placeholder" in meta:
-                        pd["placeholder"] = meta["placeholder"]
-                    if "multiline" in meta:
-                        pd["multiline"] = meta["multiline"]
-                    if "options" in meta:
-                        pd["options"] = meta["options"]
-                    if "options_from" in meta:
-                        pd["options_from"] = meta["options_from"]
-                    if "hidden" in meta:
-                        pd["hidden"] = meta["hidden"]
-
-        return {
-            "name": name,
-            "category": effective_category,
-            "description": doc,
-            "params": params,
-            "params_detail": params_detail,
-            "filepath": filepath,
-            "mtime": os.path.getmtime(filepath),
-        }
-    except Exception:
-        return None
-
-
-def _extract_all_functions(filepath: str, category: str) -> list[dict]:
-    """Extract ALL @agentic_function decorated functions from a .py file.
-
-    Unlike _extract_function_info (which finds one function by name),
-    this scans for every @agentic_function in the file.
-    """
-    import re as _re
-    results = []
-    try:
-        with open(filepath) as f:
-            content = f.read()
-
-        # Find all @agentic_function decorated functions (skip private _names)
-        for match in _re.finditer(r"@agentic_function[^\n]*\s*def\s+(\w+)\s*\(", content):
-            name = match.group(1)
-            if name.startswith("_"):
-                continue
-            info = _extract_function_info(filepath, name, category)
-            if info:
-                results.append(info)
-
-        # Fallback: if no @agentic_function found, try file-name match
-        if not results:
-            basename = os.path.splitext(os.path.basename(filepath))[0]
-            info = _extract_function_info(filepath, basename, category)
-            if info:
-                results.append(info)
-    except Exception:
-        pass
-    return results
-
-
-# ---------------------------------------------------------------------------
-# Agentic chat functions — the visualizer eats its own dog food
-# ---------------------------------------------------------------------------
-
-def _get_last_ctx(func):
-    """Get _last_ctx from a function, checking wrapper for @agentic_function instances."""
-    ctx = getattr(func, '_last_ctx', None)
-    if ctx is None and hasattr(func, '_wrapper'):
-        ctx = getattr(func._wrapper, '_last_ctx', None)
-    if ctx is None and hasattr(func, 'context'):
-        ctx = getattr(func, 'context', None)
-    return ctx
-
-
-def _inject_runtime(loaded_func, kwargs: dict, runtime: Runtime):
-    """Inject runtime into function kwargs if the function accepts it."""
-    unwrapped_func = loaded_func._fn if hasattr(loaded_func, '_fn') else loaded_func
-    try:
-        source = inspect.getsource(unwrapped_func)
-    except (OSError, TypeError):
-        source = ""
-    if "runtime" in source:
-        sig = inspect.signature(unwrapped_func)
-        if "runtime" in sig.parameters and "runtime" not in kwargs:
-            kwargs["runtime"] = runtime
-        elif hasattr(loaded_func, '_fn') and loaded_func._fn:
-            loaded_func._fn.__globals__['runtime'] = runtime
-
-
-def _format_result(result, action: str = "create") -> str:
-    """Format function result for display."""
-    if callable(result):
-        result_name = getattr(result, '__name__', 'unknown')
-        result_doc = (getattr(result, '__doc__', '') or '').strip().split('\n')[0]
-        try:
-            result_sig = inspect.signature(result._fn if hasattr(result, '_fn') else result)
-            params = [p for p in result_sig.parameters if p not in ('runtime', 'callback', 'self')]
-        except (ValueError, TypeError):
-            params = []
-        action_labels = {
-            "create": "Created",
-            "edit": "Edited",
-            "improve": "Improved",
-        }
-        label = action_labels.get(action, "Created")
-        msg = f"{label} function `{result_name}`."
-        if params:
-            param_str = ' '.join(p + '="..."' for p in params)
-            msg += f"\nUsage: `run {result_name} {param_str}`"
-        if result_doc:
-            msg += f"\nDescription: {result_doc}"
-        functions = _discover_functions()
-        _broadcast(json.dumps({"type": "functions_list", "data": functions}, default=str))
-        return msg
-    elif isinstance(result, dict) and "summary" in result:
-        return result["summary"]
-    elif isinstance(result, str):
-        return result
-    else:
-        try:
-            return json.dumps(result, indent=2, default=str, ensure_ascii=False)
-        except (TypeError, ValueError):
-            return str(result)
-
-
-def _retry_node(conv_id: str, msg_id: str, node_path: str, params_override: dict = None):
-    """Re-execute a function from the function_trees.
-
-    Finds the target node in function_trees (not root_context),
-    re-runs with original or overridden params, and replaces the old tree.
-    """
-    try:
-        _log(f"[retry] started: conv_id={conv_id}, node_path={node_path}")
-        conv = _conversations.get(conv_id)
-        if not conv:
-            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Conversation not found: {conv_id}"})
-            return
-
-        # Find target in function_trees
-        func_trees = conv.get("function_trees", [])
-        target_tree = None
-        target_idx = None
-
-        # Search: exact path match, or root name match, or nested path
-        for i, ft in enumerate(func_trees):
-            if _find_in_tree(ft, node_path):
-                target_tree = ft
-                target_idx = i
-                break
-
-        if target_tree is None:
-            available = [ft.get("path") or ft.get("name", "?") for ft in func_trees]
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "error",
-                "content": f"Node not found: {node_path}\nAvailable trees: {', '.join(available)}",
-            })
-            return
-
-        # Get function name and params from the target node
-        target_node = _find_in_tree(target_tree, node_path)
-        func_name = target_node.get("name", node_path.split("/")[-1])
-        if params_override:
-            params = {k: v for k, v in params_override.items() if k not in ("runtime", "callback")}
-        else:
-            orig_params = target_node.get("params", {})
-            params = {k: v for k, v in orig_params.items() if k not in ("runtime", "callback")}
-
-        _log(f"[retry] func={func_name}, params_keys={list(params.keys())}, params={params}")
-
-        _display_params = ", ".join(
-            f"{k}={v!r}" if len(repr(v)) < 60 else f"{k}=..."
-            for k, v in params.items()
-            if k not in ("runtime", "callback")
-        )
-        with _running_tasks_lock:
-            _running_tasks[conv_id] = {
-                "msg_id": msg_id, "func_name": func_name,
-                "started_at": time.time(), "stream_events": [],
-                "display_params": _display_params, "loaded_func_ref": None,
-            }
-
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "status",
-            "content": f"Retrying {func_name}...",
-        })
-
-        # Load and execute
-        loaded_func = _load_function(func_name)
-        if loaded_func is None or not callable(loaded_func):
-            _broadcast_chat_response(conv_id, msg_id, {"type": "error", "content": f"Function '{func_name}' not found."})
-            return
-        with _running_tasks_lock:
-            if conv_id in _running_tasks:
-                _running_tasks[conv_id]["loaded_func_ref"] = loaded_func
-
-        # Modify reuses the previous session for context continuity
-        _prev_session = conv.get("_last_exec_session")
-        _prev_rt = conv.get("_last_exec_runtime")
-        _log(f"[retry/modify] provider={_exec_provider}, prev_rt={type(_prev_rt).__name__ if _prev_rt else None}, prev_session={_prev_session}, prev_rt_closed={_prev_rt_closed(_prev_rt) if _prev_rt else 'N/A'}")
-        if _prev_rt and not _prev_rt_closed(_prev_rt):
-            exec_rt = _prev_rt
-            _log(f"[retry/modify] reusing persistent runtime (process alive)")
-        elif _prev_session and _exec_provider == "codex":
-            from agentic.providers import create_runtime
-            func_dir = os.path.join(os.path.dirname(__file__), "..", "functions")
-            exec_rt = create_runtime(
-                provider="codex", session_id=_prev_session, search=True,
-                workdir=os.path.abspath(func_dir),
-            )
-            exec_rt._turn_count = 1  # ensure `exec resume` is used
-            # Restore session-cumulative usage baseline so per-call diff is correct
-            _prev_cum = conv.get("_last_exec_cumulative_usage")
-            if _prev_cum:
-                exec_rt._session_cumulative = _prev_cum
-            if _exec_model:
-                exec_rt.model = _exec_model
-            _log(f"[retry/modify] reusing Codex session: {_prev_session}")
-        elif _prev_session and _exec_provider == "claude-code":
-            from agentic.providers import create_runtime
-            exec_rt = create_runtime(provider="claude-code")
-            # Claude Code CLI uses --resume with session_id
-            exec_rt._session_id = _prev_session
-            if _exec_model:
-                exec_rt.model = _exec_model
-            _log(f"[retry/modify] reusing Claude Code session: {_prev_session}")
-        elif _prev_session and _exec_provider == "gemini-cli":
-            from agentic.providers import create_runtime
-            exec_rt = create_runtime(provider="gemini-cli")
-            exec_rt._session_id = _prev_session
-            exec_rt._turn_count = 1  # so it uses --resume
-            if _exec_model:
-                exec_rt.model = _exec_model
-            _log(f"[retry/modify] reusing Gemini session: {_prev_session}")
-        else:
-            exec_rt = _get_exec_runtime()
-            _log(f"[retry/modify] WARNING: no session to reuse, created fresh runtime")
-        call_kwargs = dict(params)
-        # Resolve string function-name parameters to actual function objects
-        for param_key in ("fn", "function"):
-            if param_key in call_kwargs and isinstance(call_kwargs[param_key], str):
-                resolved_function = _load_function(call_kwargs[param_key])
-                if resolved_function is not None:
-                    call_kwargs[param_key] = resolved_function
-        _inject_runtime(loaded_func, call_kwargs, exec_rt)
-
-        # Register streaming callback for real-time CLI output
-        def _on_stream(event: dict):
-            with _running_tasks_lock:
-                ti = _running_tasks.get(conv_id)
-                if ti and "stream_events" in ti:
-                    ti["stream_events"].append(event)
-                    if len(ti["stream_events"]) > 200:
-                        ti["stream_events"] = ti["stream_events"][-200:]
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "stream_event",
-                "event": event,
-                "function": func_name,
-            })
-        exec_rt.on_stream = _on_stream
-
-        # Register event-driven tree updates (same as main execution path)
-        def _tree_event_callback(event_type: str, data: dict):
-            try:
-                ctx = _get_last_ctx(loaded_func)
-                if ctx is None:
-                    ctx = getattr(loaded_func, 'context', None)
-                if ctx is not None:
-                    partial_tree = ctx._to_dict()
-                    partial_tree["_in_progress"] = True
-                    _broadcast_chat_response(conv_id, msg_id, {
-                        "type": "tree_update",
-                        "tree": partial_tree,
-                        "function": func_name,
-                    })
-            except Exception:
-                pass
-
-        on_event(_tree_event_callback)
-
-        # Follow-up support + execution
-        with _web_follow_up(conv_id, msg_id, func_name, tree_cb=_tree_event_callback):
-            try:
-                result = _format_result(loaded_func(**call_kwargs), action=func_name)
-            finally:
-                off_event(_tree_event_callback)
-                with _running_tasks_lock:
-                    _running_tasks.pop(conv_id, None)
-            # Update session id and cumulative usage for next modify
-            _new_sid = getattr(exec_rt, 'last_thread_id', None) or getattr(exec_rt, '_session_id', None)
-            if _new_sid:
-                conv["_last_exec_session"] = _new_sid
-            _cum = getattr(exec_rt, '_session_cumulative', None)
-            if _cum:
-                conv["_last_exec_cumulative_usage"] = _cum
-            # Preserve persistent runtimes (Claude Code) for session continuity
-            _is_persistent = type(exec_rt).__name__ == "ClaudeCodeRuntime"
-            if _is_persistent:
-                old_rt = conv.get("_last_exec_runtime")
-                if old_rt and old_rt is not exec_rt and hasattr(old_rt, 'close'):
-                    old_rt.close()
-                conv["_last_exec_runtime"] = exec_rt
-            else:
-                if hasattr(exec_rt, 'close'):
-                    exec_rt.close()
-
-        _log(f"[retry] completed, result length: {len(result)}")
-
-        # Build new tree
-        func_ctx = _get_last_ctx(loaded_func)
-        if func_ctx:
-            new_tree = func_ctx._to_dict()
-        else:
-            new_tree = {
-                "path": func_name, "name": func_name,
-                "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
-                "output": result, "status": "success",
-            }
-
-        # Replace old tree with new one
-        if target_idx is not None and new_tree.get("path") or new_tree.get("name"):
-            func_trees[target_idx] = new_tree
-
-        # Find existing assistant message for this function and append attempt
-        now = time.time()
-        _retry_usage = getattr(exec_rt, 'last_usage', None) or {}
-        attempt_entry = {
-            "content": result,
-            "tree": new_tree,
-            "timestamp": now,
-            "subsequent_messages": [],  # new branch, no subsequent yet
-            "usage": _retry_usage,
-        }
-
-        # Find existing assistant message for this function
-        messages = conv.get("messages", [])
-        existing_msg = None
-        existing_idx = None
-        for i in range(len(messages) - 1, -1, -1):
-            m = messages[i]
-            if (m.get("role") == "assistant"
-                    and m.get("type") == "result"
-                    and m.get("function") == func_name):
-                existing_msg = m
-                existing_idx = i
-                break
-
-        if existing_msg:
-            # Save subsequent messages into current attempt before branching
-            subsequent = messages[existing_idx + 1:]
-
-            if "attempts" in existing_msg:
-                cur_idx = existing_msg.get("current_attempt", len(existing_msg["attempts"]) - 1)
-                existing_msg["attempts"][cur_idx]["subsequent_messages"] = subsequent
-                # Append new attempt
-                existing_msg["attempts"].append(attempt_entry)
-                existing_msg["current_attempt"] = len(existing_msg["attempts"]) - 1
-            else:
-                # Upgrade old message to attempts format
-                old_attempt = {
-                    "content": existing_msg.get("content", ""),
-                    "tree": target_tree,
-                    "timestamp": existing_msg.get("timestamp", now),
-                    "subsequent_messages": subsequent,
-                }
-                existing_msg["attempts"] = [old_attempt, attempt_entry]
-                existing_msg["current_attempt"] = 1
-
-            # Truncate messages after this one (new branch)
-            conv["messages"] = messages[:existing_idx + 1]
-            _log(f"[retry] saved {len(subsequent)} subsequent messages to attempt, new branch")
-
-            # Truncate function_trees after this one too
-            if target_idx is not None:
-                conv["function_trees"] = func_trees[:target_idx + 1]
-
-            existing_msg["content"] = result
-            existing_msg["timestamp"] = now
-            existing_msg["usage"] = _retry_usage
-
-            _retry_usage = getattr(exec_rt, 'last_usage', None) or {}
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "retry_result",
-                "content": result,
-                "function": func_name,
-                "context_tree": new_tree,
-                "attempts": existing_msg["attempts"],
-                "current_attempt": existing_msg["current_attempt"],
-                "is_retry": True,
-                "truncated": len(subsequent) > 0,
-                "usage": _retry_usage,
-            })
-            _broadcast_context_stats(conv_id, msg_id, exec_runtime=exec_rt)
-        else:
-            # No existing message found — append new one
-            conv["messages"].append({
-                "role": "assistant", "type": "result",
-                "id": msg_id + "_retry", "content": result,
-                "function": func_name, "timestamp": now,
-                "attempts": [attempt_entry],
-                "current_attempt": 0,
-            })
-
-            _retry_usage = getattr(exec_rt, 'last_usage', None) or {}
-            _broadcast_chat_response(conv_id, msg_id, {
-                "type": "result", "content": result,
-                "function": func_name, "context_tree": new_tree,
-                "is_retry": True,
-                "usage": _retry_usage,
-            })
-        _save_sessions()
-
-    except Exception as e:
-        with _running_tasks_lock:
-            _running_tasks.pop(conv_id, None)
-        _log(f"[retry] exception: {e}\n{traceback.format_exc()}")
-        _broadcast_chat_response(conv_id, msg_id, {
-            "type": "error",
-            "content": f"Retry failed: {e}\n\n{traceback.format_exc()}",
-        })
-
-
-def _find_in_tree(tree: dict, path: str) -> dict | None:
-    """Find a node in a tree dict by path. Returns the node dict or None."""
-    if not tree or not path:
-        return None
-    # Direct match
-    if tree.get("path") == path or tree.get("name") == path:
-        return tree
-    # Search children
-    for child in tree.get("children", []):
-        found = _find_in_tree(child, path)
-        if found:
-            return found
-    return None
-
-
-class _FunctionStub:
-    """Lightweight stand-in for a function whose module cannot be imported.
-
-    Carries enough attributes (__name__, __doc__, __file__, __source__)
-    for edit()/improve() to read source code and file path without needing
-    a working import.
-    """
-    def __init__(self, name: str, source: str, filepath: str, doc: str = ""):
-        self.__name__ = name
-        self.__qualname__ = name
-        self.__doc__ = doc
-        self.__file__ = filepath
-        self.__source__ = source
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError(f"Function '{self.__name__}' cannot be called — its module failed to import.")
-
-
-def _make_stub_from_file(func_name: str, filepath: str):
-    """Read a .py file and build a _FunctionStub for the named function."""
-    try:
-        with open(filepath, "r") as fh:
-            source = fh.read()
-    except OSError:
-        return None
-
-    # Check the function is actually defined in this file
-    if f"def {func_name}" not in source:
-        return None
-
-    # Try to extract the function's docstring (first triple-quoted string after def line)
-    doc = ""
-    import re as _re
-    pattern = _re.compile(
-        rf'def\s+{_re.escape(func_name)}\s*\([^)]*\)[^:]*:\s*'
-        r'(?:\n\s+)?"""(.*?)"""',
-        _re.DOTALL,
-    )
-    match = pattern.search(source)
-    if match:
-        doc = match.group(1).strip()
-
-    return _FunctionStub(name=func_name, source=source, filepath=filepath, doc=doc)
-
-
-def _load_function(func_name: str):
-    """Load a function by name from meta_functions, functions, or subdirectory apps.
-
-    Always reloads modules to pick up file changes without server restart.
-    If a module fails to import (e.g. broken code), falls back to a stub
-    that carries the source code so edit() can still work on it.
-    """
-    meta_names = ["create", "edit", "create_app", "create_skill"]
-    if func_name in meta_names:
-        try:
-            mod = importlib.import_module(f"agentic.meta_functions.{func_name}")
-            importlib.reload(mod)
-            return getattr(mod, func_name)
-        except (ImportError, AttributeError):
-            pass
-    # Try single-file function: first by module name, then scan all modules
-    from agentic.function import auto_trace_module, auto_trace_package
-    fn_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "functions")
-    try:
-        mod = importlib.import_module(f"agentic.functions.{func_name}")
-        importlib.reload(mod)
-        auto_trace_module(mod, trace_pkg=os.path.abspath(fn_dir))
-        return getattr(mod, func_name)
-    except (ImportError, AttributeError):
-        pass
-    except Exception:
-        # Module exists but has errors (e.g. NameError) — try stub fallback
-        mod_file = os.path.join(fn_dir, f"{func_name}.py")
-        if os.path.isfile(mod_file):
-            stub = _make_stub_from_file(func_name, mod_file)
-            if stub is not None:
-                return stub
-    # Scan all .py files in functions/ for the function name
-    if os.path.isdir(fn_dir):
-        for f in sorted(os.listdir(fn_dir)):
-            if f.endswith(".py") and not f.startswith("_"):
-                mod_name = f"agentic.functions.{f[:-3]}"
-                try:
-                    mod = importlib.import_module(mod_name)
-                    importlib.reload(mod)
-                    auto_trace_module(mod, trace_pkg=os.path.abspath(fn_dir))
-                    fn = getattr(mod, func_name, None)
-                    if fn is not None:
-                        return fn
-                except Exception:
-                    # Module failed to import — check if it contains the function
-                    fpath = os.path.join(fn_dir, f)
-                    stub = _make_stub_from_file(func_name, fpath)
-                    if stub is not None:
-                        return stub
-    # Try subdirectory projects — scan functions/ and apps/ for main.py at any depth
-    import importlib.util as _imputil
-    base = os.path.dirname(os.path.dirname(__file__))
-    for search_dir in (os.path.join(base, "functions"), os.path.join(base, "apps")):
-        if not os.path.isdir(search_dir):
-            continue
-        for d in os.listdir(search_dir):
-            full_path = os.path.join(search_dir, d)
-            if not os.path.isdir(full_path) or d.startswith(("_", ".")):
-                continue
-            _skip = {"libs", "vendor", "node_modules", "desktop_env",
-                     "test", "tests", "examples", "docs", "build", "dist"}
-            for root, dirs, files in os.walk(full_path):
-                dirs[:] = [x for x in dirs
-                           if not x.startswith(("_", ".")) and x not in _skip]
-                if "main.py" in files:
-                    main_py = os.path.join(root, "main.py")
-                    try:
-                        spec = _imputil.spec_from_file_location(f"agentic.apps.{d}.main", main_py)
-                        mod = _imputil.module_from_spec(spec)
-                        spec.loader.exec_module(mod)
-                        # Only @agentic_function decorated functions are traced;
-                        # skip auto_trace_package to avoid tracing utility functions
-                        # like compute_iou that pollute the context tree.
-                        mod = sys.modules.get(mod.__name__, mod)
-                        fn = getattr(mod, func_name, None)
-                        if fn is not None:
-                            return fn
-                    except Exception:
-                        pass  # skip invalid main.py, continue searching
-    return None
 
 
 # ---------------------------------------------------------------------------
@@ -1618,6 +599,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         "function": "_chat",
                     })
                 runtime.on_stream = _on_chat_stream
+                _register_active_runtime(conv_id, runtime)
 
                 try:
                     result = runtime.exec(content=chat_content)
@@ -1625,6 +607,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     runtime.on_stream = None
                     with _running_tasks_lock:
                         _running_tasks.pop(conv_id, None)
+                    _unregister_active_runtime(conv_id)
                 _log(f"[exec] query completed, result length: {len(str(result))}")
 
                 # Store assistant reply
@@ -1710,6 +693,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 exec_rt = _get_exec_runtime(no_tools=_no_tools)
                 _apply_thinking_effort(exec_rt, exec_thinking_effort)
                 _log(f"[exec] new runtime: provider={type(exec_rt).__name__}, no_tools={_no_tools}, id={id(exec_rt)}, thinking={exec_thinking_effort}")
+                _register_active_runtime(conv_id, exec_rt)
                 _inject_runtime(loaded_func, call_kwargs, exec_rt)
 
                 # Register streaming callback for real-time LLM output
@@ -1728,16 +712,68 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     })
                 exec_rt.on_stream = _on_stream
 
-                # Register event-driven tree updates (replaces polling)
+                # Reserve the func_idx + attempt slot and open its JSONL file
+                # so live events can append and refresh shows progress.
+                if "function_trees" not in conv:
+                    conv["function_trees"] = []
+                _run_func_idx = len(conv["function_trees"])
+                _run_attempt_idx = 0
+                _run_placeholder_tree = {
+                    "path": func_name,
+                    "name": func_name,
+                    "params": {k: v for k, v in call_kwargs.items() if k != "runtime"},
+                    "status": "running",
+                    "start_time": time.time(),
+                    "children": [],
+                    "_in_progress": True,
+                }
+                conv["function_trees"].append(_run_placeholder_tree)
+                _persist.init_tree(conv_id, _run_func_idx, _run_attempt_idx)
+                _save_conversation(conv_id)
+
+                # Register event-driven tree updates: append each node event
+                # to the JSONL file and broadcast a full partial tree.
                 def _tree_event_callback(event_type: str, data: dict):
-                    """Broadcast tree update on every node_created/node_completed."""
                     try:
+                        if event_type == "node_created":
+                            _persist.append_tree_event(
+                                conv_id, _run_func_idx, _run_attempt_idx,
+                                {
+                                    "event": "enter",
+                                    "path": data.get("path"),
+                                    "name": data.get("name"),
+                                    "node_type": data.get("node_type", "function"),
+                                    "prompt": data.get("prompt", ""),
+                                    "params": data.get("params") or {},
+                                    "render": data.get("render", "summary"),
+                                    "compress": data.get("compress", False),
+                                    "ts": data.get("start_time"),
+                                },
+                            )
+                        elif event_type == "node_completed":
+                            _persist.append_tree_event(
+                                conv_id, _run_func_idx, _run_attempt_idx,
+                                {
+                                    "event": "exit",
+                                    "path": data.get("path"),
+                                    "status": data.get("status"),
+                                    "output": data.get("output"),
+                                    "raw_reply": data.get("raw_reply"),
+                                    "attempts": data.get("attempts", []),
+                                    "error": data.get("error", ""),
+                                    "duration_ms": data.get("duration_ms"),
+                                    "ts": data.get("end_time"),
+                                },
+                            )
+
                         ctx = _get_last_ctx(loaded_func)
                         if ctx is None:
                             ctx = getattr(loaded_func, 'context', None)
                         if ctx is not None:
                             partial_tree = ctx._to_dict()
                             partial_tree["_in_progress"] = True
+                            if _run_func_idx < len(conv.get("function_trees", [])):
+                                conv["function_trees"][_run_func_idx] = partial_tree
                             _broadcast_chat_response(conv_id, msg_id, {
                                 "type": "tree_update",
                                 "tree": partial_tree,
@@ -1756,6 +792,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         off_event(_tree_event_callback)
                         with _running_tasks_lock:
                             _running_tasks.pop(conv_id, None)
+                        _unregister_active_runtime(conv_id)
                     # Store session id for modify/resume before closing
                     _last_session_id = getattr(exec_rt, 'last_thread_id', None) or getattr(exec_rt, '_session_id', None)
                     # For Claude Code: keep runtime alive for modify reuse
@@ -1792,10 +829,14 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         "status": "success",
                     }
 
-                # Store this function's context tree in conversation
+                # Replace the placeholder reserved before execution with the
+                # final tree (see `_run_func_idx` above).
                 if "function_trees" not in conv:
                     conv["function_trees"] = []
-                conv["function_trees"].append(tree_dict)
+                if 0 <= _run_func_idx < len(conv["function_trees"]):
+                    conv["function_trees"][_run_func_idx] = tree_dict
+                else:
+                    conv["function_trees"].append(tree_dict)
 
                 _log(f"[exec] {func_name} completed, result length: {len(str(result))}")
 
@@ -1852,11 +893,58 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
             }, default=str))
 
         # Persist sessions to disk after each execution
-        _save_sessions()
+        _save_conversation(conv_id)
 
     except Exception as e:
         with _running_tasks_lock:
             _running_tasks.pop(conv_id, None)
+        _unregister_active_runtime(conv_id)
+
+        # Cancellation path — the exception came from /api/stop killing the
+        # subprocess. Mark any still-running tree nodes as cancelled and emit
+        # a "stopped" result instead of an error message.
+        if _is_cancelled(conv_id):
+            _clear_cancel(conv_id)
+            ctx = None
+            _lf = locals().get("loaded_func")
+            if _lf is not None:
+                try:
+                    ctx = _get_last_ctx(_lf) or getattr(_lf, "context", None)
+                except Exception:
+                    ctx = None
+            if ctx is not None:
+                try:
+                    _mark_context_cancelled(ctx)
+                    _broadcast_chat_response(conv_id, msg_id, {
+                        "type": "tree_update",
+                        "tree": ctx._to_dict(),
+                        "function": func_name,
+                    })
+                except Exception:
+                    pass
+            try:
+                conv = _get_or_create_conversation(conv_id)
+                now = time.time()
+                conv["messages"].append({
+                    "role": "assistant",
+                    "type": "cancelled",
+                    "id": msg_id + "_reply",
+                    "content": "Execution stopped by user.",
+                    "function": func_name,
+                    "display": "runtime",
+                    "timestamp": now,
+                })
+                _save_conversation(conv_id)
+            except Exception:
+                pass
+            _broadcast_chat_response(conv_id, msg_id, {
+                "type": "result",
+                "content": "Execution stopped by user.",
+                "function": func_name,
+                "cancelled": True,
+            })
+            return
+
         error_content = f"Error: {e}\n\n{traceback.format_exc()}"
         # Persist error to conversation messages
         try:
@@ -1874,7 +962,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                 "current_attempt": 0,
             }
             conv["messages"].append(error_msg)
-            _save_sessions()
+            _save_conversation(conv_id)
         except Exception:
             pass
         _broadcast_chat_response(conv_id, msg_id, {
@@ -1928,7 +1016,7 @@ def _broadcast_context_stats(conv_id: str, msg_id: str, chat_runtime=None, exec_
             }
 
     # Include provider name so frontend can apply provider-specific formatting
-    provider_name = conv.get("provider_name", _default_provider) or ""
+    provider_name = conv.get("provider_name", _rm._default_provider) or ""
 
     stats = {
         "type": "context_stats",
@@ -2319,7 +1407,7 @@ async def _handle_ws_command(ws, cmd: dict):
                             func_trees[ti] = selected_tree
                             break
 
-                _save_sessions()
+                _save_conversation(conv_id)
                 await ws.send_text(json.dumps({
                     "type": "attempt_switched",
                     "data": {
@@ -2342,7 +1430,7 @@ async def _handle_ws_command(ws, cmd: dict):
                     conv["runtime"].close()
                 # Clean up root_contexts entries belonging to this conversation
                 _cleanup_conv_resources(conv_id, conv)
-            _save_sessions()
+            _delete_conversation_files(conv_id)
 
     elif action == "clear_conversations":
         with _conversations_lock:
@@ -2359,7 +1447,7 @@ async def _handle_ws_command(ws, cmd: dict):
             _follow_up_queues.pop(cid, None)
             with _running_tasks_lock:
                 _running_tasks.pop(cid, None)
-        _save_sessions()
+            _delete_conversation_files(cid)
 
     elif action == "load_conversation":
         conv_id = cmd.get("conv_id")
@@ -2690,6 +1778,39 @@ def create_app():
         _broadcast(json.dumps({"type": "status", "paused": False}))
         return JSONResponse(content={"paused": False})
 
+    @app.post("/api/stop")
+    async def api_stop(body: dict = None):
+        """Stop the currently running task for a conversation.
+
+        Flow: mark cancel flag → resume (in case paused) → kill exec subprocess
+        → unblock any pending ask_user queue. The exception path in
+        _execute_in_context detects the cancel flag and marks running tree
+        nodes as cancelled, then broadcasts the final tree.
+        """
+        conv_id = (body or {}).get("conv_id")
+        if not conv_id:
+            return JSONResponse(
+                content={"stopped": False, "error": "missing conv_id"},
+                status_code=400,
+            )
+        _mark_cancelled(conv_id)
+        resume_execution()
+        _kill_active_runtime(conv_id)
+        with _follow_up_lock:
+            q = _follow_up_queues.get(conv_id)
+        if q is not None:
+            try:
+                q.put_nowait({"_cancelled": True})
+            except Exception:
+                pass
+        _broadcast(json.dumps({
+            "type": "status",
+            "paused": False,
+            "stopped": True,
+            "conv_id": conv_id,
+        }))
+        return JSONResponse(content={"stopped": True})
+
     @app.get("/api/providers")
     async def get_providers():
         return JSONResponse(content=_list_providers())
@@ -2703,7 +1824,7 @@ def create_app():
                 conv = _conversations.get(conv_id)
             if conv and conv.get("provider_name") == name:
                 return JSONResponse(content={"switched": False, "already_active": True, "provider": name})
-        elif name == _default_provider:
+        elif name == _rm._default_provider:
             return JSONResponse(content={"switched": False, "already_active": True, "provider": name})
         try:
             _switch_runtime(name, conv_id=conv_id)
@@ -2715,13 +1836,12 @@ def create_app():
     async def list_models():
         """List available models for the current provider."""
         # Ensure runtime is initialized
-        global _default_provider, _default_runtime
-        with _runtime_lock:
-            if _default_provider is None:
-                _default_provider, _default_runtime = _detect_default_provider()
+        with _rm._runtime_lock:
+            if _rm._default_provider is None:
+                _rm._default_provider, _rm._default_runtime = _detect_default_provider()
 
-        provider = _default_provider or "none"
-        runtime = _default_runtime
+        provider = _rm._default_provider or "none"
+        runtime = _rm._default_runtime
         current_model = runtime.model if runtime else None
 
         # Auto-detect models from the runtime
@@ -2754,7 +1874,7 @@ def create_app():
             if conv and conv.get("runtime"):
                 # Close old runtime, create new one with new model
                 old_rt = conv["runtime"]
-                provider_name = conv.get("provider_name", _default_provider)
+                provider_name = conv.get("provider_name", _rm._default_provider)
                 if hasattr(old_rt, 'close'):
                     old_rt.close()
                 new_rt = _create_runtime_for_visualizer(provider_name)
@@ -2764,8 +1884,8 @@ def create_app():
                 _broadcast(json.dumps({"type": "provider_changed", "data": info}))
                 return JSONResponse(content={"switched": True, "model": model})
         # Update default runtime
-        if _default_runtime:
-            _default_runtime.model = model
+        if _rm._default_runtime:
+            _rm._default_runtime.model = model
             info = _get_provider_info()
             _broadcast(json.dumps({"type": "provider_changed", "data": info}))
             return JSONResponse(content={"switched": True, "model": model})
@@ -2812,8 +1932,8 @@ def create_app():
 
         chat_session_id = None
         chat_locked = False
-        chat_provider = _chat_provider
-        chat_model = _chat_model
+        chat_provider = _rm._chat_provider
+        chat_model = _rm._chat_model
 
         if conv_id:
             with _conversations_lock:
@@ -2841,58 +1961,57 @@ def create_app():
                 "thinking": _get_thinking_config(chat_provider),
             },
             "exec": {
-                "provider": _exec_provider,
-                "model": _exec_model,
-                "thinking": _get_thinking_config(_exec_provider),
+                "provider": _rm._exec_provider,
+                "model": _rm._exec_model,
+                "thinking": _get_thinking_config(_rm._exec_provider),
             },
-            "available": _available_providers,
+            "available": _rm._available_providers,
         })
 
     @app.post("/api/agent_settings")
     async def set_agent_settings(body: dict = None):
         """Update chat and/or exec agent provider/model."""
-        global _chat_provider, _chat_model, _exec_provider, _exec_model
         _init_providers()
 
         changed = False
 
         if body and "chat" in body:
             chat = body["chat"]
-            new_provider = chat.get("provider", _chat_provider)
-            new_model = chat.get("model", _chat_model)
-            if new_provider != _chat_provider or new_model != _chat_model:
-                _chat_provider = new_provider
-                _chat_model = new_model
+            new_provider = chat.get("provider", _rm._chat_provider)
+            new_model = chat.get("model", _rm._chat_model)
+            if new_provider != _rm._chat_provider or new_model != _rm._chat_model:
+                _rm._chat_provider = new_provider
+                _rm._chat_model = new_model
                 # Update all existing conversation runtimes
                 with _conversations_lock:
                     for conv in _conversations.values():
                         old_rt = conv.get("runtime")
                         if old_rt and hasattr(old_rt, 'close'):
                             old_rt.close()
-                        new_rt = _create_runtime_for_visualizer(_chat_provider)
-                        new_rt.model = _chat_model
+                        new_rt = _create_runtime_for_visualizer(_rm._chat_provider)
+                        new_rt.model = _rm._chat_model
                         conv["runtime"] = new_rt
-                        conv["provider_name"] = _chat_provider
+                        conv["provider_name"] = _rm._chat_provider
                 changed = True
 
         if body and "exec" in body:
             exec_cfg = body["exec"]
-            _exec_provider = exec_cfg.get("provider", _exec_provider)
-            _exec_model = exec_cfg.get("model", _exec_model)
+            _rm._exec_provider = exec_cfg.get("provider", _rm._exec_provider)
+            _rm._exec_model = exec_cfg.get("model", _rm._exec_model)
             changed = True
 
         if changed:
             _broadcast(json.dumps({
                 "type": "agent_settings_changed",
                 "data": {
-                    "chat": {"provider": _chat_provider, "model": _chat_model},
-                    "exec": {"provider": _exec_provider, "model": _exec_model},
+                    "chat": {"provider": _rm._chat_provider, "model": _rm._chat_model},
+                    "exec": {"provider": _rm._exec_provider, "model": _rm._exec_model},
                 },
             }))
 
         return JSONResponse(content={
-            "chat": {"provider": _chat_provider, "model": _chat_model},
-            "exec": {"provider": _exec_provider, "model": _exec_model},
+            "chat": {"provider": _rm._chat_provider, "model": _rm._chat_model},
+            "exec": {"provider": _rm._exec_provider, "model": _rm._exec_model},
         })
 
 
@@ -3216,8 +2335,8 @@ def start_server(port: int = 8765, open_browser: bool = True) -> threading.Threa
             import uvicorn
         except ImportError:
             raise ImportError(
-                "uvicorn is required for the visualizer. "
-                "Install with: pip install agentic-programming[visualize]"
+                "uvicorn is required for the web UI. "
+                "Install with: pip install agentic-programming[web]"
             )
 
         app = create_app()

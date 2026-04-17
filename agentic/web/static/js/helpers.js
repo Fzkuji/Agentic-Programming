@@ -82,9 +82,11 @@ function setWelcomeVisible(show) {
   var w = document.getElementById('welcomeScreen');
   var ex = document.getElementById('welcomeExamples');
   var cm = document.getElementById('chatMessages');
+  var ca = document.getElementById('chatArea');
   if (w) w.style.display = show ? '' : 'none';
   if (ex) ex.style.display = show ? '' : 'none';
   if (cm) cm.style.paddingBottom = show ? '0' : '';
+  if (ca) ca.classList.toggle('welcome-visible', !!show);
 }
 
 function addSystemMessage(text) {

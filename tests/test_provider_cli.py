@@ -314,7 +314,7 @@ class TestCodexRuntime:
 
 def test_visualizer_codex_runtime_enables_search(monkeypatch):
     """Visualizer chat uses stateless Codex with native web search enabled."""
-    from agentic.visualize import server
+    from agentic.web import server
 
     captured = {}
 

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agentic</title>
-<link rel="stylesheet" href="/css/style.css?v=95">
+<link rel="stylesheet" href="/css/style.css?v=107">
 </head>
 <body>
 <div class="app">
@@ -82,7 +82,6 @@
     <div class="detail-header">
       <div id="detailTitle" class="detail-title">Node Detail</div>
       <div class="detail-header-actions">
-        <button class="detail-copy" id="detailCopyBtn" onclick="copyNodeJson()" title="Copy node as JSON">Copy JSON</button>
         <button class="detail-close" onclick="closeDetail()">&times;</button>
       </div>
     </div>
@@ -98,13 +97,14 @@
 
 <!-- Application Scripts (order matters: state → helpers → tree → chat → sidebar → providers → settings → ui → init) -->
 <script src="/js/state.js?v=3"></script>
-<script src="/js/helpers.js?v=14"></script>
-<script src="/js/tree.js?v=6"></script>
+<script src="/js/helpers.js?v=15"></script>
+<script src="/js/tree.js?v=8"></script>
 <script src="/js/chat.js?v=10"></script>
-<script src="/js/sidebar.js?v=26"></script>
+<script src="/js/sidebar.js?v=27"></script>
 <script src="/js/providers.js?v=4"></script>
 <script src="/js/settings.js?v=5"></script>
-<script src="/js/ui.js?v=8"></script>
-<script src="/js/init.js?v=11"></script>
+<script src="/js/ui.js?v=9"></script>
+<script src="/js/scrollbar.js?v=2"></script>
+<script src="/js/init.js?v=12"></script>
 </body>
 </html>

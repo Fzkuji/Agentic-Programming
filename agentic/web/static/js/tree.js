@@ -244,23 +244,43 @@ function renderTreeNode(node) {
     var elapsed = Math.round(Date.now() / 1000 - node.start_time);
     dur = elapsed + 's (paused)';
   }
-  var output = node.output != null ? truncate(JSON.stringify(node.output), 80) : '';
+
+  var isExec = node.node_type === 'exec';
+  var output = '';
+  var preview = '';
+  if (isExec) {
+    var execIn = (node.params && node.params._content) || '';
+    var execOut = node.raw_reply || (typeof node.output === 'string' ? node.output : '');
+    var inPart = execIn ? '\u2192 ' + truncate(execIn, 50) : '';
+    var outPart = execOut ? ' \u2190 ' + truncate(execOut, 50) : '';
+    preview = (inPart + outPart).trim();
+  } else if (node.output != null) {
+    output = typeof node.output === 'string'
+      ? truncate(node.output, 80)
+      : truncate(JSON.stringify(node.output), 80);
+  }
+
   var toggleClass = hasChildren ? (isExpanded ? 'expanded' : '') : 'leaf';
   var childrenClass = isExpanded ? '' : 'collapsed';
 
-  var canRetry = node.name !== 'chat_session' && node.status !== 'running';
+  var canRetry = !isExec && node.name !== 'chat_session' && node.status !== 'running';
   var filteredParams = {};
   if (node.params) {
     for (var k in node.params) { if (k !== 'runtime' && k !== 'callback') filteredParams[k] = node.params[k]; }
   }
 
+  var nameCell = isExec
+    ? '<span class="llm-badge" title="LLM call">LLM</span>'
+    : '<span class="node-name" onclick="event.stopPropagation();viewSource(\'' + escAttr(node.name) + '\')" title="View source" style="cursor:pointer">' + escHtml(node.name) + '</span>';
+
   var html = '<div class="tree-node">' +
-    '<div class="node-row' + (isSelected ? ' selected' : '') + '" onclick="selectTreeNode(event, \'' + escAttr(node.path) + '\')">' +
+    '<div class="node-row' + (isSelected ? ' selected' : '') + (isExec ? ' exec-row' : '') + '" onclick="selectTreeNode(event, \'' + escAttr(node.path) + '\')">' +
       '<span class="node-toggle ' + toggleClass + '" onclick="toggleExpand(event, \'' + escAttr(node.path) + '\')">&#9654;</span>' +
       '<span class="node-icon">' + icon + '</span>' +
-      '<span class="node-name" onclick="event.stopPropagation();viewSource(\'' + escAttr(node.name) + '\')" title="View source" style="cursor:pointer">' + escHtml(node.name) + '</span>' +
-      '<span class="node-status ' + displayStatus + '">' + displayStatus + '</span>' +
+      nameCell +
+      (isExec ? '' : '<span class="node-status ' + displayStatus + '">' + displayStatus + '</span>') +
       (dur ? '<span class="node-duration"' + ((displayStatus === 'running' || displayStatus === 'paused') && node.start_time > 0 ? ' data-running="1" data-start="' + node.start_time + '"' : '') + '>' + dur + '</span>' : '') +
+      (preview ? '<span class="node-output-preview exec-preview">' + escHtml(preview) + '</span>' : '') +
       (output ? '<span class="node-output-preview">' + escHtml(output) + '</span>' : '') +
       (canRetry ? '<span class="retry-icon" onclick="event.stopPropagation();toggleRetryPanel(\'' + escAttr(node.path) + '\')" title="Modify">modify</span>' : '') +
     '</div>';

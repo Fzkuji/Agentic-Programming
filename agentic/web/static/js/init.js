@@ -91,6 +91,9 @@ function handleMessage(msg) {
       break;
     case 'status':
       isPaused = msg.paused;
+      if (msg.stopped) {
+        isRunning = false;
+      }
       updatePauseBtn();
       refreshInlineTrees();
       break;

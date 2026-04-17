@@ -120,11 +120,8 @@ html, body {
   overflow: hidden !important;
   scrollbar-width: none !important;
 }
-/* NOTE: do NOT add `::-webkit-scrollbar` rules anywhere, even scoped ones.
-   Any such rule in the stylesheet switches the entire document's scrollbars
-   from macOS overlay mode to classic (layout-occupying) mode. The
-   `overflow: hidden !important` above is sufficient to hide scrollbars
-   inside the collapsed sidebar. */
+/* Custom scrollbars: defined globally below. On collapsed sidebar we hide
+   them via `overflow: hidden !important` above. */
 /* --- Collapsed sidebar: static top, smooth-slide bottom --- */
 /* Logo shrinks to 0 in flex layout; fade out text so no partial clipping */
 .sidebar.collapsed .sidebar-header .logo { opacity: 0; padding-left: 0; }
@@ -1282,6 +1279,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   display: flex;
   flex-direction: column;
 }
+.chat-area.welcome-visible { overflow: hidden; }
 
 /* Live execution tree */
 .live-exec-tree {
@@ -2203,15 +2201,16 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 
 .stop-btn {
   position: absolute;
-  right: 12px;
-  top: 12px;
+  right: 50px;
+  bottom: calc(100% - 42px);
   z-index: 2;
   width: 30px; height: 30px; border-radius: 50%; border: none;
   background: var(--accent-red); color: #fff; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; transition: all var(--transition); opacity: 0.8;
+  flex-shrink: 0; transition: bottom 0.3s cubic-bezier(0.25, 0.1, 0.25, 1), opacity var(--transition); opacity: 0.85;
   padding: 0;
 }
+.input-wrapper.fn-form-mode .stop-btn { bottom: 12px; }
 .stop-btn svg { width: 14px; height: 14px; fill: currentColor; }
 .stop-btn:hover { opacity: 1; }
 
@@ -2533,6 +2532,8 @@ select.fn-form-input {
   border-left: none;
 }
 
+.app:has(#detailPanel.collapsed) #detailResize { display: none; }
+
 .detail-header {
   display: flex;
   align-items: center;
@@ -2571,30 +2572,6 @@ select.fn-form-input {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.detail-copy {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-family: var(--font-mono);
-  padding: 3px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all var(--transition);
-  line-height: 1.2;
-}
-
-.detail-copy:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
-.detail-copy.copied {
-  color: var(--accent-green, #98c379);
-  border-color: var(--accent-green, #98c379);
 }
 
 .detail-body { padding: 16px; }
@@ -2704,6 +2681,15 @@ select.fn-form-input {
 .node-status.error { background: rgba(224,108,117,0.12); color: var(--accent-red); }
 .node-duration { font-size: 10px; color: var(--text-secondary); flex-shrink: 0; }
 .node-output-preview { font-size: 10px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+.node-output-preview.exec-preview { font-family: var(--font-mono); color: var(--text-muted); }
+
+.llm-badge {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.4px;
+  padding: 1px 6px; border-radius: 3px;
+  background: rgba(198,144,38,0.12); color: var(--accent-yellow);
+  flex-shrink: 0; line-height: 1.3;
+}
 
 .rerun-btn {
   -webkit-appearance: none; appearance: none;
@@ -2772,13 +2758,37 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
 }
 
 /* ===== Scrollbar =====
-   Intentionally no global ::-webkit-scrollbar rules here. Defining them
-   globally forces scrollbars into "classic" mode (always taking layout
-   width) even on platforms where the system default is overlay (macOS).
-   We let the OS decide — on macOS, scrollbars float over content and take
-   no width, so different pages no longer render at different widths based
-   on whether they scroll. Per-element customization can still be added
-   using more specific selectors when needed. */
+   Custom overlay scrollbars: native scrollbars are hidden on targeted scroll
+   containers (`.scroll-overlay`), and js/scrollbar.js draws a thin floating
+   thumb on top of the content. The thumb is theme-aware, drag-to-scroll, and
+   takes no layout width. Containers not marked `.scroll-overlay` fall back to
+   the OS default scrollbar. */
+.scroll-overlay {
+  scrollbar-width: none; /* Firefox: hide native */
+}
+.scroll-overlay::-webkit-scrollbar {
+  display: none; /* WebKit: hide native */
+}
+
+.overlay-thumb {
+  position: fixed;
+  width: 6px;
+  right: 0;
+  border-radius: 6px;
+  background: var(--border-light);
+  pointer-events: auto;
+  z-index: 9999;
+  opacity: 0;
+  transition: opacity 0.25s, background 0.15s, width 0.12s;
+  cursor: default;
+  user-select: none;
+}
+.overlay-thumb.visible { opacity: 0.85; }
+.overlay-thumb:hover,
+.overlay-thumb.dragging {
+  background: var(--text-muted);
+  width: 8px;
+}
 
 /* ===== Responsive ===== */
 @media (max-width: 900px) {

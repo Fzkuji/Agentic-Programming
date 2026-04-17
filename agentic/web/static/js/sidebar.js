@@ -3,6 +3,7 @@
 function toggleSidebar() {
   var sb = document.getElementById('sidebar');
   sidebarOpen = !sidebarOpen;
+  sb.style.removeProperty('width');
   sb.classList.toggle('collapsed', !sidebarOpen);
 }
 

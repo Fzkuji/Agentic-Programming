@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- **Real-time web visualization** (`python -m agentic.visualize`) — interactive Context tree viewer with WebSocket streaming
+- **Real-time web UI** (`python -m agentic.web`, also accepts `agentic.visualize` alias) — interactive Context tree viewer with WebSocket streaming
 - **Built-in agentic functions**: `general_action`, `agent_loop`, `wait`, `deep_work`
 - **`deep_work`** — autonomous plan-execute-evaluate loop with quality levels (high_school → professor)
 - **Session continuity** for CLI providers (Claude Code, Codex, Gemini CLI)
