@@ -164,7 +164,24 @@ from agentic import Runtime
 runtime = Runtime(call=my_llm_call, max_retries=3)
 ```
 
-That is useful for rate limits, flaky network requests, and temporary provider errors. Retry attempts are recorded in the execution tree, so `context.traceback()` and `context.save("trace.jsonl")` preserve the failure history.
+`max_retries` counts the total number of attempts, including the first call. In other words:
+
+- `max_retries=1` means try once, then fail immediately
+- `max_retries=2` means first call + one retry
+- `max_retries=3` means first call + up to two retries
+
+The retry loop is designed for transient provider failures such as rate limits, flaky network requests, and temporary upstream errors. `TypeError` and `NotImplementedError` are treated as implementation errors and are raised immediately instead of being retried.
+
+Retry attempts are recorded in the execution tree, so `context.traceback()` and `context.save("trace.jsonl")` preserve the full failure history:
+
+```python
+[
+    {"attempt": 1, "reply": None, "error": "ConnectionError: timeout"},
+    {"attempt": 2, "reply": "ok", "error": None},
+]
+```
+
+That retry history also feeds into `fix()`, which means a later repair pass can see what actually failed instead of guessing from scratch.
 
 ### `fix()` for broken generated functions
 
@@ -186,6 +203,15 @@ except Exception:
 ```
 
 Internally this runs a clarify → generate → verify loop, which makes it a good fit for tightening output formats after real failures instead of regenerating from scratch.
+
+A few practical details matter:
+
+- `fix()` can inspect the function source, function name, and recent `Context` failure history
+- if retries already happened, those recorded attempts become part of the repair context
+- if the verifier never accepts a rewrite within `max_rounds`, `fix()` returns a summary string instead of raising
+- if more information is needed and no `ask_user` handler is installed, it can return a follow-up payload like `{"type": "follow_up", "question": "..."}`
+
+Use `Runtime(max_retries=...)` for transient API problems, and `fix()` for structural problems in the generated function itself. They complement each other rather than overlapping.
 
 ---
 
