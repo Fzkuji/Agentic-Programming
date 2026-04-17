@@ -33,7 +33,7 @@ Quick start:
 from agentic.context import Context, FollowUp, run_with_follow_up, ask_user
 from agentic.function import agentic_function, traced, auto_trace_module, auto_trace_package
 from agentic.runtime import Runtime
-from agentic.meta_functions import create, create_app, fix, improve, create_skill
+from agentic.meta_functions import create, create_app, edit, improve, create_skill
 from agentic.providers import detect_provider, create_runtime, check_providers
 from agentic.functions.general_action import general_action
 from agentic.functions.agent_loop import agent_loop
@@ -52,7 +52,7 @@ __all__ = [
     "ask_user",
     "create",
     "create_app",
-    "fix",
+    "edit",
     "improve",
     "detect_provider",
     "create_runtime",

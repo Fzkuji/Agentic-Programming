@@ -1,12 +1,12 @@
 """
-fix() — Analyze and rewrite an existing function based on errors and instructions.
+edit() — Analyze and rewrite an existing function based on errors and instructions.
 
 Loop pattern:
     for each round:
-        _fix_round(task, feedback) → generates, validates, compiles, verifies
+        _edit_round(task, feedback) → generates, validates, compiles, verifies
         Each round is a parent node in the execution tree with child steps.
 
-    conclude_fix() → natural language summary
+    conclude_edit() → natural language summary
     return compiled callable
 """
 
@@ -24,9 +24,9 @@ from agentic.meta_functions._helpers import (
 )
 
 
-_FIX_GENERATION_SUFFIX = (
+_EDIT_GENERATION_SUFFIX = (
     "\n\nFix the root cause, not just the symptom. "
-    "Respond with ONLY the fixed Python code in a ```python fence."
+    "Respond with ONLY the edited Python code in a ```python fence."
 )
 
 
@@ -36,7 +36,7 @@ _FIX_GENERATION_SUFFIX = (
 
 
 @agentic_function(compress=True, summarize={"siblings": -1})
-def _fix_round(
+def _edit_round(
     task: str,
     original_code: str,
     error_log: str,
@@ -45,7 +45,7 @@ def _fix_round(
     fn_name: str,
     runtime: Runtime,
 ) -> dict:
-    """Execute one round of fix: clarify → generate code → validate → compile → verify.
+    """Execute one round of edit: clarify → generate code → validate → compile → verify.
 
     Returns a dict describing the outcome:
       {"status": "approved", "code": "...", "compiled": <callable>}
@@ -56,22 +56,18 @@ def _fix_round(
 
     Args:
         task: The full task string (base context + previous feedback).
-        original_code: The original source code being fixed.
+        original_code: The original source code being edited.
         error_log: Error log from the original function.
-        instruction: User's fix instruction.
+        instruction: User's edit instruction.
         round_num: Current round number (for display).
         runtime: LLM runtime instance.
 
     Returns:
         Dict with status and round-specific data.
     """
-    # Step 1: Clarify — do we have enough info?
-    # On the first round (round_num == 0), always ask a follow-up question
-    # so the user can confirm/clarify what they want fixed before we generate code.
-    # Exit is only allowed on round 1+ (after user has had a chance to respond).
     check = clarify(task=task, runtime=runtime)
     if round_num == 0:
-        question = check.get("question") or check.get("reason") or "Need more information."
+        question = check.get("question") or "Can you confirm what needs editing?"
         return {"status": "follow_up", "question": question}
     if check.get("exit"):
         return {"status": "exit", "reason": check.get("reason", "Task cannot proceed.")}
@@ -79,47 +75,44 @@ def _fix_round(
         question = check.get("question") or "Need more information."
         return {"status": "follow_up", "question": question}
 
-    # Step 2: Generate fix attempt
-    response = generate_code(task=f"{task}{_FIX_GENERATION_SUFFIX}", runtime=runtime)
+    response = generate_code(task=f"{task}{_EDIT_GENERATION_SUFFIX}", runtime=runtime)
 
-    # Step 3: Extract, validate, compile
     try:
-        fixed_code = extract_code(response)
-        fixed_code = _canonicalize_function_code(fixed_code, fn_name)
-        validate_code(fixed_code, response)
-        compiled_fn = compile_function(fixed_code, runtime, fn_name)
+        edited_code = extract_code(response)
+        edited_code = _canonicalize_function_code(edited_code, fn_name)
+        validate_code(edited_code, response)
+        compiled_fn = compile_function(edited_code, runtime, fn_name)
     except (SyntaxError, ValueError, RuntimeError) as e:
         return {"status": "error", "feedback": f"Code failed: {e}"}
 
-    # Step 4: Verify
-    verify_result = verify_fix(
+    verify_result = verify_edit(
         original_code=original_code,
-        fixed_code=fixed_code,
+        edited_code=edited_code,
         error_log=error_log,
         instruction=instruction,
         runtime=runtime,
     )
 
     if verify_result.get("approved", False):
-        return {"status": "approved", "code": fixed_code, "compiled": compiled_fn}
+        return {"status": "approved", "code": edited_code, "compiled": compiled_fn}
     else:
-        reason = verify_result.get("reasoning", "Fix was rejected.")
+        reason = verify_result.get("reasoning", "Edit was rejected.")
         return {"status": "rejected", "feedback": reason}
 
 
 @agentic_function(summarize={"depth": 0, "siblings": 0})
-def verify_fix(
+def verify_edit(
     original_code: str,
-    fixed_code: str,
+    edited_code: str,
     error_log: str,
     instruction: str,
     runtime: Runtime,
 ) -> dict:
-    """Review a proposed code fix and decide if it correctly addresses the problem.
+    """Review a proposed code edit and decide if it correctly addresses the problem.
 
-    Compare the original code with the fixed version. Check:
-    1. Does the fix address the root cause (not just the symptom)?
-    2. Is the fix correct and complete?
+    Compare the original code with the edited version. Check:
+    1. Does the edit address the root cause (not just the symptom)?
+    2. Is the edit correct and complete?
     3. Does it introduce any new issues?
 
     Return JSON:
@@ -129,10 +122,10 @@ def verify_fix(
     }
 
     Args:
-        original_code: The original broken code.
-        fixed_code: The proposed fix.
+        original_code: The original code.
+        edited_code: The proposed edit.
         error_log: Error messages from the original code.
-        instruction: What the user asked to fix.
+        instruction: What the user asked to change.
         runtime: LLM runtime instance.
 
     Returns:
@@ -140,7 +133,7 @@ def verify_fix(
     """
     context = (
         f"Original code:\n```python\n{original_code}\n```\n\n"
-        f"Fixed code:\n```python\n{fixed_code}\n```"
+        f"Edited code:\n```python\n{edited_code}\n```"
     )
     if error_log:
         context += f"\n\nError log:\n{error_log}"
@@ -157,28 +150,27 @@ def verify_fix(
             return json.loads(match.group())
     except (json.JSONDecodeError, AttributeError):
         pass
-    # Fallback: check for rejection keywords; approve by default
     lower = reply.lower()
-    rejected = any(w in lower for w in ["reject", "wrong", "incorrect", "not fix", "doesn't fix", "fail"])
+    rejected = any(w in lower for w in ["reject", "wrong", "incorrect", "doesn't address", "fail"])
     return {"approved": not rejected, "reasoning": reply[:300]}
 
 
 @agentic_function(summarize={"depth": 0, "siblings": 0})
-def conclude_fix(task: str, runtime: Runtime) -> str:
-    """Summarize what was fixed based on all the steps taken.
+def conclude_edit(task: str, runtime: Runtime) -> str:
+    """Summarize what was edited based on all the steps taken.
 
     Look at the execution history (visible as siblings in the context tree)
     and produce a concise natural language summary of:
     - What was wrong
     - What was changed
-    - Whether the fix was successful
+    - Whether the edit was successful
 
     Args:
-        task: The original fix task description.
+        task: The original edit task description.
         runtime: LLM runtime instance.
 
     Returns:
-        Natural language summary of the fix.
+        Natural language summary of the edit.
     """
     return runtime.exec(content=[
         {"type": "text", "text": task},
@@ -191,18 +183,18 @@ def conclude_fix(task: str, runtime: Runtime) -> str:
 
 @agentic_function(input={
     "fn": {
-        "description": "Function to fix",
+        "description": "Function to edit",
         "options_from": "functions",
         "multiline": False,
     },
     "runtime": {"hidden": True},
     "instruction": {
-        "description": "What to fix or change",
+        "description": "What to change",
         "placeholder": "e.g. handle empty input gracefully",
         "multiline": True,
     },
     "name": {
-        "description": "Rename the fixed function",
+        "description": "Rename the edited function",
         "placeholder": "e.g. sentiment_v2",
         "multiline": False,
     },
@@ -211,27 +203,27 @@ def conclude_fix(task: str, runtime: Runtime) -> str:
         "options": ["3", "5", "10"],
     },
 })
-def fix(
+def edit(
     fn,
     runtime: Runtime,
     instruction: str = None,
     name: str = None,
     max_rounds: int = 5,
 ):
-    """Fix a broken function based on its code, errors, and optional instruction.
+    """Edit a function based on its code, errors, and optional instruction.
 
-    Runs _fix_round() in a loop. Each round is a distinct node in the
+    Runs _edit_round() in a loop. Each round is a distinct node in the
     execution tree with its own children (generate, validate, verify).
 
     Args:
-        fn: The function to fix.
+        fn: The function to edit.
         runtime: Runtime instance for LLM calls.
         instruction: Optional manual instruction ("change X to Y").
         name: Optional name override.
         max_rounds: Maximum rounds (default 5).
 
     Returns:
-        callable — the fixed function.
+        callable — the edited function.
         If a follow-up question arises and ask_user handler is registered
         (e.g. in the visualizer), the loop blocks until the user answers.
         If no handler, returns {"type": "follow_up", "question": "..."}.
@@ -241,18 +233,15 @@ def fix(
     description = getattr(fn, '__doc__', '') or getattr(fn, '__name__', 'unknown')
     code = get_source(fn)
     error_log = get_error_log(fn)
-    fn_name = name or getattr(fn, '__name__', 'fixed')
+    fn_name = name or getattr(fn, '__name__', 'edited')
     instruction_text = (instruction or "").strip()
 
-    # Resolve file path for context
     try:
         _inner = getattr(fn, '__wrapped__', fn)
         fn_filepath = _inspect.getfile(_inner)
     except (TypeError, OSError):
         fn_filepath = getattr(fn, '__file__', None)
 
-    # Base task — fixed context that doesn't change between rounds.
-    # The per-round generation suffix is appended only when calling generate_code().
     header = f"Function: {fn_name}"
     if fn_filepath:
         header += f"\nFile: {fn_filepath}"
@@ -267,13 +256,11 @@ def fix(
     feedback = None
 
     for round_num in range(max_rounds):
-        # Build task: base context + last round's feedback.
         task = base_task
         if feedback:
             task += f"\n\n── Previous attempt feedback ──\n{feedback}"
 
-        # Run one round (creates a parent node in execution tree)
-        round_result = _fix_round(
+        round_result = _edit_round(
             task=task,
             original_code=code,
             error_log=error_log or "",
@@ -286,57 +273,51 @@ def fix(
         status = round_result.get("status")
 
         if status == "exit":
-            # LLM decided this task should stop (impossible, mismatched, etc.)
             reason = round_result.get("reason", "Task cannot proceed.")
             conclude_task = (
-                f"Fix task for '{fn_name}' was stopped by the model.\n"
+                f"Edit task for '{fn_name}' was stopped by the model.\n"
                 f"Reason: {reason}\n"
                 f"Instruction: {instruction_text or description}\n"
                 "Summarize why the task was stopped."
             )
-            return conclude_fix(task=conclude_task, runtime=runtime)
+            return conclude_edit(task=conclude_task, runtime=runtime)
 
         if status == "follow_up":
             from agentic.context import ask_user
             answer = ask_user(round_result["question"])
             if answer is not None and answer.strip():
-                # Got a real answer from user — continue loop
                 feedback = f"Q: {round_result['question']}\nA: {answer}"
                 continue
-            # No handler or no answer — return question as plain text
             return round_result["question"]
 
         if status == "approved":
             compiled_fn = round_result["compiled"]
-            fixed_code = round_result["code"]
-            # Re-assign name if needed
+            edited_code = round_result["code"]
             if fn_name and compiled_fn:
                 compiled_fn.__name__ = fn_name
                 compiled_fn.__qualname__ = fn_name
             save_function(
-                fixed_code,
+                edited_code,
                 fn_name,
-                f"Fixed: {description}",
+                f"Edited: {description}",
                 source_path=fn_filepath,
-                action="fix",
+                action="edit",
             )
             break
 
-        # "error" or "rejected" — use feedback for next round
         feedback = round_result.get("feedback", "Unknown issue.")
         compiled_fn = None
 
-    # Conclude — summary recorded in context tree
     if compiled_fn is not None:
-        conclude_task = f"Fix task for '{fn_name}': {instruction_text or description}"
-        conclude_fix(task=conclude_task, runtime=runtime)
+        conclude_task = f"Edit task for '{fn_name}': {instruction_text or description}"
+        conclude_edit(task=conclude_task, runtime=runtime)
         return compiled_fn
     else:
         conclude_task = (
-            f"Fix task for '{fn_name}' failed after {max_rounds} rounds.\n"
+            f"Edit task for '{fn_name}' failed after {max_rounds} rounds.\n"
             f"Instruction: {instruction_text or description}\n"
             f"Last feedback: {feedback or 'N/A'}\n"
             "Summarize what was attempted and why it failed."
         )
-        summary = conclude_fix(task=conclude_task, runtime=runtime)
+        summary = conclude_edit(task=conclude_task, runtime=runtime)
         return summary

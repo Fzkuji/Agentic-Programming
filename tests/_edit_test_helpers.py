@@ -1,14 +1,13 @@
 """
-Shared helpers for fix() tests.
+Shared helpers for edit() tests.
 
-The new fix() flow:
-  round 0: clarify() → always returns follow_up (forced)
-  user answers via ask_user
-  round 1: clarify() → ready → generate_code() → verify_fix() → conclude_fix()
+The edit() flow:
+  round 0: check_task() → LLM calls ask_user via catalog → user answers
+  round 1: check_task() → ready → generate_code() → verify_fix() → conclude_fix()
 
-So a successful fix needs at least 5 LLM calls:
-  1. clarify (round 0) — result ignored, forced follow_up
-  2. clarify (round 1) — should return {"ready": true}
+So a successful edit needs at least 5 LLM calls:
+  1. check_task (round 0) — LLM calls ask_user
+  2. check_task (round 1) — LLM replies directly (ready)
   3. generate_code — should return fixed code
   4. verify_fix — should return {"approved": true, ...}
   5. conclude_fix — returns summary string
@@ -17,11 +16,11 @@ So a successful fix needs at least 5 LLM calls:
 from agentic.context import set_ask_user
 
 
-def make_fix_mock(fixed_code, *, answer="Proceed with the fix.", check_prompts=None):
-    """Create a mock_call that handles the full fix() flow.
+def make_edit_mock(edited_code, *, answer="Proceed with the edit.", check_prompts=None):
+    """Create a mock_call that handles the full edit() flow.
 
     Args:
-        fixed_code: The Python code string to return from generate_code.
+        edited_code: The Python code string to return from generate_code.
         answer: The answer to give when ask_user is called (round 0 follow-up).
         check_prompts: Optional list to append all received prompts to.
 
@@ -36,17 +35,17 @@ def make_fix_mock(fixed_code, *, answer="Proceed with the fix.", check_prompts=N
         text = content[-1]["text"] if content else ""
         prompts.append(text)
 
-        # Call 1: clarify (round 0) — result doesn't matter, forced follow_up
+        # Call 1: check_task (round 0) — LLM calls ask_user via catalog
         if call_count[0] == 1:
-            return '{"ready": false, "question": "Can you confirm what needs fixing?"}'
+            return '{"call": "ask_user", "args": {"question": "Can you confirm what needs fixing?"}}'
 
-        # Call 2: clarify (round 1) — ready
+        # Call 2: check_task (round 1) — ready (no function call)
         if call_count[0] == 2:
-            return '{"ready": true}'
+            return "Ready to proceed."
 
         # Call 3: generate_code — return the fixed code
         if call_count[0] == 3:
-            return fixed_code
+            return edited_code
 
         # Call 4: verify_fix — approve
         if call_count[0] == 4:
@@ -63,14 +62,14 @@ def make_fix_mock(fixed_code, *, answer="Proceed with the fix.", check_prompts=N
     return mock_call, cleanup
 
 
-def make_simple_fix_mock(fixed_code):
+def make_simple_edit_mock(edited_code):
     """Even simpler: returns a mock_call and context manager.
 
     Usage:
-        mock_call, cleanup = make_simple_fix_mock(code)
+        mock_call, cleanup = make_simple_edit_mock(code)
         try:
-            result = fix(fn=..., runtime=Runtime(call=mock_call))
+            result = edit(fn=..., runtime=Runtime(call=mock_call))
         finally:
             cleanup()
     """
-    return make_fix_mock(fixed_code)
+    return make_edit_mock(edited_code)

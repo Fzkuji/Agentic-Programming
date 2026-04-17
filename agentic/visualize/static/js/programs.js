@@ -119,6 +119,9 @@ function pgRenderFolders() {
       '<span class="pg-folder-name">' + pgEscHtml(name) + '</span>' +
       '<span class="pg-folder-count">' + count + '</span></div>';
   }
+  html += '<div class="pg-folder-item pg-folder-new" onclick="pgCreateFolder()" title="Create a new folder">' +
+    '<span class="pg-folder-icon">+</span>' +
+    '<span class="pg-folder-name">New folder</span></div>';
   el.innerHTML = html;
 }
 
@@ -207,7 +210,11 @@ function pgRenderCard(p) {
 /* ---------- Actions ---------- */
 
 function pgRunProgram(name, category) {
-  window.location.href = '/?run=' + encodeURIComponent(name) + '&cat=' + encodeURIComponent(category);
+  window.location.href = '/new?run=' + encodeURIComponent(name) + '&cat=' + encodeURIComponent(category);
+}
+
+function pgEditProgram(name) {
+  window.location.href = '/new?run=edit&fn=' + encodeURIComponent(name);
 }
 
 function pgToggleView() {
@@ -237,7 +244,10 @@ function pgCreateFolder() {
   item.className = 'pg-folder-item active';
   item.innerHTML = '<span class="pg-folder-icon">\u{1F4C1}</span>' +
     '<input class="pg-rename-input" type="text" placeholder="New folder" autofocus>';
-  list.appendChild(item);
+  // Insert the input row above the "+ New folder" button so the button stays at bottom.
+  var newFolderBtn = list.querySelector('.pg-folder-new');
+  if (newFolderBtn) list.insertBefore(item, newFolderBtn);
+  else list.appendChild(item);
   var input = item.querySelector('input');
   input.focus();
 
@@ -377,6 +387,7 @@ function pgProgramCtx(e, name) {
   var fav = pgIsFavorite(name);
   var items = [
     { label: fav ? '\u2605 Unfavorite' : '\u2606 Favorite', action: function() { pgToggleFav(name, { stopPropagation: function(){} }); } },
+    { label: '\u270E Edit...', action: function() { pgEditProgram(name); } },
     '---',
   ];
   var folders = Object.keys(pgMeta.folders).sort();

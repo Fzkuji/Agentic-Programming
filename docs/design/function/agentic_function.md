@@ -4,7 +4,7 @@
 
 `@agentic_function` 是需要 LLM 参与的函数。装饰器自动将函数执行记录到 Context Tree 中。
 
-核心规则：**一个 @agentic_function 最多调一次 `runtime.exec()`，但可以调用任意多个其他 @agentic_function。**
+核心规则：**一个 @agentic_function 可以调用多次 `runtime.exec()`（每次创建一个 exec 子节点），也可以调用任意多个其他 @agentic_function。**
 
 ## 三种使用模式
 
@@ -31,6 +31,7 @@ def translate_to_chinese(text: str, runtime: Runtime) -> str:
 Context tree:
 ```
 translate_to_chinese  ✓ success
+└── _exec → "翻译后的中文文本"
 ```
 
 ### 2. 编排函数

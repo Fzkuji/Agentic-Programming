@@ -16,7 +16,7 @@ function/
 
 ## 核心规则
 
-1. **一个 `@agentic_function` 最多调一次 `runtime.exec()`**
+1. **一个 `@agentic_function` 可以调用多次 `runtime.exec()`**（每次创建一个 exec 子节点）
 2. **一个函数可以调用任意多个其他 `@agentic_function`**
 3. **Docstring 是 prompt**，content 只放数据
 4. **大模型只输出它需要决定的参数**，其他由代码自动填充

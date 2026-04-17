@@ -140,15 +140,69 @@ function renderInlineTree(tree, treeId) {
   var statusIcon = hasRunning
     ? '<span class="pulse" style="color:var(--accent-blue)">&#9679;</span> '
     : '<span style="color:var(--accent-cyan)">&#9670;</span> ';
+  var rootPath = tree.path || '';
   return '<div class="inline-tree">' +
     '<div class="inline-tree-header" onclick="toggleInlineTree(\'' + id + '\')">' +
       '<span>' + statusIcon + 'Execution Tree</span>' +
-      '<span class="inline-tree-toggle" id="itoggle_' + id + '">&#9654;</span>' +
+      '<span class="inline-tree-actions">' +
+        '<button class="inline-tree-copy" onclick="event.stopPropagation();copyInlineTree(event, \'' + escAttr(rootPath) + '\')" title="Copy tree as JSON">Copy JSON</button>' +
+        '<span class="inline-tree-toggle" id="itoggle_' + id + '">&#9654;</span>' +
+      '</span>' +
     '</div>' +
-    '<div class="inline-tree-body" id="ibody_' + id + '" data-root-path="' + escAttr(tree.path || '') + '">' +
+    '<div class="inline-tree-body" id="ibody_' + id + '" data-root-path="' + escAttr(rootPath) + '">' +
       renderTreeNode(tree) +
     '</div>' +
   '</div>';
+}
+
+function copyInlineTree(ev, rootPath) {
+  var root = _nodeCache[rootPath];
+  if (!root) return;
+  function clean(n) {
+    var c = {};
+    for (var k in n) {
+      if (k === 'children') continue;
+      if (k === 'params' && n.params && typeof n.params === 'object') {
+        var p = {};
+        for (var pk in n.params) {
+          if (pk !== 'runtime' && pk !== 'callback') p[pk] = n.params[pk];
+        }
+        c.params = p;
+      } else {
+        c[k] = n[k];
+      }
+    }
+    if (n.children && n.children.length) {
+      c.children = n.children.map(clean);
+    }
+    return c;
+  }
+  var json = JSON.stringify(clean(root), null, 2);
+  var btn = ev && ev.currentTarget;
+  var done = function() {
+    if (!btn) return;
+    var prev = btn.textContent;
+    btn.textContent = 'Copied';
+    btn.classList.add('copied');
+    setTimeout(function() { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(json).then(done, function() { _treeFallbackCopy(json); done(); });
+  } else {
+    _treeFallbackCopy(json);
+    done();
+  }
+}
+
+function _treeFallbackCopy(text) {
+  var ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.top = '-1000px';
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand('copy'); } catch(e) {}
+  document.body.removeChild(ta);
 }
 
 function toggleInlineTree(id) {

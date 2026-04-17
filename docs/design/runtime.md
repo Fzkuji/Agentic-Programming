@@ -18,11 +18,14 @@ Runtime 是 LLM 的调用接口。它封装了具体的 provider（Claude Code C
 ```
 create_runtime() → runtime 对象（= 一个 session）
     ↓
-runtime.exec() → 调 LLM
-runtime.exec() → 调 LLM（session provider 记得上一次）
+runtime.exec() → 创建 exec 子节点，调 LLM
+runtime.exec() → 再创建一个 exec 子节点，调 LLM
     ↓
 runtime.close() → 释放资源，之后 exec() 报错
 ```
+
+每次 `exec()` 调用会在当前函数节点下创建一个 exec 子节点（`node_type="exec"`），
+然后通过 `summarize()` 读取上下文树构建 LLM 输入。
 
 ### 三个生命周期方法
 

@@ -286,24 +286,7 @@ function _handleRunningTask(rt) {
   }
 }
 
-// ===== Section collapse =====
-function toggleConvList() {
-  var list = document.getElementById('convList');
-  var hint = document.getElementById('convHint');
-  if (!list) return;
-  var hidden = list.style.display === 'none';
-  list.style.display = hidden ? '' : 'none';
-  if (hint) hint.textContent = hidden ? 'Hide' : 'Show';
-}
-
-function toggleFavList() {
-  var list = document.getElementById('favList');
-  var hint = document.getElementById('favHint');
-  if (!list) return;
-  var hidden = list.style.display === 'none';
-  list.style.display = hidden ? '' : 'none';
-  if (hint) hint.textContent = hidden ? 'Hide' : 'Show';
-}
+// (toggleConvList, toggleFavList, doRefreshFunctions moved to sidebar.js)
 function togglePanel() {}
 
 // ===== Column Resize =====
@@ -349,27 +332,7 @@ function togglePanel() {}
 
 // (Panel resize removed — single conversations list now)
 
-// ===== Refresh Button with Spin Feedback =====
-
-function doRefreshFunctions(btn) {
-  if (btn.classList.contains('spinning')) return;
-  var svg = btn.querySelector('svg');
-  if (!svg) return;
-  btn.classList.add('spinning');
-  refreshFunctions();
-  svg.addEventListener('animationend', function handler() {
-    svg.removeEventListener('animationend', handler);
-    btn.classList.remove('spinning');
-    // Show green checkmark briefly
-    var orig = btn.innerHTML;
-    btn.innerHTML = '&#10003;';
-    btn.classList.add('done');
-    setTimeout(function() {
-      btn.innerHTML = orig;
-      btn.classList.remove('done');
-    }, 800);
-  });
-}
+// (doRefreshFunctions moved to sidebar.js)
 
 // ===== Event Listeners =====
 

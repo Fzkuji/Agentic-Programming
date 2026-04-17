@@ -87,7 +87,7 @@ _CLI_PROVIDERS = {"codex", "claude-code", "gemini-cli"}
 
 
 # ---------------------------------------------------------------------------
-# Follow-up context manager — shared by run / fix / any command handler
+# Follow-up context manager — shared by run / edit / any command handler
 # ---------------------------------------------------------------------------
 from contextlib import contextmanager as _contextmanager
 
@@ -152,7 +152,7 @@ def _create_runtime_for_visualizer(provider: str):
     if provider == "codex":
         # Keep visualizer chat stateless so Context tree stays source of truth.
         # Restrict workdir to functions/ to prevent Codex from modifying
-        # framework source files during fix()/generate_code() execution.
+        # framework source files during edit()/generate_code() execution.
         func_dir = os.path.join(os.path.dirname(__file__), "..", "functions")
         func_dir = os.path.abspath(func_dir)
         return create_runtime(provider=provider, session_id=None, search=True,
@@ -968,7 +968,7 @@ def _format_result(result, action: str = "create") -> str:
             params = []
         action_labels = {
             "create": "Created",
-            "fix": "Fixed",
+            "edit": "Edited",
             "improve": "Improved",
         }
         label = action_labels.get(action, "Created")
@@ -1307,7 +1307,7 @@ class _FunctionStub:
     """Lightweight stand-in for a function whose module cannot be imported.
 
     Carries enough attributes (__name__, __doc__, __file__, __source__)
-    for fix()/improve() to read source code and file path without needing
+    for edit()/improve() to read source code and file path without needing
     a working import.
     """
     def __init__(self, name: str, source: str, filepath: str, doc: str = ""):
@@ -1353,9 +1353,9 @@ def _load_function(func_name: str):
 
     Always reloads modules to pick up file changes without server restart.
     If a module fails to import (e.g. broken code), falls back to a stub
-    that carries the source code so fix() can still work on it.
+    that carries the source code so edit() can still work on it.
     """
-    meta_names = ["create", "fix", "create_app", "create_skill"]
+    meta_names = ["create", "edit", "create_app", "create_skill"]
     if func_name in meta_names:
         try:
             mod = importlib.import_module(f"agentic.meta_functions.{func_name}")
@@ -1462,7 +1462,9 @@ _THINKING_CONFIGS = {
             {"value": "low", "desc": "Quick responses"},
             {"value": "medium", "desc": "Balanced"},
             {"value": "high", "desc": "Deep reasoning"},
+            {"value": "xhigh", "desc": "Extra deep reasoning"},
             {"value": "max", "desc": "Maximum effort"},
+            {"value": "auto", "desc": "Adaptive"},
         ],
         "default": "medium",
     },
@@ -1696,7 +1698,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                         _running_tasks[conv_id]["loaded_func_ref"] = loaded_func
                 call_kwargs = dict(kwargs or {})
                 # Resolve string function-name parameters to actual function objects
-                # (e.g. fix(function="sentiment") → fix(function=<sentiment function>))
+                # (e.g. edit(function="sentiment") → edit(function=<sentiment function>))
                 for param_key in ("fn", "function"):
                     if param_key in call_kwargs and isinstance(call_kwargs[param_key], str):
                         resolved_function = _load_function(call_kwargs[param_key])
@@ -1953,7 +1955,7 @@ def _parse_chat_input(text: str) -> dict:
     """Parse user input to determine intent.
 
     Returns dict with keys:
-      - action: "run", "create", "fix", "query"
+      - action: "run", "create", "edit", "query"
       - function: function name (if applicable)
       - kwargs: dict of arguments (if applicable)
       - raw: original text
@@ -1987,16 +1989,16 @@ def _parse_chat_input(text: str) -> dict:
             kwargs["name"] = name
         return {"action": "run", "function": "create", "kwargs": kwargs, "raw": text}
 
-    # "fix ..." -> meta fix
-    if lower.startswith("fix "):
-        rest = text[4:].strip()
+    # "edit ..." -> meta edit
+    if lower.startswith("edit "):
+        rest = text[5:].strip()
         parts = rest.split(maxsplit=1)
         name = parts[0]
         instruction = parts[1] if len(parts) > 1 else None
         kwargs = {"name": name}
         if instruction:
             kwargs["instruction"] = instruction
-        return {"action": "run", "function": "fix", "kwargs": kwargs, "raw": text}
+        return {"action": "run", "function": "edit", "kwargs": kwargs, "raw": text}
 
     # "run func_name key=val ..." -> direct run
     if lower.startswith("run "):
@@ -3080,33 +3082,33 @@ def create_app():
             del sys.modules[mod_name]
         return JSONResponse(content={"saved": True, "filepath": filepath})
 
-    @app.post("/api/function/{name}/fix")
-    async def fix_function(name: str, body: dict = None):
-        """Run meta fix() on a function."""
+    @app.post("/api/function/{name}/edit")
+    async def edit_function(name: str, body: dict = None):
+        """Run meta edit() on a function."""
         instruction = (body or {}).get("instruction", "")
         conv_id = (body or {}).get("conv_id")
         conv = _get_or_create_conversation(conv_id)
         msg_id = str(uuid.uuid4())[:8]
 
-        def _do_fix():
+        def _do_edit():
             try:
-                from agentic.meta_functions import fix
+                from agentic.meta_functions import edit
                 from agentic.providers import create_runtime
                 mod = importlib.import_module(f"agentic.functions.{name}")
                 fn = getattr(mod, name)
                 runtime = create_runtime()
-                fixed = fix(fn=fn, runtime=runtime, instruction=instruction or None)
+                edited = edit(fn=fn, runtime=runtime, instruction=instruction or None)
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "result",
-                    "content": f"Fixed function '{name}' successfully.",
+                    "content": f"Edited function '{name}' successfully.",
                 })
             except Exception as e:
                 _broadcast_chat_response(conv_id, msg_id, {
                     "type": "error",
-                    "content": f"Fix failed: {e}",
+                    "content": f"Edit failed: {e}",
                 })
 
-        threading.Thread(target=_do_fix, daemon=True).start()
+        threading.Thread(target=_do_edit, daemon=True).start()
         return JSONResponse(content={"conv_id": conv["id"], "msg_id": msg_id})
 
     @app.delete("/api/function/{name}")

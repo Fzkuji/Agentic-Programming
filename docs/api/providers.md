@@ -246,7 +246,7 @@ Claude Code CLI。适合本地开发机 / 订阅账号场景，不需要在 Pyth
 from agentic.providers import ClaudeCodeRuntime
 
 rt = ClaudeCodeRuntime(
-    model="sonnet",
+    model="haiku",
     timeout=120,
 )
 ```

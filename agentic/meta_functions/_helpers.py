@@ -607,6 +607,16 @@ def clarify(task: str, runtime: Runtime) -> dict:
     return {"ready": True}
 
 
+def check_task(task: str, runtime: Runtime) -> dict:
+    """Backward-compatible alias for clarify().
+
+    Older tests and external callers still import check_task from this module.
+    Keep the compatibility shim while the clearer name, clarify(), becomes the
+    primary public entry point.
+    """
+    return clarify(task=task, runtime=runtime)
+
+
 # ── Base meta function ────────────────────────────────────────
 
 @agentic_function

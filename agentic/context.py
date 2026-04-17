@@ -251,7 +251,7 @@ def run_with_follow_up(func, *args, **kwargs):
 
     Examples:
         # Agent auto-answering follow-ups:
-        result = run_with_follow_up(fix, fn=broken_func, runtime=rt)
+        result = run_with_follow_up(edit, fn=broken_func, runtime=rt)
         while isinstance(result, FollowUp):
             answer = runtime.exec(f"Answer: {result.question}")
             result = result.answer(answer)
@@ -462,8 +462,8 @@ class Context:
             create
             └── generate_code  <-- Current
 
-        Or for fix() with 3 rounds:
-            fix
+        Or for edit() with 3 rounds:
+            edit
             ├── generate_code  ✓
             ├── generate_code  ✓
             └── generate_code  <-- Current
@@ -994,6 +994,72 @@ class Context:
             ctx.children.append(child)
         return ctx
 
+    @classmethod
+    def from_jsonl(cls, path: str | os.PathLike[str]) -> "Context":
+        """Reconstruct a Context tree from JSONL enter/exit records."""
+        path_str = os.fspath(path)
+        with open(path_str, encoding="utf-8") as f:
+            records = []
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+
+        if not records:
+            raise ValueError("No valid records found in JSONL file")
+
+        nodes: dict[str, Context] = {}
+        root: Optional[Context] = None
+
+        def _parent_path(node_path: str) -> Optional[str]:
+            return node_path.rsplit("/", 1)[0] if "/" in node_path else None
+
+        for record in records:
+            node_path = record.get("path")
+            if not node_path:
+                continue
+
+            if record.get("event") == "enter":
+                parent = nodes.get(_parent_path(node_path))
+                ctx = cls(
+                    name=record.get("name", node_path.rsplit("/", 1)[-1].split("_")[0]),
+                    prompt=record.get("prompt", ""),
+                    params=record.get("params") or {},
+                    parent=parent,
+                    render=record.get("render", "summary"),
+                    compress=record.get("compress", False),
+                    start_time=record.get("ts", 0.0),
+                    node_type=record.get("node_type", "function"),
+                )
+                if parent is not None:
+                    parent.children.append(ctx)
+                else:
+                    root = ctx
+                nodes[node_path] = ctx
+            elif record.get("event") == "exit":
+                ctx = nodes.get(node_path)
+                if ctx is None:
+                    continue
+                ctx.status = record.get("status", ctx.status)
+                ctx.output = record.get("output")
+                ctx.raw_reply = record.get("raw_reply")
+                ctx.attempts = record.get("attempts") or []
+                ctx.error = record.get("error") or ""
+                ctx.end_time = record.get("ts") or (
+                    (ctx.start_time + (record["duration_ms"] / 1000.0))
+                    if record.get("duration_ms") is not None and ctx.start_time
+                    else 0.0
+                )
+
+        if root is None:
+            raise ValueError("No valid records found in JSONL file")
+
+        return root
+
     def _to_records(self, tree_depth: int = 0) -> list[dict]:
         """Flatten the tree into a list of dicts for JSONL export."""
         node = self._to_dict()
@@ -1001,6 +1067,37 @@ class Context:
         records = [node]
         for c in self.children:
             records.extend(c._to_records(tree_depth + 1))
+        return records
+
+    def _to_event_records(self) -> list[dict]:
+        """Flatten the tree into enter/exit records for crash recovery."""
+        enter = {
+            "event": "enter",
+            "path": self.path,
+            "name": self.name,
+            "node_type": self.node_type,
+            "prompt": self.prompt,
+            "params": {k: (getattr(v, '__name__', None) or str(v)) if callable(v) else v
+                       for k, v in (self.params or {}).items()
+                       if k not in ("runtime", "callback")} if self.params else {},
+            "render": self.render,
+            "compress": self.compress,
+            "ts": self.start_time,
+        }
+        records = [enter]
+        for child in self.children:
+            records.extend(child._to_event_records())
+        records.append({
+            "event": "exit",
+            "path": self.path,
+            "status": self.status,
+            "output": self.output,
+            "raw_reply": self.raw_reply,
+            "attempts": self.attempts,
+            "error": self.error,
+            "duration_ms": self.duration_ms,
+            "ts": self.end_time,
+        })
         return records
 
 

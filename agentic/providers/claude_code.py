@@ -146,8 +146,16 @@ class ClaudeCodeRuntime(Runtime):
         # Thinking effort
         effort = getattr(self, '_thinking_effort', None)
         if effort and effort != "medium":
-            # Map our levels to Claude Code's levels
-            effort_map = {"none": "low", "low": "low", "medium": "medium", "high": "high", "xhigh": "max"}
+            # Claude Code CLI supports: low|medium|high|xhigh|max|auto
+            effort_map = {
+                "none": "low",
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "xhigh": "xhigh",
+                "max": "max",
+                "auto": "auto",
+            }
             cmd.extend(["--effort", effort_map.get(effort, effort)])
 
         if self._tools is not None:

@@ -13,9 +13,9 @@
 
 - 用 `@agentic_function` 装饰器
 - 按固定顺序调用多个子 `@agentic_function`
-- `exec()` 可选：不调（纯串联），或调一次（做总结）
+- `exec()` 可选：不调（纯串联），或调多次（每次创建一个 exec 子节点）
 - 子函数之间通过 Python 变量传递数据
-- 一个函数最多调一次 `exec()`，但可以调任意多个其他 `@agentic_function`
+- 一个函数可以调多次 `exec()`，也可以调任意多个其他 `@agentic_function`
 
 ## 示例：不调 exec，纯串联
 

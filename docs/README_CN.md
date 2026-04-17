@@ -155,13 +155,16 @@ MCP 是*传输层*。Agentic Programming 是*执行模型*。两者正交。
 
 ### 自动上下文
 
-每个 `@agentic_function` 调用会创建一个 **Context** 节点。节点组成树，自动注入到 LLM 调用中：
+每个 `@agentic_function` 调用创建**函数节点**，每次 `runtime.exec()` 创建 **exec 节点**。节点组成树，自动注入到 LLM 调用中：
 
 ```
 login_flow ✓ 8.8s
-├── observe ✓ 3.1s → "found login form at (200, 300)"
-├── click ✓ 2.5s → "clicked login button"
-└── verify ✓ 3.2s → "dashboard confirmed"
+├── observe ✓ 3.1s
+│   └── _exec → "found login form at (200, 300)"
+├── click ✓ 2.5s
+│   └── _exec → "clicked login button"
+└── verify ✓ 3.2s
+    └── _exec → "dashboard confirmed"
 ```
 
 当 `verify` 调用 LLM 时，它自动看到 `observe` 和 `click` 的返回结果。不需要手动管理上下文。
@@ -197,7 +200,7 @@ sentiment(text="I love this!")  # → "positive"
 create_app("Summarize articles from URLs", runtime=runtime, name="summarizer")
 # → agentic/apps/summarizer.py
 
-# 修复损坏的函数——自动读取源码和错误历史
+# 修复损坏的函数——自动读取源码和错误历史，运行 check → generate → verify 循环
 fixed = fix(fn=broken_fn, runtime=runtime, instruction="return JSON, not plain text")
 ```
 
@@ -227,7 +230,8 @@ fixed = fix(fn=broken_fn, runtime=runtime, instruction="return JSON, not plain t
 |------|------|
 | `from agentic.meta_functions import create` | 从描述生成新的 `@agentic_function` |
 | `from agentic.meta_functions import create_app` | 生成包含 `main()` 的完整可运行应用 |
-| `from agentic.meta_functions import fix` | 通过 LLM 分析修复损坏的函数 |
+| `from agentic.meta_functions import fix` | 通过多轮 LLM 分析修复损坏的函数（check → generate → verify 循环） |
+| `from agentic.meta_functions import improve` | 根据目标优化现有函数 |
 | `from agentic.meta_functions import create_skill` | 生成用于 agent 发现的 SKILL.md |
 
 ### 内置函数
@@ -265,6 +269,7 @@ agentic/
 │   ├── create.py            #   create() — generate a function
 │   ├── create_app.py        #   create_app() — generate a complete app
 │   ├── fix.py               #   fix() — rewrite broken functions
+│   ├── improve.py           #   improve() — optimize existing functions
 │   └── create_skill.py      #   create_skill() — generate SKILL.md
 ├── providers/               # Anthropic, OpenAI, Gemini, Claude Code, Codex, Gemini CLI
 ├── mcp/                     # MCP server (python -m agentic.mcp)

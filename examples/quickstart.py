@@ -20,7 +20,7 @@ from agentic.providers import ClaudeCodeRuntime
 
 # ── Step 1: Create a runtime (no API key needed) ────────────────
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 # ── Step 2: Define agentic functions ─────────────────────────────

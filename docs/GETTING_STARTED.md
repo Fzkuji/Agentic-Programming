@@ -26,7 +26,7 @@ from agentic import agentic_function, Runtime
 from agentic.providers import ClaudeCodeRuntime
 
 # ClaudeCodeRuntime uses Claude Code CLI — no API key needed
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 @agentic_function
 def greet(name):
@@ -67,7 +67,7 @@ claude login
 ```python
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 ```
 
 **Pros:** Zero API key setup, uses existing subscription.
@@ -200,7 +200,7 @@ from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
 # Initialize runtime (no API key needed)
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -309,7 +309,7 @@ from agentic import agentic_function, Runtime
 from agentic.providers import ClaudeCodeRuntime
 
 # ClaudeCodeRuntime 使用 Claude Code CLI，不需要 API key
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 @agentic_function
 def greet(name):
@@ -350,7 +350,7 @@ claude login
 ```python
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 ```
 
 **优点：** 零配置，用已有订阅。
@@ -483,7 +483,7 @@ from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
 # 初始化 runtime（不需要 API key）
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function

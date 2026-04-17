@@ -57,9 +57,9 @@ runtime.exec(content=[{"type": "text", "text": f"Please analyze the sentiment of
 
 ## exec() 调用规则
 
-- 一个 `@agentic_function` 最多调一次 `runtime.exec()`
-- 需要多次 LLM 调用时，拆成多个 `@agentic_function`
+- 一个 `@agentic_function` 可以调用多次 `runtime.exec()`（每次创建一个 exec 子节点）
 - 一个函数可以调用多个其他 `@agentic_function`
+- exec 节点是函数节点的子节点，通过 `summarize()` 自动获取上下文
 
 ## LLM 动态选择函数（dispatch 模式）
 
@@ -127,22 +127,19 @@ result = available[action["call"]]["function"](**args)
 | 多余参数 | 过滤掉函数签名里没有的 |
 | 缺少必要参数 | 调 `fix_call_params` 让 LLM 补全 |
 | JSON 解析失败 | 返回 LLM 原始回复 |
-| LLM 信息不足 | 通过 `follow_up()` 向调用方提问 |
+| LLM 信息不足 | 通过 `ask_user` 向用户提问 |
 
-### follow_up 机制
+### ask_user 机制
 
-当 LLM 判断信息不足以完成任务时，可以通过 function dispatch 调用 `follow_up()`，
-而不是硬猜或输出不完整的代码。
-
-`generate_code()` 的 available 函数中包含 `follow_up`，LLM 可以选择调用它：
+当 LLM 判断信息不足以完成任务时，`check_task()` 通过 catalog 机制让 LLM 调用 `ask_user`：
 
 ```python
 # LLM 输出：
-{"call": "follow_up", "args": {"question": "输入格式是 JSON 还是纯文本？"}}
+{"call": "ask_user", "args": {"question": "输入格式是 JSON 还是纯文本？"}}
 ```
 
-`generate_code()` 返回 `{"type": "follow_up", "question": "..."}`，
-由调用方（create / fix / improve）向上传递，最终由上层 agent 或用户处理。
+`check_task()` 返回 `{"ready": False, "question": "..."}`，
+由调用方（create / fix / improve）通过 `ask_user()` 向用户提问，获取回答后继续。
 
 ## 代码风格
 

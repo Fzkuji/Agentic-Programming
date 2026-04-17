@@ -120,9 +120,11 @@ html, body {
   overflow: hidden !important;
   scrollbar-width: none !important;
 }
-.sidebar.collapsed *::-webkit-scrollbar {
-  display: none !important;
-}
+/* NOTE: do NOT add `::-webkit-scrollbar` rules anywhere, even scoped ones.
+   Any such rule in the stylesheet switches the entire document's scrollbars
+   from macOS overlay mode to classic (layout-occupying) mode. The
+   `overflow: hidden !important` above is sufficient to hide scrollbars
+   inside the collapsed sidebar. */
 /* --- Collapsed sidebar: static top, smooth-slide bottom --- */
 /* Logo shrinks to 0 in flex layout; fade out text so no partial clipping */
 .sidebar.collapsed .sidebar-header .logo { opacity: 0; padding-left: 0; }
@@ -1006,6 +1008,20 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   background: rgba(24, 169, 107, 0.08);
   color: var(--accent-green);
 }
+.pg-folder-item.pg-folder-new {
+  color: var(--text-muted);
+  font-style: italic;
+  margin-top: 4px;
+}
+.pg-folder-item.pg-folder-new:hover {
+  color: var(--text-primary);
+  font-style: normal;
+}
+.pg-folder-item.pg-folder-new .pg-folder-icon {
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 1;
+}
 .pg-folder-icon { font-size: 14px; flex-shrink: 0; }
 .pg-folder-name {
   flex: 1;
@@ -1262,7 +1278,6 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 .chat-area {
   flex: 1;
   overflow-y: auto;
-  scrollbar-gutter: stable;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -1878,6 +1893,32 @@ a.user-menu-item { text-decoration: none; color: inherit; }
 }
 .inline-tree-toggle { transform: rotate(90deg); }
 .inline-tree-toggle.collapsed { transform: rotate(0deg); }
+.inline-tree-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.inline-tree-copy {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.3;
+  transition: all var(--transition);
+}
+.inline-tree-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+.inline-tree-copy.copied {
+  color: var(--accent-green, #98c379);
+  border-color: var(--accent-green, #98c379);
+}
 .inline-tree-body {
   padding: 6px 8px;
   display: block;
@@ -2038,7 +2079,7 @@ a.user-menu-item { text-decoration: none; color: inherit; }
   left: 0;
   right: 0;
   height: 8px;
-  background: linear-gradient(to bottom, var(--bg-primary), transparent);
+  background: linear-gradient(to top, var(--bg-primary), transparent);
   pointer-events: none;
   transform: translateY(-100%);
 }
@@ -2526,6 +2567,36 @@ select.fn-form-input {
 
 .detail-close:hover { background: var(--bg-hover); color: var(--text-primary); }
 
+.detail-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.detail-copy {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all var(--transition);
+  line-height: 1.2;
+}
+
+.detail-copy:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.detail-copy.copied {
+  color: var(--accent-green, #98c379);
+  border-color: var(--accent-green, #98c379);
+}
+
 .detail-body { padding: 16px; }
 
 .detail-section { margin-bottom: 16px; }
@@ -2700,11 +2771,14 @@ textarea.retry-field-input { min-height: 50px; max-height: 200px; resize: vertic
   50% { opacity: 0.4; }
 }
 
-/* ===== Scrollbar ===== */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+/* ===== Scrollbar =====
+   Intentionally no global ::-webkit-scrollbar rules here. Defining them
+   globally forces scrollbars into "classic" mode (always taking layout
+   width) even on platforms where the system default is overlay (macOS).
+   We let the OS decide — on macOS, scrollbars float over content and take
+   no width, so different pages no longer render at different widths based
+   on whether they scroll. Per-element customization can still be added
+   using more specific selectors when needed. */
 
 /* ===== Responsive ===== */
 @media (max-width: 900px) {

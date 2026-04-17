@@ -2,7 +2,7 @@
 Agentic Programming MCP Server.
 
 Exposes agentic functions as MCP tools so any MCP-compatible client
-(Claude Desktop, Cursor, VS Code, etc.) can create, run, fix, and
+(Claude Desktop, Cursor, VS Code, etc.) can create, run, edit, and
 list agentic functions.
 
 Usage:
@@ -155,13 +155,13 @@ def create_application(description: str, name: str = "app") -> str:
 
 
 @mcp.tool()
-def fix_function(name: str, instruction: str = "") -> str:
-    """Fix a broken agentic function using LLM analysis.
+def edit_function(name: str, instruction: str = "") -> str:
+    """Edit an agentic function using LLM analysis.
 
     Reads the function's source code and error history, then rewrites it.
 
     Args:
-        name: Function name to fix.
+        name: Function name to edit.
         instruction: Optional guidance (e.g. "return JSON instead of plain text").
 
     Returns:
@@ -173,14 +173,14 @@ def fix_function(name: str, instruction: str = "") -> str:
     except (ImportError, AttributeError):
         return f"Error: function '{name}' not found in agentic/functions/"
 
-    from agentic.meta_functions import fix
+    from agentic.meta_functions import edit
     from agentic.providers import create_runtime
 
     runtime = create_runtime()
-    result = fix(fn=fn, runtime=runtime, instruction=instruction or None, name=name)
+    result = edit(fn=fn, runtime=runtime, instruction=instruction or None, name=name)
     if isinstance(result, dict) and result.get("type") == "follow_up":
-        return f"LLM needs more info to fix '{name}': {result['question']}"
-    return f"Fixed function '{name}' → agentic/functions/{name}.py"
+        return f"LLM needs more info to edit '{name}': {result['question']}"
+    return f"Edited function '{name}' → agentic/functions/{name}.py"
 
 
 # ── Entry point ────────────────────────────────────────────────

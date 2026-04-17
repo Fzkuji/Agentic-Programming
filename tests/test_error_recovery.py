@@ -1,17 +1,17 @@
 """
-End-to-end tests for error recovery: create → fail → fix → succeed.
+End-to-end tests for error recovery: create → fail → edit → succeed.
 """
 
 import pytest
 from agentic import agentic_function, Runtime
-from agentic.meta_functions import create, fix
+from agentic.meta_functions import create, edit
 
 
 class TestCreateFailFixSucceed:
-    """Full create → fail → fix → succeed cycle."""
+    """Full create → fail → edit → succeed cycle."""
 
     def test_basic_recovery_flow(self):
-        """create() → call fails → fix(fn=...) → call succeeds."""
+        """create() → call fails → edit(fn=...) → call succeeds."""
         from agentic.context import set_ask_user
 
         fix_code = '''@agentic_function
@@ -37,10 +37,10 @@ def divide(a, b):
     """Divide a by b."""
     return str(a / b)'''
 
-            # fix phase — handle multi-call flow
+            # edit phase — handle multi-call flow
             fix_call_count[0] += 1
             if fix_call_count[0] == 1:  # clarify round 0
-                return '{"ready": false, "question": "Confirm fix?"}'
+                return '{"ready": false, "question": "Confirm edit?"}'
             if fix_call_count[0] == 2:  # clarify round 1
                 return '{"ready": true}'
             if fix_call_count[0] == 3:  # generate
@@ -60,18 +60,18 @@ def divide(a, b):
         with pytest.raises(Exception):
             divide(a=10, b=0)
 
-        # Fix
-        phase[0] = "fix"
+        # Edit
+        phase[0] = "edit"
         set_ask_user(lambda q: "Yes, fix the division by zero.")
         try:
-            fixed_divide = fix(fn=divide, runtime=runtime)
+            edited_divide = edit(fn=divide, runtime=runtime)
         finally:
             set_ask_user(None)
 
-        result = fixed_divide(a=10, b=0)
+        result = edited_divide(a=10, b=0)
         assert "Error" in result or "zero" in result.lower()
 
-    def test_fix_preserves_context_tree(self):
+    def test_edit_preserves_context_tree(self):
         """Fixed function creates proper Context trees."""
         from agentic.context import set_ask_user
 
@@ -91,7 +91,7 @@ def process(data):
         {"type": "text", "text": "Process: " + str(data)},
     ])'''
 
-            if phase[0] == "fix":
+            if phase[0] == "edit":
                 fix_call_count[0] += 1
                 if fix_call_count[0] == 1:
                     return '{"ready": false, "question": "Confirm?"}'
@@ -116,10 +116,10 @@ def process(data):
 
         original = create(description="Process data", runtime=runtime)
 
-        phase[0] = "fix"
+        phase[0] = "edit"
         set_ask_user(lambda q: "Yes, proceed.")
         try:
-            fixed = fix(fn=original, runtime=runtime)
+            fixed = edit(fn=original, runtime=runtime)
         finally:
             set_ask_user(None)
 

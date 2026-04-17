@@ -13,7 +13,7 @@ from agentic.meta_functions import create
 
 # ── LLM Provider: Claude Code CLI ───────────────────────────────
 
-def claude_call(content, model="sonnet", response_format=None):
+def claude_call(content, model="haiku", response_format=None):
     parts = [b["text"] for b in content if b["type"] == "text"]
     prompt = "\n".join(parts)
     if response_format:
@@ -28,7 +28,7 @@ def claude_call(content, model="sonnet", response_format=None):
     return result.stdout.strip()
 
 
-runtime = Runtime(call=claude_call, model="sonnet")
+runtime = Runtime(call=claude_call, model="haiku")
 
 
 # ── Demo ────────────────────────────────────────────────────────

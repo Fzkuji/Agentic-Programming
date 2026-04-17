@@ -1,11 +1,13 @@
 {
   "favorites": [
-    "fix",
     "agentic_research",
     "_research_step",
     "gui_agent",
     "research_agent",
-    "test_resume"
+    "test_resume",
+    "edit"
   ],
-  "folders": {}
+  "folders": {
+    "1": []
+  }
 }

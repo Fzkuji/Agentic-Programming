@@ -6,7 +6,7 @@ import pytest
 from agentic import agentic_function, Runtime
 from agentic.functions.build_catalog import build_catalog
 from agentic.functions.prepare_args import prepare_args
-from agentic.meta_functions import create, fix
+from agentic.meta_functions import create, edit
 from agentic.meta_functions._helpers import (
     extract_code as _extract_code,
     _make_safe_builtins,
@@ -255,18 +255,18 @@ def test_prepare_args_merges_context_and_runtime():
     assert args == {"text": "hello", "style": "brief", "runtime": runtime}
 
 
-# ── fix() tests (new API: fn-based) ────────────────────────────
+# ── edit() tests (new API: fn-based) ────────────────────────────
 
-def test_fix_rewrites_function():
-    """fix() auto-extracts code and fixes the function."""
-    from tests._fix_test_helpers import make_fix_mock
+def test_edit_rewrites_function():
+    """edit() auto-extracts code and fixes the function."""
+    from tests._edit_test_helpers import make_edit_mock
 
     code = '''@agentic_function
 def fixed_add(a, b):
     """Add two numbers correctly."""
     return str(int(a) + int(b))'''
 
-    mock_call, cleanup = make_fix_mock(code)
+    mock_call, cleanup = make_edit_mock(code)
     try:
         runtime = Runtime(call=mock_call)
 
@@ -275,23 +275,23 @@ def fixed_add(a, b):
             """Add two numbers."""
             return 1 / 0  # broken
 
-        fn = fix(fn=broken, runtime=runtime)
+        fn = edit(fn=broken, runtime=runtime)
         assert callable(fn)
         assert fn(a="2", b="3") == "5"
     finally:
         cleanup()
 
 
-def test_fix_with_custom_name():
-    """fix() can override the function name."""
-    from tests._fix_test_helpers import make_fix_mock
+def test_edit_with_custom_name():
+    """edit() can override the function name."""
+    from tests._edit_test_helpers import make_edit_mock
 
     code = '''@agentic_function
 def repaired():
     """Fixed function."""
     return "fixed"'''
 
-    mock_call, cleanup = make_fix_mock(code)
+    mock_call, cleanup = make_edit_mock(code)
     try:
         runtime = Runtime(call=mock_call)
 
@@ -300,7 +300,7 @@ def repaired():
             """Do something."""
             raise Exception()
 
-        fn = fix(fn=broken, runtime=runtime, name="my_fixed_fn")
+        fn = edit(fn=broken, runtime=runtime, name="my_fixed_fn")
         assert fn.__name__ == "my_fixed_fn"
         assert fn() == "fixed"
     finally:

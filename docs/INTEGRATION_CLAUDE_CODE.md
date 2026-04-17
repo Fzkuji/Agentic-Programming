@@ -38,7 +38,7 @@ from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
 # No API key needed — uses Claude Code subscription
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 @agentic_function
 def explain(concept):
@@ -55,7 +55,7 @@ print(result)
 
 ```python
 runtime = ClaudeCodeRuntime(
-    model="sonnet",       # Model name (passed to --model flag)
+    model="haiku",       # Model name (passed to --model flag)
     timeout=120,          # Max seconds per CLI call (default: 120)
     cli_path=None,        # Path to claude binary (auto-detected)
 )
@@ -107,7 +107,7 @@ Demonstrates multi-step agentic workflow with context tracking.
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -196,7 +196,7 @@ from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
 # 不需要 API key，使用 Claude Code 订阅
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 @agentic_function
 def explain(concept):
@@ -213,7 +213,7 @@ print(result)
 
 ```python
 runtime = ClaudeCodeRuntime(
-    model="sonnet",       # 模型名（传给 --model 参数）
+    model="haiku",       # 模型名（传给 --model 参数）
     timeout=120,          # 每次 CLI 调用的超时秒数（默认 120）
     cli_path=None,        # claude 二进制文件路径（自动检测）
 )
@@ -265,7 +265,7 @@ Claude Code 集成 demo — 不需要 API key。
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function

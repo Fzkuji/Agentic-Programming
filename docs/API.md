@@ -32,7 +32,7 @@ from agentic import (
 from agentic import agentic_function, Runtime
 
 # 1. 创建 Runtime
-runtime = Runtime(call=my_llm_func, model="sonnet")
+runtime = Runtime(call=my_llm_func, model="haiku")
 
 # 2. 定义函数
 @agentic_function

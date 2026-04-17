@@ -527,6 +527,10 @@ def _auto_save(ctx: Context):
         os.makedirs(logs_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{ctx.name}_{timestamp}.jsonl"
-        ctx.save(os.path.join(logs_dir, filename))
+        path = os.path.join(logs_dir, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            for record in ctx._to_event_records():
+                f.write(__import__("json").dumps(record, ensure_ascii=False, default=str) + "\n")
+        ctx._persist_path = path
     except Exception:
         pass  # Never fail the user's function because of logging

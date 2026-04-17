@@ -58,7 +58,7 @@ sys.path.insert(0, os.path.expanduser("~/.openclaw/workspace/Agentic-Programming
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -127,7 +127,7 @@ Script called by OpenClaw agent to analyze code quality.
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -174,7 +174,7 @@ import sys
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -280,7 +280,7 @@ sys.path.insert(0, os.path.expanduser("~/.openclaw/workspace/Agentic-Programming
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -345,7 +345,7 @@ OpenClaw agent 调用的代码审查脚本。
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function
@@ -387,7 +387,7 @@ import sys
 from agentic import agentic_function
 from agentic.providers import ClaudeCodeRuntime
 
-runtime = ClaudeCodeRuntime(model="sonnet")
+runtime = ClaudeCodeRuntime(model="haiku")
 
 
 @agentic_function

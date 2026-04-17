@@ -15,7 +15,7 @@ from agentic import agentic_function, Runtime
 
 # ── LLM Provider: Claude Code CLI ───────────────────────────────
 
-def claude_call(content, model="sonnet", response_format=None):
+def claude_call(content, model="haiku", response_format=None):
     """Call Claude Code CLI in print mode."""
     # Combine all text blocks into one prompt
     parts = []
@@ -42,7 +42,7 @@ def claude_call(content, model="sonnet", response_format=None):
 
 # ── Runtime ─────────────────────────────────────────────────────
 
-runtime = Runtime(call=claude_call, model="sonnet")
+runtime = Runtime(call=claude_call, model="haiku")
 
 
 # ── Agentic Functions ──────────────────────────────────────────

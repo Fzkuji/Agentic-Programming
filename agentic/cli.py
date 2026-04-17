@@ -3,7 +3,7 @@ agentic CLI — command-line interface for Agentic Programming.
 
 Usage:
     agentic create "description" --name my_func
-    agentic fix my_func --instruction "change X to Y"
+    agentic edit my_func --instruction "change X to Y"
     agentic run my_func --arg key=value
     agentic list
     agentic create-skill my_func
@@ -34,7 +34,7 @@ def _add_provider_args(parser):
 def main():
     parser = argparse.ArgumentParser(
         prog="agentic",
-        description="Agentic Programming CLI — create, fix, and run LLM-powered functions.",
+        description="Agentic Programming CLI — create, edit, and run LLM-powered functions.",
     )
     sub = parser.add_subparsers(dest="command", help="Command to run")
 
@@ -45,11 +45,11 @@ def main():
     p_create.add_argument("--as-skill", action="store_true", help="Also create a SKILL.md")
     _add_provider_args(p_create)
 
-    # fix
-    p_fix = sub.add_parser("fix", help="Fix an existing function")
-    p_fix.add_argument("name", help="Function name to fix")
-    p_fix.add_argument("--instruction", "-i", default=None, help="What to change")
-    _add_provider_args(p_fix)
+    # edit
+    p_edit = sub.add_parser("edit", help="Edit an existing function")
+    p_edit.add_argument("name", help="Function name to edit")
+    p_edit.add_argument("--instruction", "-i", default=None, help="What to change")
+    _add_provider_args(p_edit)
 
     # run
     p_run = sub.add_parser("run", help="Run an existing function")
@@ -132,8 +132,8 @@ def main():
         _cmd_create(args.description, args.name, args.as_skill, args.provider, args.model)
     elif args.command == "create-app":
         _cmd_create_app(args.description, args.name, args.provider, args.model)
-    elif args.command == "fix":
-        _cmd_fix(args.name, args.instruction, args.provider, args.model)
+    elif args.command == "edit":
+        _cmd_edit(args.name, args.instruction, args.provider, args.model)
     elif args.command == "run":
         _cmd_run(args.name, args.arg, args.provider, args.model)
     elif args.command == "create-skill":
@@ -391,10 +391,10 @@ def _cmd_create_app(description, name, provider=None, model=None):
     print(f"  Run with: python {filepath}")
 
 
-def _cmd_fix(name, instruction, provider=None, model=None):
-    """Fix an existing function."""
+def _cmd_edit(name, instruction, provider=None, model=None):
+    """Edit an existing function."""
     import importlib
-    from agentic.meta_functions import fix
+    from agentic.meta_functions import edit
     runtime = _get_runtime(provider, model)
 
     try:
@@ -404,13 +404,13 @@ def _cmd_fix(name, instruction, provider=None, model=None):
         print(f"Error: function '{name}' not found in agentic/functions/")
         sys.exit(1)
 
-    print(f"Fixing '{name}' (provider: {runtime.__class__.__name__})...")
-    result = fix(fn=target_func, runtime=runtime, instruction=instruction)
+    print(f"Editing '{name}' (provider: {runtime.__class__.__name__})...")
+    result = edit(fn=target_func, runtime=runtime, instruction=instruction)
     if isinstance(result, dict) and result.get("type") == "follow_up":
         print(f"  LLM needs more info: {result['question']}")
-        print(f"  Re-run with: agentic fix {name} --instruction '<your answer>'")
+        print(f"  Re-run with: agentic edit {name} --instruction '<your answer>'")
     else:
-        print(f"  Fixed and saved to agentic/functions/{name}.py")
+        print(f"  Edited and saved to agentic/functions/{name}.py")
 
 
 def _cmd_run(name, arg_list, provider=None, model=None):
