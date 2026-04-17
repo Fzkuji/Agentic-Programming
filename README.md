@@ -132,12 +132,14 @@ This opens `http://localhost:8765` with a chat interface where you can create, r
 
 `create_runtime()` auto-detects the first available provider in this order:
 
-1. Anthropic API (`ANTHROPIC_API_KEY`)
-2. OpenAI API (`OPENAI_API_KEY`)
-3. Gemini API (`GOOGLE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`)
-4. Claude Code CLI (`claude`)
-5. Codex CLI (`codex`)
-6. Gemini CLI (`gemini`)
+1. Explicit config (`AGENTIC_PROVIDER` / `AGENTIC_MODEL`, then `~/.agentic/config.json`)
+2. Known caller environments (Claude Code or Codex sessions)
+3. Claude Code CLI (`claude`)
+4. Codex CLI (`codex`)
+5. Gemini CLI (`gemini`)
+6. Anthropic API (`ANTHROPIC_API_KEY`)
+7. OpenAI API (`OPENAI_API_KEY`)
+8. Gemini API (`GOOGLE_API_KEY` or `GOOGLE_GENERATIVE_AI_API_KEY`)
 
 You can always override detection explicitly:
 
@@ -145,7 +147,7 @@ You can always override detection explicitly:
 from agentic import create_runtime
 
 runtime = create_runtime(provider="openai", model="gpt-5")
-# or: provider="anthropic" | "gemini" | "claude_code" | "codex" | "gemini_cli"
+# or: provider="anthropic" | "gemini" | "claude-code" | "codex" | "gemini-cli"
 ```
 
 To inspect what the library can see on your machine:

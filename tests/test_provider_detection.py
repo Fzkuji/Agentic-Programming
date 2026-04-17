@@ -37,6 +37,25 @@ class TestProviderDetection:
 
         assert providers.detect_provider() == ("anthropic", "claude-sonnet-4-6")
 
+    def test_detect_provider_prefers_caller_environment_before_generic_cli_scan(self, monkeypatch):
+        """Known caller environments are honored before the generic CLI fallback scan."""
+        monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/codex" if name == "codex" else None)
+        monkeypatch.delenv("AGENTIC_PROVIDER", raising=False)
+        monkeypatch.delenv("AGENTIC_MODEL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        monkeypatch.delenv("GOOGLE_GENERATIVE_AI_API_KEY", raising=False)
+        monkeypatch.delenv("CLAUDECODE", raising=False)
+        monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+        monkeypatch.setenv("CODEX_CLI", "1")
+        monkeypatch.delenv("CODEX_SANDBOX_TYPE", raising=False)
+
+        from agentic import providers
+        importlib.reload(providers)
+
+        assert providers.detect_provider() == ("codex", None)
+
     def test_detect_provider_accepts_google_generative_ai_api_key(self, monkeypatch):
         """Gemini API auto-detection accepts Google's alternate env var name."""
         monkeypatch.setattr("shutil.which", lambda name: None)
