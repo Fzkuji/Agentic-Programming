@@ -111,9 +111,40 @@ function handleMessage(msg) {
         document.querySelectorAll('.node-duration[data-running]').forEach(function(el) {
           el.removeAttribute('data-running');
         });
+        // Optimistically finalize the in-progress runtime block: drop the
+        // typing-indicator, flip the tree header icon from pulsing to idle,
+        // and inject a footer with Retry button. The worker's final `result`
+        // broadcast may arrive late (or not at all if the CLI subprocess
+        // takes time to die) — without this, the block stays stuck at
+        // "... three dots" with a blue pulse forever.
+        document.querySelectorAll('.runtime-block[data-function]').forEach(function(block) {
+          var ti = block.querySelector('.typing-indicator');
+          if (ti && ti.parentNode) ti.parentNode.removeChild(ti);
+          if (block.id === 'runtime_pending') block.id = '';
+          var treeHdr = block.querySelector('.inline-tree-header > span:first-child');
+          if (treeHdr) {
+            treeHdr.innerHTML = '<span style="color:var(--accent-cyan)">&#9670;</span> Execution Tree';
+          }
+          if (!block.querySelector('.runtime-block-footer')) {
+            var fn = block.getAttribute('data-function');
+            var footer = document.createElement('div');
+            footer.className = 'runtime-block-footer';
+            footer.innerHTML = '<div class="runtime-footer-left">' +
+              '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(fn) + '\')">&#8634; Retry</button>' +
+            '</div><div class="runtime-footer-center"></div><div class="runtime-footer-right"></div>';
+            block.appendChild(footer);
+          }
+        });
       }
       updatePauseBtn();
       refreshInlineTrees();
+      if (msg.stopped) {
+        _removePauseRetryButtons();
+      } else if (msg.paused) {
+        _injectPauseRetryButtons();
+      } else {
+        _removePauseRetryButtons();
+      }
       break;
     case 'running_task':
       _handleRunningTask(msg.data);

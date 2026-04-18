@@ -983,6 +983,35 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
             if ctx is not None:
                 try:
                     _mark_context_cancelled(ctx)
+                    # Persist synthetic exit records for nodes that were
+                    # running when cancellation fired. Without these, the
+                    # JSONL only holds enter events for those nodes, so
+                    # replay on page refresh shows them as running again.
+                    _fidx = locals().get("_run_func_idx")
+                    _aidx = locals().get("_run_attempt_idx")
+                    if _fidx is not None and _aidx is not None:
+                        def _walk(n):
+                            if n is None:
+                                return
+                            if (getattr(n, "status", "") == "error"
+                                    and getattr(n, "error", "") == "Cancelled by user"):
+                                _persist.append_tree_event(
+                                    conv_id, _fidx, _aidx,
+                                    {
+                                        "event": "exit",
+                                        "path": n.path,
+                                        "status": "error",
+                                        "output": None,
+                                        "raw_reply": None,
+                                        "attempts": getattr(n, "attempts", []) or [],
+                                        "error": "Cancelled by user",
+                                        "duration_ms": getattr(n, "duration_ms", 0),
+                                        "ts": getattr(n, "end_time", time.time()),
+                                    },
+                                )
+                            for c in getattr(n, "children", []) or []:
+                                _walk(c)
+                        _walk(ctx)
                     _broadcast_chat_response(conv_id, msg_id, {
                         "type": "tree_update",
                         "tree": ctx._to_dict(),
