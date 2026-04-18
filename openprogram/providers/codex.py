@@ -172,9 +172,11 @@ class CodexRuntime(Runtime):
 
         Unsupported block types (audio, video, file) emit warnings and are skipped.
 
-        no_tools=True switches the CLI to `--sandbox read-only` (without
-        --full-auto) for this call, so a dispatcher-mode caller can't fan out
-        into file reads / shell commands the way `workspace-write` allows.
+        The `no_tools` kwarg is accepted for signature compatibility with
+        runtime._call_with_opt but is intentionally NOT used to change the
+        sandbox. Enforcement is prompt-only — the framework has already
+        prepended a router-mode instruction. Switching sandbox mid-session
+        would force a fresh Codex thread and break continuity.
         """
         import warnings
 
@@ -233,20 +235,7 @@ class CodexRuntime(Runtime):
             if response_format:
                 prompt += f"\n\nRespond with ONLY valid JSON matching this schema: {json.dumps(response_format)}"
 
-            if no_tools:
-                # Swap full_auto + workspace-write for read-only so the CLI
-                # can't spend minutes editing files during a routing decision.
-                # Save + restore so an ordinary agentic call afterwards still
-                # gets the usual tool set.
-                saved = (self.full_auto, self.sandbox)
-                self.full_auto = False
-                self.sandbox = "read-only"
-                try:
-                    result = self._run_codex(prompt, image_paths, model)
-                finally:
-                    self.full_auto, self.sandbox = saved
-            else:
-                result = self._run_codex(prompt, image_paths, model)
+            result = self._run_codex(prompt, image_paths, model)
             self._turn_count += 1
             return result
 

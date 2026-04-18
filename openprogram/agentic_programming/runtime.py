@@ -180,8 +180,11 @@ class Runtime:
         if system_text:
             full_content.insert(0, {"type": "text", "text": system_text, "role": "system"})
 
-        # --- no_tools: walk up for any @agentic_function(no_tools=True) ancestor ---
+        # --- no_tools: inject a router-mode preamble + reminder (prompt-only) ---
         no_tools = _find_no_tools_flag(parent_ctx)
+        if no_tools:
+            full_content.insert(0, {"type": "text", "text": _NO_TOOLS_PREAMBLE, "role": "system"})
+            full_content.append({"type": "text", "text": _NO_TOOLS_REMINDER})
 
         # --- Debug: dump LLM input ---
         if os.environ.get("AGENTIC_DUMP_INPUT"):
@@ -284,8 +287,11 @@ class Runtime:
         if system_text:
             full_content.insert(0, {"type": "text", "text": system_text, "role": "system"})
 
-        # --- no_tools: walk up for any @agentic_function(no_tools=True) ancestor ---
+        # --- no_tools: inject a router-mode preamble + reminder (prompt-only) ---
         no_tools = _find_no_tools_flag(parent_ctx)
+        if no_tools:
+            full_content.insert(0, {"type": "text", "text": _NO_TOOLS_PREAMBLE, "role": "system"})
+            full_content.append({"type": "text", "text": _NO_TOOLS_REMINDER})
 
         # --- Call the LLM (with retry) ---
         attempts = exec_ctx.attempts if exec_ctx is not None else []
@@ -386,6 +392,29 @@ class Runtime:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+# Prepended when an ancestor @agentic_function is marked no_tools=True.
+# Front-loaded role framing — agent CLIs (Codex, Claude Code) otherwise default
+# to "act as a developer, do the work" given any request. We tell them up front
+# this is a routing turn, not an execution turn, and demand a single JSON blob.
+_NO_TOOLS_PREAMBLE = (
+    "You are a ROUTER, not an agent. This turn is a routing/decision step, "
+    "not a work step.\n"
+    "- Do NOT call shell commands, do NOT read files, do NOT edit anything.\n"
+    "- Do NOT explore the workspace. Every fact you need is provided below.\n"
+    "- Respond with exactly ONE JSON object matching the shape specified "
+    "in the caller's instructions — no prose, no markdown fences, no commentary.\n"
+    "- This must take seconds, not minutes. If you're tempted to investigate, stop.\n"
+)
+
+# Appended AFTER the user content so the instruction wins the recency battle
+# against any role-play framing inside the docstring (e.g. "you are a senior
+# researcher…" which otherwise nudges agentic CLIs back into work mode).
+_NO_TOOLS_REMINDER = (
+    "\n[router-mode reminder] Emit only the JSON described above. "
+    "No tools. No file reads. No shell. No commentary."
+)
+
 
 def _find_system_prompt(ctx: Optional["Context"]) -> str:
     """Walk up the Context tree to find the nearest @agentic_function(system=...).
