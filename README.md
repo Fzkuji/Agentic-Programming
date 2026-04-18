@@ -81,6 +81,38 @@ pip install openprogram
 openprogram install-skills                # auto-detects Claude Code / Gemini CLI
 ```
 
+<details>
+<summary><b>Local development (editable) — OpenProgram + harnesses</b></summary>
+
+The reference layout is three co-located repos, each installed editable:
+
+```
+~/Documents/LLM Agent Harness/OpenProgram/          # this repo
+~/Documents/GUI Agent/GUI-Agent-Harness/            # GUI harness
+~/Documents/Research-Agent-Harness/                 # research harness
+```
+
+Install order matters (harnesses depend on `openprogram`):
+
+```bash
+pip install -e "$OPENPROGRAM_DIR"                   # 1
+pip install -e "$GUI_HARNESS_DIR"                   # 2  (pulls openprogram from step 1)
+pip install -e "$RESEARCH_HARNESS_DIR"              # 3
+```
+
+`openprogram/programs/applications/{GUI,Research}-Agent-Harness` are **symlinks** into the harness repos so application discovery can walk into them and find `@agentic_function` exports. If you move any repo, the symlink breaks silently — recreate it:
+
+```bash
+cd openprogram/programs/applications
+rm -f GUI-Agent-Harness && ln -s "$GUI_HARNESS_DIR" GUI-Agent-Harness
+rm -f Research-Agent-Harness && ln -s "$RESEARCH_HARNESS_DIR" Research-Agent-Harness
+```
+
+Same caveat for `pip install -e` itself: it writes an absolute path into a `.pth` file. Rename a parent folder and every import breaks until you rerun `pip install -e .` from the new location. There is no relative-path escape — the only fix is rerun the install.
+
+</details>
+
+
 Or manually:
 
 ```bash
@@ -367,8 +399,8 @@ openprogram/
 │   │   ├── buildin/                 #   deep_work / agent_loop / general_action / wait / ask_user
 │   │   └── third_party/             #   user-generated via `openprogram create`
 │   └── applications/                # full apps built on OpenProgram
-│       ├── GUI-Agent-Harness/       #   autonomous GUI agent (pre-installed)
-│       └── Research-Agent-Harness/  #   autonomous research agent (pre-installed)
+│       ├── GUI-Agent-Harness/       #   symlink → GUI agent repo (checked out separately)
+│       └── Research-Agent-Harness/  #   symlink → Research agent repo (checked out separately)
 └── webui/                           # `openprogram web` — browser UI
 skills/                              # SKILL.md files for agent integration
 examples/                            # runnable demos
