@@ -3,30 +3,32 @@
  *
  * Workdir is a runtime-level setting, not a function argument. It travels
  * alongside the normal `run <func> key=val ...` command as `work_dir=<path>`;
- * the server intercepts it before dispatch and routes it into exec_rt.set_workdir().
+ * server.py intercepts it before dispatch and routes it into
+ * exec_rt.set_workdir().
  *
- * UI: a required field rendered above every function's normal parameters,
- * with "Choose folder" (browse modal) and "Use OpenProgram repo" shortcut.
- * Last value used for a given function on a given conversation is remembered
- * server-side and prefilled on next open.
+ * UI: a single pill button at the top of the function form. Click opens a
+ * dropdown with Choose a folder…, Use OpenProgram repo, and recent
+ * folders (localStorage-backed). Hidden <input id="fnField_work_dir">
+ * stores the actual value so submitFnForm can read it uniformly.
  */
 
+var _WORKDIR_RECENT_KEY = 'openprogram_workdir_recent';
+var _WORKDIR_RECENT_MAX = 6;
+
 function buildWorkdirField() {
-  // IDs are stable because only one function form is open at a time.
   return (
-    '<div class="fn-form-field fn-form-workdir-field">' +
-      '<div class="fn-form-label">' +
-        '<span class="fn-form-label-name">work_dir</span>' +
-        '<span class="fn-form-label-type">str</span>' +
-        '<span class="fn-form-label-required">*</span>' +
-        '<span class="fn-form-label-desc">Absolute path: codex --cd target. Files the agent writes land here, not in the framework repo.</span>' +
-      '</div>' +
-      '<div class="fn-form-workdir-row">' +
-        '<input class="fn-form-input fn-form-workdir-input" id="fnField_work_dir" ' +
-               'placeholder="/Users/you/Documents/your-project" autocomplete="off">' +
-        '<button type="button" class="fn-form-workdir-btn" onclick="openFolderPicker()" title="Browse">📁 Choose folder</button>' +
-        '<button type="button" class="fn-form-workdir-btn" onclick="applyRepoWorkdir()" title="OpenProgram repo root">Use repo</button>' +
-      '</div>' +
+    '<div class="workdir-field" id="workdirField">' +
+      '<input type="hidden" id="fnField_work_dir" value="">' +
+      '<button type="button" class="workdir-pill workdir-pill-empty" id="workdirPill" onclick="toggleWorkdirMenu()">' +
+        '<svg class="workdir-icon" viewBox="0 0 20 20" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="M3 6a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' +
+        '</svg>' +
+        '<span class="workdir-pill-text" id="workdirPillText">Choose working directory</span>' +
+        '<svg class="workdir-chev" viewBox="0 0 20 20" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' +
+          '<polyline points="5 8 10 13 15 8"></polyline>' +
+        '</svg>' +
+      '</button>' +
+      '<div class="workdir-menu" id="workdirMenu" hidden></div>' +
     '</div>'
   );
 }
@@ -34,43 +36,185 @@ function buildWorkdirField() {
 async function initWorkdirField(fnName) {
   var input = document.getElementById('fnField_work_dir');
   if (!input) return;
+  input.dataset.fnName = fnName || '';
+
   var convId = (typeof currentConvId !== 'undefined') ? currentConvId : null;
-  var url = '/api/workdir/defaults?function_name=' + encodeURIComponent(fnName);
+  var url = '/api/workdir/defaults?function_name=' + encodeURIComponent(fnName || '');
   if (convId) url += '&conv_id=' + encodeURIComponent(convId);
   try {
     var r = await fetch(url);
     var data = await r.json();
-    // Stash repo root for the "Use repo" shortcut
     window._workdirRepoRoot = data.repo;
     window._workdirHome = data.home;
     if (data.last) {
-      input.value = data.last;
+      _setWorkdirValue(data.last, /*skipRecent*/ true);
+    } else {
+      _setWorkdirValue('', true);
     }
   } catch (e) {
-    // Non-fatal — user can still type a path
+    // non-fatal — user can still open the picker
+  }
+
+  // Close dropdown on outside click
+  document.addEventListener('click', _workdirOutsideClick, true);
+}
+
+function _workdirOutsideClick(e) {
+  var field = document.getElementById('workdirField');
+  if (!field) {
+    document.removeEventListener('click', _workdirOutsideClick, true);
+    return;
+  }
+  if (!field.contains(e.target)) {
+    _closeWorkdirMenu();
   }
 }
 
-function applyRepoWorkdir() {
+function _setWorkdirValue(path, skipRecent) {
   var input = document.getElementById('fnField_work_dir');
-  if (!input) return;
-  if (window._workdirRepoRoot) {
-    input.value = window._workdirRepoRoot;
-    input.style.borderColor = '';
+  var pill = document.getElementById('workdirPill');
+  var text = document.getElementById('workdirPillText');
+  if (!input || !pill || !text) return;
+  input.value = path || '';
+  if (path) {
+    text.textContent = _shortenPath(path);
+    pill.title = path;
+    pill.classList.remove('workdir-pill-empty');
+    pill.classList.remove('workdir-pill-error');
+    if (!skipRecent) _pushRecent(path);
+  } else {
+    text.textContent = 'Choose working directory';
+    pill.removeAttribute('title');
+    pill.classList.add('workdir-pill-empty');
   }
+}
+
+function _shortenPath(p) {
+  if (!p) return '';
+  // Show the last two path segments; prefix with ~ if inside $HOME.
+  var home = window._workdirHome || '';
+  var display = p;
+  if (home && p.indexOf(home) === 0) {
+    display = '~' + p.slice(home.length);
+  }
+  var parts = display.split('/').filter(Boolean);
+  if (parts.length <= 2) return display;
+  var last = parts.slice(-2).join('/');
+  return (display.startsWith('~') ? '~/…/' : '…/') + last;
+}
+
+function _getRecent() {
+  try {
+    var raw = localStorage.getItem(_WORKDIR_RECENT_KEY);
+    var arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function _pushRecent(path) {
+  if (!path) return;
+  var arr = _getRecent();
+  arr = arr.filter(function(p) { return p !== path; });
+  arr.unshift(path);
+  if (arr.length > _WORKDIR_RECENT_MAX) arr = arr.slice(0, _WORKDIR_RECENT_MAX);
+  try { localStorage.setItem(_WORKDIR_RECENT_KEY, JSON.stringify(arr)); } catch (e) {}
+}
+
+function toggleWorkdirMenu() {
+  var menu = document.getElementById('workdirMenu');
+  if (!menu) return;
+  if (!menu.hasAttribute('hidden')) {
+    _closeWorkdirMenu();
+    return;
+  }
+  _openWorkdirMenu();
+}
+
+function _openWorkdirMenu() {
+  var menu = document.getElementById('workdirMenu');
+  var pill = document.getElementById('workdirPill');
+  if (!menu || !pill) return;
+  menu.innerHTML = _renderWorkdirMenu();
+  menu.removeAttribute('hidden');
+  pill.classList.add('workdir-pill-open');
+}
+
+function _closeWorkdirMenu() {
+  var menu = document.getElementById('workdirMenu');
+  var pill = document.getElementById('workdirPill');
+  if (menu) menu.setAttribute('hidden', '');
+  if (pill) pill.classList.remove('workdir-pill-open');
+}
+
+function _renderWorkdirMenu() {
+  var input = document.getElementById('fnField_work_dir');
+  var current = input ? input.value : '';
+  var repoRoot = window._workdirRepoRoot;
+
+  var html = '';
+  html +=
+    '<button type="button" class="workdir-menu-item" onclick="_workdirChooseFolder()">' +
+      '<svg class="workdir-menu-icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M3 6a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' +
+        '<path d="M10 9v4m-2-2h4"/>' +
+      '</svg>' +
+      '<span>Choose a folder…</span>' +
+    '</button>';
+
+  if (repoRoot && repoRoot !== current) {
+    html +=
+      '<button type="button" class="workdir-menu-item" onclick="_workdirUseRepo()">' +
+        '<svg class="workdir-menu-icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+          '<circle cx="10" cy="10" r="7"/>' +
+          '<circle cx="10" cy="10" r="2.5"/>' +
+          '<path d="M10 3v3M10 14v3M3 10h3M14 10h3"/>' +
+        '</svg>' +
+        '<span>Use OpenProgram repo</span>' +
+      '</button>';
+  }
+
+  var recent = _getRecent().filter(function(p) { return p && p !== current; });
+  if (recent.length > 0) {
+    html += '<div class="workdir-menu-sep"></div>';
+    html += '<div class="workdir-menu-label">Recent</div>';
+    for (var i = 0; i < recent.length; i++) {
+      var p = recent[i];
+      html +=
+        '<button type="button" class="workdir-menu-item workdir-menu-recent" title="' + _escAttr(p) + '" ' +
+                'onclick="_workdirUseRecent(\'' + _escJs(p) + '\')">' +
+          '<svg class="workdir-menu-icon" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M3 6a2 2 0 0 1 2-2h3l2 2h5a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' +
+          '</svg>' +
+          '<span class="workdir-menu-recent-text">' + _escHtml(_shortenPath(p)) + '</span>' +
+        '</button>';
+    }
+  }
+
+  return html;
+}
+
+function _workdirChooseFolder() {
+  _closeWorkdirMenu();
+  var input = document.getElementById('fnField_work_dir');
+  var start = (input && input.value) || window._workdirHome || '';
+  _showPickerOverlay(start, function(chosen) {
+    _setWorkdirValue(chosen);
+  });
+}
+
+function _workdirUseRepo() {
+  if (window._workdirRepoRoot) _setWorkdirValue(window._workdirRepoRoot);
+  _closeWorkdirMenu();
+}
+
+function _workdirUseRecent(path) {
+  _setWorkdirValue(path);
+  _closeWorkdirMenu();
 }
 
 // ── Folder picker modal ─────────────────────────────────────────────
-
-function openFolderPicker() {
-  var input = document.getElementById('fnField_work_dir');
-  if (!input) return;
-  var startPath = (input.value && input.value.trim()) || window._workdirHome || '';
-  _showPickerOverlay(startPath, function(chosen) {
-    input.value = chosen;
-    input.style.borderColor = '';
-  });
-}
 
 function _showPickerOverlay(initialPath, onSelect) {
   _closePicker();
@@ -89,7 +233,7 @@ function _showPickerOverlay(initialPath, onSelect) {
         '<span class="folder-picker-current" id="folderPickerCurrent"></span>' +
         '<div class="folder-picker-actions">' +
           '<button type="button" class="folder-picker-btn" onclick="_closePicker()">Cancel</button>' +
-          '<button type="button" class="folder-picker-btn folder-picker-btn-primary" id="folderPickerSelect">Select this folder</button>' +
+          '<button type="button" class="folder-picker-btn folder-picker-btn-primary" id="folderPickerSelect">Select</button>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -152,7 +296,6 @@ async function _browseTo(path) {
 }
 
 function _renderCrumbs(fullPath, home) {
-  // Render each path segment as a clickable crumb.
   var parts = fullPath.split('/').filter(Boolean);
   var html = '<span class="folder-picker-crumb" onclick="_browseTo(\'/\')">/</span>';
   var acc = '';
@@ -170,3 +313,4 @@ function _renderCrumbs(fullPath, home) {
 
 function _escHtml(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
 function _escJs(s) { return String(s || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
+function _escAttr(s) { return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
