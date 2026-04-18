@@ -246,15 +246,61 @@ research_assistant
 
 ## Docstring 规范
 
+Docstring 在每次 `runtime.exec()` 时会被当作 prompt 传给 LLM（对 session provider 是首次，对无 session provider 是每次）。因此它的写法直接决定 LLM 的行为。
+
 ### 必须
-- 一行摘要
-- 具体指令（输出格式、约束）
+- 一行摘要（函数做什么）
+- 具体指令（输出格式、约束、禁止项）
 - Args + Returns
 
-### 禁止
-- "You are a helpful assistant"
-- "Complete the task"
-- 重复 content 中已有的内容
+### 禁止：角色/Persona 框架
+
+**不要写 "You are a senior ML researcher"、"You are a dispatcher"、"You are a creative brainstormer" 这种 persona 开头。**
+
+原因：
+1. **Client 本身已经有 system prompt。** Codex CLI、Claude Code、Gemini CLI 都带着自己的基础 system prompt（"You are Codex, an AI coding agent..."）。我们再加一层 persona 是叠床架屋，而且会和 client 自己的定位打架。
+2. **每个函数不同 persona 对 session provider 是灾难。** Codex / Claude Code 这类 session-based CLI 在一次会话里持续累积 prompt。如果每个 `@agentic_function` 都在 docstring 里换一个角色（researcher → dispatcher → reviewer → …），LLM 的 context 里会堆满互相矛盾的 persona，行为混乱还浪费 token。
+3. **Persona 会触发 agentic CLI 的工具调用本能。** 给 Codex 看到 "You are a senior ML researcher managing a research project" + 一个任务路径，它的内心戏就是"senior researcher 会先去看看 survey"→ 开始跑 `sed` / `cat` 读文件，而不是老实返回我们要的 JSON。给决策类函数加 persona，实际效果是把 planner 变成 executor。
+
+### 正确写法
+
+直接说**这个函数此刻要做什么、返回什么格式、什么不能做**：
+
+```python
+# ❌ 错误：加 persona
+"""You are a senior ML researcher managing a research project.
+Based on the task and what has been done so far, pick the next stage.
+Return JSON: {...}"""
+
+# ✅ 正确：直接说任务
+"""Pick the next research stage for this task.
+
+Return ONLY a JSON object (no commentary, no tool calls, no file reads):
+{
+  "stage": "stage_name",
+  "sub_task": "specific goal",
+  "done": false
+}
+...
+"""
+```
+
+### 针对 agentic CLI 的"硬护栏"
+
+Codex / Claude Code 这类 CLI 默认会主动调 shell / read / edit 工具。对**只需要返回 JSON 的 planner / dispatcher / router 类函数**，要在 docstring 里明确禁止工具使用：
+
+```
+Return ONLY a JSON object. Do NOT run any commands. Do NOT read any
+files. Do NOT use any tools. Your entire response must be a single
+JSON object, nothing else.
+```
+
+**"Return JSON"、"please return JSON" 这种软措辞对 agent CLI 基本无效** —— 它们会先跑一圈工具再 JSON。必须用 "Do NOT" 的硬性禁令。
+
+### 其他禁止
+- "You are a helpful assistant" / "Complete the task" —— 空话
+- 重复 content 里已经给的数据
+- "Please"、"I'd like you to" —— 礼貌语对 LLM 无意义，占 token
 
 ## Content 规范
 
