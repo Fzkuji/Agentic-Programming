@@ -59,7 +59,7 @@ _conversations: dict[str, dict] = {}
 _conversations_lock = threading.Lock()
 
 # Global default providers (used when creating new conversations)
-# (Provider state moved to agentic_web._runtime_mgmt)
+# (Provider state moved to openprogram.webui._runtime_management)
 
 # Follow-up answer queues — keyed by conversation ID. When a function calls
 # ask_user(), the handler puts the question on WebSocket and blocks on this
@@ -120,10 +120,10 @@ def _web_follow_up(conv_id: str, msg_id: str, func_name: str, tree_cb=None):
 
 
 # ---------------------------------------------------------------------------
-# Runtime / provider management lives in agentic_web._runtime_mgmt
+# Runtime / provider management lives in openprogram.webui._runtime_management
 # ---------------------------------------------------------------------------
-from openprogram.webui import _runtime_mgmt as _rm
-from openprogram.webui._runtime_mgmt import (
+from openprogram.webui import _runtime_management
+from openprogram.webui._runtime_management import (
     _CLI_PROVIDERS,
     _prev_rt_closed,
     _create_runtime_for_visualizer,
@@ -304,7 +304,7 @@ def _list_providers() -> list[dict]:
             "name": name,
             "label": label,
             "available": available,
-            "active": name == _rm._default_provider,
+            "active": name == _runtime_management._default_provider,
             "configurable": env_keys is not None,
             "configured": available if env_keys else None,
             "env_keys": env_keys,
@@ -1116,7 +1116,7 @@ def _broadcast_context_stats(conv_id: str, msg_id: str, chat_runtime=None, exec_
             }
 
     # Include provider name so frontend can apply provider-specific formatting
-    provider_name = conv.get("provider_name", _rm._default_provider) or ""
+    provider_name = conv.get("provider_name", _runtime_management._default_provider) or ""
 
     stats = {
         "type": "context_stats",
@@ -1969,7 +1969,7 @@ def create_app():
                 conv = _conversations.get(conv_id)
             if conv and conv.get("provider_name") == name:
                 return JSONResponse(content={"switched": False, "already_active": True, "provider": name})
-        elif name == _rm._default_provider:
+        elif name == _runtime_management._default_provider:
             return JSONResponse(content={"switched": False, "already_active": True, "provider": name})
         try:
             _switch_runtime(name, conv_id=conv_id)
@@ -1981,12 +1981,12 @@ def create_app():
     async def list_models():
         """List available models for the current provider."""
         # Ensure runtime is initialized
-        with _rm._runtime_lock:
-            if _rm._default_provider is None:
-                _rm._default_provider, _rm._default_runtime = _detect_default_provider()
+        with _runtime_management._runtime_lock:
+            if _runtime_management._default_provider is None:
+                _runtime_management._default_provider, _runtime_management._default_runtime = _detect_default_provider()
 
-        provider = _rm._default_provider or "none"
-        runtime = _rm._default_runtime
+        provider = _runtime_management._default_provider or "none"
+        runtime = _runtime_management._default_runtime
         current_model = runtime.model if runtime else None
 
         # Auto-detect models from the runtime
@@ -2019,7 +2019,7 @@ def create_app():
             if conv and conv.get("runtime"):
                 # Close old runtime, create new one with new model
                 old_rt = conv["runtime"]
-                provider_name = conv.get("provider_name", _rm._default_provider)
+                provider_name = conv.get("provider_name", _runtime_management._default_provider)
                 if hasattr(old_rt, 'close'):
                     old_rt.close()
                 new_rt = _create_runtime_for_visualizer(provider_name)
@@ -2029,8 +2029,8 @@ def create_app():
                 _broadcast(json.dumps({"type": "provider_changed", "data": info}))
                 return JSONResponse(content={"switched": True, "model": model})
         # Update default runtime
-        if _rm._default_runtime:
-            _rm._default_runtime.model = model
+        if _runtime_management._default_runtime:
+            _runtime_management._default_runtime.model = model
             info = _get_provider_info()
             _broadcast(json.dumps({"type": "provider_changed", "data": info}))
             return JSONResponse(content={"switched": True, "model": model})
@@ -2077,8 +2077,8 @@ def create_app():
 
         chat_session_id = None
         chat_locked = False
-        chat_provider = _rm._chat_provider
-        chat_model = _rm._chat_model
+        chat_provider = _runtime_management._chat_provider
+        chat_model = _runtime_management._chat_model
 
         if conv_id:
             with _conversations_lock:
@@ -2106,11 +2106,11 @@ def create_app():
                 "thinking": _get_thinking_config(chat_provider),
             },
             "exec": {
-                "provider": _rm._exec_provider,
-                "model": _rm._exec_model,
-                "thinking": _get_thinking_config(_rm._exec_provider),
+                "provider": _runtime_management._exec_provider,
+                "model": _runtime_management._exec_model,
+                "thinking": _get_thinking_config(_runtime_management._exec_provider),
             },
-            "available": _rm._available_providers,
+            "available": _runtime_management._available_providers,
         })
 
     @app.post("/api/agent_settings")
@@ -2122,41 +2122,41 @@ def create_app():
 
         if body and "chat" in body:
             chat = body["chat"]
-            new_provider = chat.get("provider", _rm._chat_provider)
-            new_model = chat.get("model", _rm._chat_model)
-            if new_provider != _rm._chat_provider or new_model != _rm._chat_model:
-                _rm._chat_provider = new_provider
-                _rm._chat_model = new_model
+            new_provider = chat.get("provider", _runtime_management._chat_provider)
+            new_model = chat.get("model", _runtime_management._chat_model)
+            if new_provider != _runtime_management._chat_provider or new_model != _runtime_management._chat_model:
+                _runtime_management._chat_provider = new_provider
+                _runtime_management._chat_model = new_model
                 # Update all existing conversation runtimes
                 with _conversations_lock:
                     for conv in _conversations.values():
                         old_rt = conv.get("runtime")
                         if old_rt and hasattr(old_rt, 'close'):
                             old_rt.close()
-                        new_rt = _create_runtime_for_visualizer(_rm._chat_provider)
-                        new_rt.model = _rm._chat_model
+                        new_rt = _create_runtime_for_visualizer(_runtime_management._chat_provider)
+                        new_rt.model = _runtime_management._chat_model
                         conv["runtime"] = new_rt
-                        conv["provider_name"] = _rm._chat_provider
+                        conv["provider_name"] = _runtime_management._chat_provider
                 changed = True
 
         if body and "exec" in body:
             exec_cfg = body["exec"]
-            _rm._exec_provider = exec_cfg.get("provider", _rm._exec_provider)
-            _rm._exec_model = exec_cfg.get("model", _rm._exec_model)
+            _runtime_management._exec_provider = exec_cfg.get("provider", _runtime_management._exec_provider)
+            _runtime_management._exec_model = exec_cfg.get("model", _runtime_management._exec_model)
             changed = True
 
         if changed:
             _broadcast(json.dumps({
                 "type": "agent_settings_changed",
                 "data": {
-                    "chat": {"provider": _rm._chat_provider, "model": _rm._chat_model},
-                    "exec": {"provider": _rm._exec_provider, "model": _rm._exec_model},
+                    "chat": {"provider": _runtime_management._chat_provider, "model": _runtime_management._chat_model},
+                    "exec": {"provider": _runtime_management._exec_provider, "model": _runtime_management._exec_model},
                 },
             }))
 
         return JSONResponse(content={
-            "chat": {"provider": _rm._chat_provider, "model": _rm._chat_model},
-            "exec": {"provider": _rm._exec_provider, "model": _rm._exec_model},
+            "chat": {"provider": _runtime_management._chat_provider, "model": _runtime_management._chat_model},
+            "exec": {"provider": _runtime_management._exec_provider, "model": _runtime_management._exec_model},
         })
 
 

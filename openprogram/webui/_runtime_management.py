@@ -83,8 +83,9 @@ def _create_runtime_for_visualizer(provider: str):
     """Create a runtime appropriate for the web UI.
 
     Strategy per provider:
-      - Codex CLI:       session_id=None + search=True → stateless, Context tree
-                         injects history, Codex handles current-info lookups
+      - Codex CLI:       session_id="auto" (default) + search=True → capture
+                         thread id on first call, resume on every subsequent
+                         call so one research run shares one codex thread
       - Claude Code CLI: default (persistent process), has_session=True → process
                          manages its own context, summarize() skipped
       - Gemini CLI:      default → session auto-managed by CLI
@@ -92,7 +93,7 @@ def _create_runtime_for_visualizer(provider: str):
     """
     from openprogram.providers import create_runtime
     if provider == "codex":
-        return create_runtime(provider=provider, session_id=None, search=True)
+        return create_runtime(provider=provider, search=True)
     return create_runtime(provider=provider)
 
 

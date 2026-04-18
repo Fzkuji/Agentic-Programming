@@ -12,6 +12,10 @@ from typing import Optional
 
 from openprogram.agentic_programming.function import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
+from openprogram.programs.applications.research._paths import (
+    find_project_artifact,
+    writable_project_dir,
+)
 from openprogram.programs.functions.buildin._utils import parse_json
 
 
@@ -103,14 +107,19 @@ def run_idea(
     project_dir = os.path.expanduser(project_dir)
 
     # Read gaps from literature stage
-    gaps_path = os.path.join(project_dir, "related_work", "gaps.md")
-    if os.path.exists(gaps_path):
+    gaps_path = find_project_artifact(
+        project_dir,
+        "related_work/gaps.md",
+        "literature review/synthesis/gaps.md",
+        "synthesis/gaps.md",
+    )
+    if gaps_path is not None:
         with open(gaps_path, "r") as f:
             gaps = f.read()
     else:
         import warnings
         warnings.warn(
-            f"Gaps file not found at {gaps_path}. "
+            "Gaps file not found in the project directory or its deliverables mirror. "
             "Run the 'literature' stage first for better results.",
             stacklevel=2,
         )
@@ -125,7 +134,9 @@ def run_idea(
     ranking = rank_ideas(ideas=ideas, novelty_results=novelty, runtime=runtime)
 
     # Save
-    with open(os.path.join(project_dir, "IDEA_REPORT.md"), "w") as f:
+    output_dir = writable_project_dir(project_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / "IDEA_REPORT.md", "w") as f:
         f.write(f"# Idea Report: {topic}\n\n")
         f.write(f"## Generated Ideas\n{ideas}\n\n")
         f.write(f"## Novelty Assessment\n{novelty}\n\n")

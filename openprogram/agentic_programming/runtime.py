@@ -77,6 +77,18 @@ class Runtime:
         self.last_usage = None  # Last call's token usage: {input_tokens, output_tokens, ...}
         self.usage_is_cumulative = False  # True if last_usage accumulates across calls (e.g. Codex CLI)
 
+    # --- Working directory ---
+
+    def set_workdir(self, path: str) -> None:
+        """Set the provider's working directory.
+
+        For runtimes that spawn subprocesses (Codex CLI via --cd), this
+        determines where shell/tool commands execute and where the LLM
+        writes relative-path files. Default: no-op — runtimes that don't
+        spawn subprocesses ignore this.
+        """
+        pass
+
     # --- Lifecycle ---
 
     def close(self):

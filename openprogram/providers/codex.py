@@ -141,6 +141,10 @@ class CodexRuntime(Runtime):
                 "Codex CLI not found. Install: npm install -g @openai/codex"
             )
 
+    def set_workdir(self, path: str) -> None:
+        """Set the codex --cd target for subsequent exec calls."""
+        self.workdir = path
+
     def list_models(self) -> list[str]:
         """Auto-detect available models from Codex CLI's own model cache.
 

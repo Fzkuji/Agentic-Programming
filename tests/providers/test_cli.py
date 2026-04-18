@@ -34,6 +34,61 @@ class TestCodexRuntime:
 
         outer = self
 
+        def build_proc(*, stdout_lines=None, stderr="", returncode=0):
+            stdout_lines = list(stdout_lines or [])
+            stderr_lines = [stderr] if stderr else []
+            state = {"done": False}
+
+            stdin_mock = MagicMock()
+
+            def _stdin_write(s):
+                outer._prompts_written.append(s)
+
+            stdin_mock.write = MagicMock(side_effect=_stdin_write)
+            stdin_mock.close = MagicMock()
+
+            stdout_mock = MagicMock()
+
+            def _stdout_readline():
+                if stdout_lines:
+                    return stdout_lines.pop(0)
+                state["done"] = True
+                return ""
+
+            stdout_mock.readline = MagicMock(side_effect=_stdout_readline)
+            stdout_mock.__iter__ = MagicMock(return_value=iter(list(stdout_lines)))
+            stdout_mock.close = MagicMock()
+
+            stderr_mock = MagicMock()
+
+            def _stderr_readline():
+                if stderr_lines:
+                    line = stderr_lines.pop(0)
+                    return line if line.endswith("\n") else f"{line}\n"
+                return ""
+
+            stderr_mock.read = MagicMock(return_value=stderr)
+            stderr_mock.readline = MagicMock(side_effect=_stderr_readline)
+            stderr_mock.close = MagicMock()
+
+            proc = MagicMock()
+            proc.stdin = stdin_mock
+            proc.stdout = stdout_mock
+            proc.stderr = stderr_mock
+            proc.returncode = returncode
+
+            def _wait(timeout=None):
+                state["done"] = True
+                return returncode
+
+            proc.wait = MagicMock(side_effect=_wait)
+            proc.poll = MagicMock(side_effect=lambda: returncode if state["done"] else None)
+            proc.terminate = MagicMock()
+            proc.kill = MagicMock()
+            return proc
+
+        self._build_proc = build_proc
+
         def make_popen(cmd, **kwargs):
             # Write mock output to the -o file so CodexRuntime reads it back.
             for i, arg in enumerate(cmd):
@@ -42,31 +97,11 @@ class TestCodexRuntime:
                         f.write("mock codex reply")
                     break
 
-            stdout_lines = list(outer._next_stdout_lines)
-
-            stdin_mock = MagicMock()
-            def _stdin_write(s):
-                outer._prompts_written.append(s)
-            stdin_mock.write = MagicMock(side_effect=_stdin_write)
-            stdin_mock.close = MagicMock()
-
-            stdout_mock = MagicMock()
-            stdout_mock.__iter__ = MagicMock(return_value=iter(stdout_lines))
-            stdout_mock.close = MagicMock()
-
-            stderr_mock = MagicMock()
-            stderr_mock.read = MagicMock(return_value=outer._next_stderr)
-            stderr_mock.close = MagicMock()
-
-            proc = MagicMock()
-            proc.stdin = stdin_mock
-            proc.stdout = stdout_mock
-            proc.stderr = stderr_mock
-            proc.returncode = outer._next_returncode
-            proc.wait = MagicMock(return_value=outer._next_returncode)
-            proc.poll = MagicMock(return_value=outer._next_returncode)
-            proc.terminate = MagicMock()
-            proc.kill = MagicMock()
+            proc = build_proc(
+                stdout_lines=outer._next_stdout_lines,
+                stderr=outer._next_stderr,
+                returncode=outer._next_returncode,
+            )
             outer._last_proc = proc
             return proc
 
@@ -159,21 +194,17 @@ class TestCodexRuntime:
     def test_auto_session_captures_thread_id_and_resumes(self):
         """Auto sessions resume only after Codex reports a real thread id."""
         replies = iter([
-            '{"type":"thread.started","thread_id":"thread-123"}',
-            '{"type":"thread.resumed","thread_id":"thread-123"}',
+            ['{"type":"thread.started","thread_id":"thread-123"}\n'],
+            ['{"type":"thread.resumed","thread_id":"thread-123"}\n'],
         ])
 
         def run_with_thread_id(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = next(replies)
-            result.stderr = ""
             for i, arg in enumerate(cmd):
                 if arg == "-o" and i + 1 < len(cmd):
                     with open(cmd[i + 1], "w") as f:
                         f.write("mock codex reply")
                     break
-            return result
+            return self._build_proc(stdout_lines=next(replies))
 
         self._mock_run.side_effect = run_with_thread_id
         rt = self._make_runtime()
@@ -244,6 +275,29 @@ class TestCodexRuntime:
         rt._call([{"type": "text", "text": "test"}], response_format=schema)
         assert "JSON" in self._last_prompt()
 
+    def test_stdout_agent_message_fallback_when_output_file_is_empty(self):
+        """Empty `-o` output falls back to the last agent message in stdout."""
+        stdout_lines = [
+            '{"type":"thread.started","thread_id":"thread-123"}\n',
+            '{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"intermediate"}}\n',
+            '{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"{\\"call\\":\\"stage_done\\"}"}}\n',
+        ]
+
+        def run_with_empty_output_file(cmd, **kwargs):
+            for i, arg in enumerate(cmd):
+                if arg == "-o" and i + 1 < len(cmd):
+                    with open(cmd[i + 1], "w") as f:
+                        f.write("")
+                    break
+            return self._build_proc(stdout_lines=stdout_lines)
+
+        self._mock_run.side_effect = run_with_empty_output_file
+        rt = self._make_runtime()
+
+        result = rt._call([{"type": "text", "text": "test"}])
+
+        assert result == '{"call":"stage_done"}'
+
     def test_cli_not_found(self, monkeypatch):
         """Missing CLI raises FileNotFoundError."""
         monkeypatch.setattr("shutil.which", lambda name: None)
@@ -270,43 +324,33 @@ class TestCodexRuntime:
             rt._call([{"type": "text", "text": "test"}])
 
     def test_timeout(self, monkeypatch):
-        """Timeout raises TimeoutError.
-
-        With Popen + line streaming, TimeoutExpired no longer fires from
-        subprocess itself — the streaming loop enforces the deadline by
-        checking elapsed time between reads. Simulate a monotonically
-        advancing clock that crosses the budget after the first line.
-        """
-        self._next_stdout_lines = [
-            '{"type":"turn.started"}\n',
-            '{"type":"turn.completed"}\n',
-        ]
+        """Timeout raises TimeoutError after an idle period."""
         counter = {"n": 0}
 
         def fake_time():
             counter["n"] += 1
-            # First call is start_time (t=0), subsequent calls trip the budget
-            return 0.0 if counter["n"] == 1 else 9999.0
+            return 0.0 if counter["n"] <= 2 else 9999.0
 
         import time as _t
         monkeypatch.setattr(_t, "time", fake_time)
+        from openprogram.providers.codex import CodexRuntime
+        monkeypatch.setattr(CodexRuntime, "_enqueue_stream_lines", lambda self, stream, q: None)
+        monkeypatch.setattr(CodexRuntime, "_read_line_with_timeout", lambda self, q, remaining: "")
         rt = self._make_runtime(timeout=10)
-        with pytest.raises(TimeoutError, match="timed out"):
+        with pytest.raises(TimeoutError, match="no output for 10s"):
             rt._call([{"type": "text", "text": "test"}])
 
     def test_reset(self):
         """reset() creates new session and resets turn count."""
         def run_with_thread_id(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = '{"type":"thread.started","thread_id":"thread-reset"}'
-            result.stderr = ""
             for i, arg in enumerate(cmd):
                 if arg == "-o" and i + 1 < len(cmd):
                     with open(cmd[i + 1], "w") as f:
                         f.write("mock codex reply")
                     break
-            return result
+            return self._build_proc(
+                stdout_lines=['{"type":"thread.started","thread_id":"thread-reset"}\n']
+            )
 
         self._mock_run.side_effect = run_with_thread_id
         rt = self._make_runtime()
@@ -359,7 +403,7 @@ class TestCodexRuntime:
 
 
 def test_visualizer_codex_runtime_enables_search(monkeypatch):
-    """Visualizer chat uses stateless Codex with native web search enabled."""
+    """Visualizer Codex keeps default auto-session and enables native web search."""
     from openprogram.webui import server
 
     captured = {}
@@ -375,7 +419,7 @@ def test_visualizer_codex_runtime_enables_search(monkeypatch):
     server._create_runtime_for_visualizer("codex")
 
     assert captured["provider"] == "codex"
-    assert captured["kwargs"]["session_id"] is None
+    assert "session_id" not in captured["kwargs"]
     assert captured["kwargs"]["search"] is True
 
 
@@ -548,5 +592,3 @@ class TestGeminiCLIRuntime:
         assert len(matching_warnings) == 1
         cmd = self._mock_run.call_args[0][0]
         assert cmd[1] == expected_prompt
-
-
