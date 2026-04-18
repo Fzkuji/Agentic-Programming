@@ -203,10 +203,8 @@ def _evaluate(task: str, standard: str, work_summary: str,
     reply = runtime.exec(content=[
         {"type": "text", "text": (
             "Evaluate the work below against the quality standard. "
-            "Be thorough, critical, and strict. Do NOT be lenient.\n\n"
-            "Evaluate on: completeness, quality, correctness, polish.\n"
-            "Do NOT run commands or read files — evaluate based on "
-            "the content provided here.\n\n"
+            "Be thorough, critical, and strict.\n\n"
+            "Evaluate on: completeness, quality, correctness, polish.\n\n"
             f"Task: {task}\n"
             f"Quality standard: {standard}\n\n"
             f"Work to evaluate:\n{work_summary}\n\n"

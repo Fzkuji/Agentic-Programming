@@ -264,7 +264,7 @@ Docstring 在每次 `runtime.exec()` 时会被当作 prompt 传给 LLM（对 ses
 
 ### 正确写法
 
-直接说**这个函数此刻要做什么、返回什么格式、什么不能做**：
+直接说**这个函数此刻要做什么、可选项是什么、怎么挑、返回什么格式**：
 
 ```python
 # ❌ 错误：加 persona
@@ -275,27 +275,26 @@ Return JSON: {...}"""
 # ✅ 正确：直接说任务
 """Pick the next research stage for this task.
 
-Return ONLY a JSON object (no commentary, no tool calls, no file reads):
+Available stages:
+{stages}
+
+Return JSON:
 {
   "stage": "stage_name",
   "sub_task": "specific goal",
   "done": false
 }
-...
+
+Pick by:
+- If no literature review has run yet → "literature"
+- If literature is done but no ideas → "idea"
+- ...
 """
 ```
 
-### 针对 agentic CLI 的"硬护栏"
+### Planner / dispatcher / router 类函数
 
-Codex / Claude Code 这类 CLI 默认会主动调 shell / read / edit 工具。对**只需要返回 JSON 的 planner / dispatcher / router 类函数**，要在 docstring 里明确禁止工具使用：
-
-```
-Return ONLY a JSON object. Do NOT run any commands. Do NOT read any
-files. Do NOT use any tools. Your entire response must be a single
-JSON object, nothing else.
-```
-
-**"Return JSON"、"please return JSON" 这种软措辞对 agent CLI 基本无效** —— 它们会先跑一圈工具再 JSON。必须用 "Do NOT" 的硬性禁令。
+只需要返回 JSON 的决策函数，不要用 "Do NOT run commands / read files / use tools" 这类负向禁令。如果 agent CLI 跑去调工具而不是直接返回决策，说明 prompt 还不够明确 —— 修法是把 how-to-choose 的判断标准写得更具体（"Pick by: <criterion A>, <criterion B>, ..."），而不是在前面堆禁令。
 
 ### 其他禁止
 - "You are a helpful assistant" / "Complete the task" —— 空话

@@ -17,9 +17,6 @@ from openprogram.agentic_programming.runtime import Runtime
 def chat(message: str, runtime: Runtime = None) -> str:
     """Reply to the user's message in a helpful and concise way.
 
-    This is a pure text chat — do NOT use any tools, commands, or file operations.
-    Just read the message and respond naturally.
-
     Args:
         message: The user's message.
 
