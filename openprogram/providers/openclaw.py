@@ -56,6 +56,10 @@ class OpenClawRuntime(Runtime):
         self.cli_path = cli_path or shutil.which("openclaw")
         self._session_id: Optional[str] = None  # set on first call for continuity
 
+        # Live subprocess handle so webui's kill_active_runtime can terminate
+        # mid-call. Set to None when no call is in flight.
+        self._proc: Optional[subprocess.Popen] = None
+
         if self.cli_path is None:
             raise FileNotFoundError(
                 "openclaw CLI not found on PATH. Install from "
@@ -113,19 +117,45 @@ class OpenClawRuntime(Runtime):
             "--json",
         ]
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout,
-            env=os.environ,
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"openclaw agent failed (exit {result.returncode}): "
-                f"{result.stderr.strip() or result.stdout.strip()}"
+        # Popen (not subprocess.run) so self._proc is exposed for external kill.
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=os.environ,
             )
+        except Exception as e:
+            raise RuntimeError(f"Failed to start openclaw agent: {e}")
+
+        self._proc = proc
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=2)
+                except Exception:
+                    pass
+                raise TimeoutError(f"openclaw agent timed out after {self.timeout}s")
+
+            if proc.returncode != 0:
+                raise RuntimeError(
+                    f"openclaw agent failed (exit {proc.returncode}): "
+                    f"{(stderr or '').strip() or (stdout or '').strip()}"
+                )
+
+            # Build a minimal result shim for the downstream JSON parsing.
+            class _R:
+                pass
+            result = _R()
+            result.stdout = stdout or ""
+            result.stderr = stderr or ""
+            result.returncode = proc.returncode
+        finally:
+            self._proc = None
 
         try:
             data = json.loads(result.stdout.strip())

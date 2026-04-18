@@ -80,6 +80,10 @@ class GeminiCLIRuntime(Runtime):
         self._turn_count = 0
         self.last_thread_id = None  # for external session reuse
 
+        # Live subprocess handle so webui's kill_active_runtime can terminate
+        # mid-call. Set to None when no call is in flight.
+        self._proc: Optional[subprocess.Popen] = None
+
         if self.cli_path is None:
             raise FileNotFoundError(
                 "Gemini CLI not found. Install it first:\n"
@@ -156,23 +160,38 @@ class GeminiCLIRuntime(Runtime):
         env.pop("ANTHROPIC_API_KEY", None)
         env.pop("OPENAI_API_KEY", None)
 
+        # Popen (not subprocess.run) so self._proc is exposed for external kill.
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout,
                 env=env,
             )
-        except subprocess.TimeoutExpired:
-            raise TimeoutError(f"Gemini CLI timed out after {self.timeout}s")
+        except Exception as e:
+            raise RuntimeError(f"Failed to start Gemini CLI: {e}")
 
-        if result.returncode != 0:
-            error_msg = result.stderr.strip() or result.stdout.strip() or "Unknown error"
-            raise RuntimeError(f"Gemini CLI error (exit {result.returncode}): {error_msg}")
+        self._proc = proc
+        try:
+            try:
+                stdout, stderr = proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=2)
+                except Exception:
+                    pass
+                raise TimeoutError(f"Gemini CLI timed out after {self.timeout}s")
 
-        # Parse JSON output to extract clean response and session_id
-        raw = result.stdout.strip()
+            if proc.returncode != 0:
+                error_msg = (stderr or "").strip() or (stdout or "").strip() or "Unknown error"
+                raise RuntimeError(f"Gemini CLI error (exit {proc.returncode}): {error_msg}")
+
+            # Parse JSON output to extract clean response and session_id
+            raw = (stdout or "").strip()
+        finally:
+            self._proc = None
         try:
             data = json.loads(raw)
             # Capture session_id for future resume

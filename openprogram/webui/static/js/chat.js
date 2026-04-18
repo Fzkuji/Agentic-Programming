@@ -440,6 +440,11 @@ function _handleStreamEvent(data) {
     line.innerHTML = time + escHtml(evt.text || evt.type || '');
   }
   terminal.appendChild(line);
+  // Cap line count to keep DOM light on long Codex / Claude Code runs.
+  var MAX_STREAM_LINES = 500;
+  while (terminal.childElementCount > MAX_STREAM_LINES) {
+    terminal.removeChild(terminal.firstElementChild);
+  }
   terminal.scrollTop = terminal.scrollHeight;
 }
 

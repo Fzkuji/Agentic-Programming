@@ -14,26 +14,67 @@ class TestCodexRuntime:
 
     @pytest.fixture(autouse=True)
     def setup_mock(self, monkeypatch, tmp_path):
-        """Mock shutil.which and subprocess.run."""
+        """Mock shutil.which and subprocess.Popen.
+
+        CodexRuntime uses Popen + line-by-line stdout reading so it can
+        stream events live and be killable mid-call. The mock here mimics
+        that: build a Popen-like object with stdin/stdout/stderr and a
+        deterministic stdout_lines iterator.
+        """
         self.tmp_path = tmp_path
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/codex" if name == "codex" else None)
 
-        # Default mock: write output to -o file, return success
-        def mock_run(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "mock codex reply"
-            result.stderr = ""
-            # Find -o flag and write output
+        # Per-call overrides (test sets these before invoking _call).
+        self._next_stdout_lines: list[str] = []
+        self._next_stderr: str = ""
+        self._next_returncode: int = 0
+        # Accumulated state for assertions.
+        self._prompts_written: list[str] = []
+        self._last_proc = None
+
+        outer = self
+
+        def make_popen(cmd, **kwargs):
+            # Write mock output to the -o file so CodexRuntime reads it back.
             for i, arg in enumerate(cmd):
                 if arg == "-o" and i + 1 < len(cmd):
                     with open(cmd[i + 1], "w") as f:
                         f.write("mock codex reply")
                     break
-            return result
 
-        self._mock_run = MagicMock(side_effect=mock_run)
-        monkeypatch.setattr("subprocess.run", self._mock_run)
+            stdout_lines = list(outer._next_stdout_lines)
+
+            stdin_mock = MagicMock()
+            def _stdin_write(s):
+                outer._prompts_written.append(s)
+            stdin_mock.write = MagicMock(side_effect=_stdin_write)
+            stdin_mock.close = MagicMock()
+
+            stdout_mock = MagicMock()
+            stdout_mock.__iter__ = MagicMock(return_value=iter(stdout_lines))
+            stdout_mock.close = MagicMock()
+
+            stderr_mock = MagicMock()
+            stderr_mock.read = MagicMock(return_value=outer._next_stderr)
+            stderr_mock.close = MagicMock()
+
+            proc = MagicMock()
+            proc.stdin = stdin_mock
+            proc.stdout = stdout_mock
+            proc.stderr = stderr_mock
+            proc.returncode = outer._next_returncode
+            proc.wait = MagicMock(return_value=outer._next_returncode)
+            proc.poll = MagicMock(return_value=outer._next_returncode)
+            proc.terminate = MagicMock()
+            proc.kill = MagicMock()
+            outer._last_proc = proc
+            return proc
+
+        self._mock_popen = MagicMock(side_effect=make_popen)
+        monkeypatch.setattr("subprocess.Popen", self._mock_popen)
+        # Legacy alias so older tests that read `_mock_run.call_args[0][0]`
+        # (the cmd list) continue to work without rewriting every assertion.
+        self._mock_run = self._mock_popen
 
         yield
 
@@ -41,12 +82,16 @@ class TestCodexRuntime:
         from openprogram.providers.codex import CodexRuntime
         return CodexRuntime(cli_path="/usr/bin/codex", **kwargs)
 
+    def _last_prompt(self) -> str:
+        """Last prompt string written to stdin by CodexRuntime."""
+        return self._prompts_written[-1] if self._prompts_written else ""
+
     def test_text_only_call(self):
         """Text-only content produces correct codex exec command."""
         rt = self._make_runtime()
         result = rt._call([{"type": "text", "text": "hello"}])
         assert result == "mock codex reply"
-        cmd = self._mock_run.call_args[0][0]
+        cmd = self._mock_popen.call_args[0][0]
         assert cmd[0] == "/usr/bin/codex"
         assert "exec" in cmd
         assert "-a" in cmd
@@ -55,8 +100,7 @@ class TestCodexRuntime:
         assert "--skip-git-repo-check" in cmd
         # Prompt passed via stdin, "-" is the stdin marker
         assert cmd[-1] == "-"
-        prompt_input = self._mock_run.call_args[1].get("input", "")
-        assert prompt_input == "hello"
+        assert self._last_prompt() == "hello"
 
     def test_model_flag(self):
         """Model is passed via --model flag."""
@@ -97,9 +141,8 @@ class TestCodexRuntime:
         cmd = self._mock_run.call_args[0][0]
         # No -i flag for URL
         assert "-i" not in cmd
-        # URL should appear in prompt text (passed via stdin)
-        prompt_input = self._mock_run.call_args[1].get("input", "")
-        assert "https://example.com/img.png" in prompt_input
+        # URL should appear in prompt text (written to stdin)
+        assert "https://example.com/img.png" in self._last_prompt()
 
     def test_session_resume(self):
         """Second call uses 'resume' subcommand."""
@@ -199,9 +242,7 @@ class TestCodexRuntime:
         rt = self._make_runtime()
         schema = {"type": "object", "properties": {"name": {"type": "string"}}}
         rt._call([{"type": "text", "text": "test"}], response_format=schema)
-        # Prompt is passed via stdin
-        prompt_input = self._mock_run.call_args[1].get("input", "")
-        assert "JSON" in prompt_input
+        assert "JSON" in self._last_prompt()
 
     def test_cli_not_found(self, monkeypatch):
         """Missing CLI raises FileNotFoundError."""
@@ -212,14 +253,8 @@ class TestCodexRuntime:
 
     def test_cli_error_propagates(self):
         """CLI errors are raised as RuntimeError."""
-        def failing_run(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 1
-            result.stderr = "something went wrong"
-            result.stdout = ""
-            return result
-
-        self._mock_run.side_effect = failing_run
+        self._next_returncode = 1
+        self._next_stderr = "something went wrong"
         rt = self._make_runtime()
 
         with pytest.raises(RuntimeError, match="Codex CLI error"):
@@ -227,24 +262,35 @@ class TestCodexRuntime:
 
     def test_auth_error(self):
         """Auth errors raise ConnectionError."""
-        def auth_fail(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 1
-            result.stderr = "Invalid API key"
-            result.stdout = ""
-            return result
-
-        self._mock_run.side_effect = auth_fail
+        self._next_returncode = 1
+        self._next_stderr = "Invalid API key"
         rt = self._make_runtime()
 
         with pytest.raises(ConnectionError, match="authentication"):
             rt._call([{"type": "text", "text": "test"}])
 
-    def test_timeout(self):
-        """Timeout raises TimeoutError."""
-        self._mock_run.side_effect = subprocess.TimeoutExpired(cmd="codex", timeout=10)
-        rt = self._make_runtime(timeout=10)
+    def test_timeout(self, monkeypatch):
+        """Timeout raises TimeoutError.
 
+        With Popen + line streaming, TimeoutExpired no longer fires from
+        subprocess itself — the streaming loop enforces the deadline by
+        checking elapsed time between reads. Simulate a monotonically
+        advancing clock that crosses the budget after the first line.
+        """
+        self._next_stdout_lines = [
+            '{"type":"turn.started"}\n',
+            '{"type":"turn.completed"}\n',
+        ]
+        counter = {"n": 0}
+
+        def fake_time():
+            counter["n"] += 1
+            # First call is start_time (t=0), subsequent calls trip the budget
+            return 0.0 if counter["n"] == 1 else 9999.0
+
+        import time as _t
+        monkeypatch.setattr(_t, "time", fake_time)
+        rt = self._make_runtime(timeout=10)
         with pytest.raises(TimeoutError, match="timed out"):
             rt._call([{"type": "text", "text": "test"}])
 
@@ -423,22 +469,28 @@ class TestClaudeCodeRuntimeUnsupported:
 # ══════════════════════════════════════════════════════════════
 
 class TestGeminiCLIRuntime:
-    """Tests for GeminiCLIRuntime with mocked subprocess."""
+    """Tests for GeminiCLIRuntime with mocked subprocess.Popen."""
 
     @pytest.fixture(autouse=True)
     def setup_mock(self, monkeypatch):
-        """Mock shutil.which and subprocess.run."""
+        """Mock shutil.which and subprocess.Popen.
+
+        GeminiCLIRuntime uses Popen + communicate() so self._proc is
+        exposed for external kill. The mock returns a proc whose
+        communicate() produces ("mock gemini reply", "") with rc=0.
+        """
         monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/gemini" if name == "gemini" else None)
 
-        def mock_run(cmd, **kwargs):
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "mock gemini reply"
-            result.stderr = ""
-            return result
+        def make_popen(cmd, **kwargs):
+            proc = MagicMock()
+            proc.communicate = MagicMock(return_value=("mock gemini reply", ""))
+            proc.returncode = 0
+            proc.kill = MagicMock()
+            proc.terminate = MagicMock()
+            return proc
 
-        self._mock_run = MagicMock(side_effect=mock_run)
-        monkeypatch.setattr("subprocess.run", self._mock_run)
+        self._mock_run = MagicMock(side_effect=make_popen)
+        monkeypatch.setattr("subprocess.Popen", self._mock_run)
 
     def _make_runtime(self, **kwargs):
         from openprogram.providers.gemini_cli import GeminiCLIRuntime

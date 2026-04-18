@@ -129,6 +129,10 @@ class CodexRuntime(Runtime):
         # not per-call usage. Track the cumulative baseline so we can diff.
         self._session_cumulative = {"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0}
 
+        # Live handle to the current codex subprocess (or None).
+        # Exposed so webui's kill_active_runtime can terminate mid-call.
+        self._proc: Optional[subprocess.Popen] = None
+
         if self.cli_path is None:
             raise FileNotFoundError(
                 "Codex CLI not found. Install: npm install -g @openai/codex"
@@ -329,29 +333,53 @@ class CodexRuntime(Runtime):
             import time as _time
             start_time = _time.time()
 
+            # Popen (not subprocess.run) so we can stream stdout line-by-line
+            # and expose self._proc for external kill via kill_active_runtime.
             try:
-                result = subprocess.run(
+                proc = subprocess.Popen(
                     cmd,
-                    input=None if is_resume else prompt,
+                    stdin=subprocess.PIPE if not is_resume else subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    bufsize=1,  # line-buffered
                     env=env,
-                    timeout=self.timeout,
                 )
-            except subprocess.TimeoutExpired:
-                raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
             except Exception as e:
                 raise RuntimeError(f"Failed to start Codex CLI: {e}")
 
-            stdout_lines = []
-            for line in result.stdout.splitlines(keepends=True):
-                stdout_lines.append(line)
-                stripped = line.strip()
-                if not stripped or not stripped.startswith("{"):
-                    continue
-                try:
-                    event = json.loads(stripped)
+            self._proc = proc
+            try:
+                # Feed the prompt over stdin for non-resume calls, then close
+                # the pipe so codex knows the input is complete.
+                if not is_resume and proc.stdin is not None:
+                    try:
+                        proc.stdin.write(prompt)
+                        proc.stdin.close()
+                    except (BrokenPipeError, OSError):
+                        pass
+
+                stdout_lines: list[str] = []
+                timed_out = False
+                for line in proc.stdout:
+                    # Enforce overall timeout between reads.
+                    if _time.time() - start_time > self.timeout:
+                        timed_out = True
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
+
+                    stdout_lines.append(line)
+                    stripped = line.strip()
+                    if not stripped or not stripped.startswith("{"):
+                        continue
+                    try:
+                        event = json.loads(stripped)
+                    except json.JSONDecodeError:
+                        continue
+
                     elapsed = round(_time.time() - start_time, 1)
                     etype = event.get("type", "")
 
@@ -368,35 +396,68 @@ class CodexRuntime(Runtime):
 
                     streamed = self._stream_codex_event(event, elapsed)
                     if streamed and self.on_stream:
-                        self.on_stream(streamed)
-                except json.JSONDecodeError:
+                        try:
+                            self.on_stream(streamed)
+                        except Exception:
+                            pass
+
+                # Drain stderr (may have diagnostics even on success)
+                try:
+                    stderr_output = proc.stderr.read() if proc.stderr else ""
+                except Exception:
+                    stderr_output = ""
+
+                # Wait for final exit status
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=2)
+
+                if timed_out:
+                    raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
+
+                if proc.returncode != 0:
+                    # Build a pseudo-CompletedProcess-like namespace for
+                    # _handle_error (it reads .returncode/.stdout/.stderr).
+                    class _R:
+                        pass
+                    r = _R()
+                    r.returncode = proc.returncode
+                    r.stdout = "".join(stdout_lines)
+                    r.stderr = stderr_output
+                    self._handle_error(r)
+
+                # Extract thread_id from stdout if session events didn't give it
+                if not self.last_thread_id:
+                    tid = self._extract_thread_id("".join(stdout_lines))
+                    if tid:
+                        self.last_thread_id = tid
+                        if self._auto_session and not self._session_id:
+                            self._session_id = tid
+                            self.has_session = True
+
+                # Read output from the -o file
+                try:
+                    with open(output_file, "r") as f:
+                        result_text = f.read().strip()
+                    if result_text:
+                        return result_text
+                except (FileNotFoundError, IOError):
                     pass
 
-            if result.returncode != 0:
-                self._handle_error(result)
+                # Fall back to stdout
+                return "".join(stdout_lines).strip()
 
-            stderr_output = result.stderr
-
-            # Extract thread_id from stdout (always track, only resume if auto-session)
-            if not self.last_thread_id:
-                tid = self._extract_thread_id("".join(stdout_lines))
-                if tid:
-                    self.last_thread_id = tid
-                    if self._auto_session and not self._session_id:
-                        self._session_id = tid
-                        self.has_session = True
-
-            # Read output from the -o file
-            try:
-                with open(output_file, "r") as f:
-                    result = f.read().strip()
-                if result:
-                    return result
-            except (FileNotFoundError, IOError):
-                pass
-
-            # Fall back to stdout
-            return "".join(stdout_lines).strip()
+            finally:
+                # Ensure pipes are closed even on unexpected error
+                for _stream in (proc.stdin, proc.stdout, proc.stderr):
+                    try:
+                        if _stream is not None:
+                            _stream.close()
+                    except Exception:
+                        pass
+                self._proc = None
 
         finally:
             try:
