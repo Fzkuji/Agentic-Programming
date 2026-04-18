@@ -28,6 +28,8 @@ openprogram/programs/functions/third_party/*.py
 # Scratch skill
 skills/init-research/
 
-# Runtime test logs
+# Runtime test logs (historical — current default is ~/.agentic/logs/,
+# outside the workspace; keep entries here in case someone sets
+# AGENTIC_LOGS_DIR back to these paths)
 openprogram/agentic_programming/logs/
 openprogram/logs/

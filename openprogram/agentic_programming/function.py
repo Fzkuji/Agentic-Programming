@@ -588,9 +588,18 @@ def auto_trace_package(pkg_dir, pkg_name=None):
 
 
 def _auto_save(ctx: Context):
-    """Auto-save the completed Context tree to the logs directory."""
+    """Auto-save the completed Context tree to the logs directory.
+
+    Logs live under ~/.agentic/logs/ (override with AGENTIC_LOGS_DIR).
+    Historically they were saved inside the package tree next to the code,
+    but that polluted the workspace: tool-using agents (Codex, Claude Code)
+    would rg into these files and choke on the multi-MB JSONL records.
+    Keeping logs outside the codebase avoids that entirely.
+    """
     try:
-        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        logs_dir = os.environ.get("AGENTIC_LOGS_DIR")
+        if not logs_dir:
+            logs_dir = os.path.join(os.path.expanduser("~"), ".agentic", "logs")
         os.makedirs(logs_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{ctx.name}_{timestamp}.jsonl"

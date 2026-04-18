@@ -58,9 +58,11 @@ import base64
 import json
 import mimetypes
 import os
+import queue
 import shutil
 import subprocess
 import tempfile
+import threading
 from typing import Optional
 
 from openprogram.agentic_programming.runtime import Runtime
@@ -78,7 +80,8 @@ class CodexRuntime(Runtime):
 
     Args:
         model:      Model to use (default: None = let CLI choose). Passed to --model flag.
-        timeout:    Max seconds per CLI call (default: 300).
+        timeout:    Max seconds without new CLI output before timing out
+                    (default: 600).
         cli_path:   Path to codex CLI binary (auto-detected if not specified).
         session_id: Session ID for continuity. "auto" = capture the CLI's
                     thread id after the first call. None = stateless.
@@ -96,7 +99,7 @@ class CodexRuntime(Runtime):
     def __init__(
         self,
         model: str = "gpt-5.4-mini",
-        timeout: int = 300,
+        timeout: int = 600,
         cli_path: str = None,
         session_id: str = "auto",
         workdir: str = None,
@@ -263,9 +266,52 @@ class CodexRuntime(Runtime):
 
         return None
 
+    def _enqueue_stream_lines(self, stream, out_queue: queue.Queue):
+        """Read a subprocess stream in a background thread."""
+        try:
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                out_queue.put(line)
+        except Exception:
+            pass
+        finally:
+            out_queue.put(None)
+
+    def _collect_stream_lines(self, stream, lines: list[str]):
+        """Drain a subprocess stream into a list to avoid pipe deadlocks."""
+        try:
+            while True:
+                line = stream.readline()
+                if not line:
+                    break
+                lines.append(line)
+        except Exception:
+            pass
+
+    def _read_line_with_timeout(self, stream_queue: queue.Queue, remaining: float) -> Optional[str]:
+        """Read one queued stdout line, returning '' on timeout and None on EOF."""
+        if remaining <= 0:
+            return ""
+        try:
+            return stream_queue.get(timeout=min(remaining, 1.0))
+        except queue.Empty:
+            return ""
+
     def _run_codex(self, prompt: str, image_paths: list[str], model: str) -> str:
         """Build and run the codex exec command."""
-        is_resume = bool(self._session_id and self._turn_count > 0)
+        # Auto mode: resume as soon as we have captured a thread_id. A prior
+        # call may have captured the id via thread.started but then failed
+        # (timeout, network) before _turn_count was incremented — without
+        # this, every failed first call forces Codex to start a fresh
+        # session on retry, losing context.
+        # Manual mode (user-provided session_id): first call creates the
+        # session, so require turn_count > 0 before resuming.
+        is_resume = bool(
+            self._session_id
+            and (self._auto_session or self._turn_count > 0)
+        )
 
         cmd = [self.cli_path]
 
@@ -360,10 +406,27 @@ class CodexRuntime(Runtime):
                         pass
 
                 stdout_lines: list[str] = []
+                stderr_lines: list[str] = []
+                stdout_queue: queue.Queue = queue.Queue()
+
+                stdout_thread = threading.Thread(
+                    target=self._enqueue_stream_lines,
+                    args=(proc.stdout, stdout_queue),
+                    daemon=True,
+                )
+                stderr_thread = threading.Thread(
+                    target=self._collect_stream_lines,
+                    args=(proc.stderr, stderr_lines),
+                    daemon=True,
+                )
+                stdout_thread.start()
+                stderr_thread.start()
+
                 timed_out = False
-                for line in proc.stdout:
-                    # Enforce overall timeout between reads.
-                    if _time.time() - start_time > self.timeout:
+                deadline = _time.time() + self.timeout
+                while True:
+                    remaining = deadline - _time.time()
+                    if remaining <= 0:
                         timed_out = True
                         try:
                             proc.terminate()
@@ -371,8 +434,17 @@ class CodexRuntime(Runtime):
                             pass
                         break
 
+                    line = self._read_line_with_timeout(stdout_queue, remaining)
+                    if line == "":
+                        if proc.poll() is not None and stdout_queue.empty():
+                            break
+                        continue
+                    if line is None:
+                        break
+
                     stdout_lines.append(line)
                     stripped = line.strip()
+                    deadline = _time.time() + self.timeout
                     if not stripped or not stripped.startswith("{"):
                         continue
                     try:
@@ -401,12 +473,6 @@ class CodexRuntime(Runtime):
                         except Exception:
                             pass
 
-                # Drain stderr (may have diagnostics even on success)
-                try:
-                    stderr_output = proc.stderr.read() if proc.stderr else ""
-                except Exception:
-                    stderr_output = ""
-
                 # Wait for final exit status
                 try:
                     proc.wait(timeout=5)
@@ -414,8 +480,12 @@ class CodexRuntime(Runtime):
                     proc.kill()
                     proc.wait(timeout=2)
 
+                stdout_thread.join(timeout=1)
+                stderr_thread.join(timeout=1)
+                stderr_output = "".join(stderr_lines)
+
                 if timed_out:
-                    raise TimeoutError(f"Codex CLI timed out after {self.timeout}s")
+                    raise TimeoutError(f"Codex CLI timed out (no output for {self.timeout}s)")
 
                 if proc.returncode != 0:
                     # Build a pseudo-CompletedProcess-like namespace for
@@ -446,8 +516,14 @@ class CodexRuntime(Runtime):
                 except (FileNotFoundError, IOError):
                     pass
 
-                # Fall back to stdout
-                return "".join(stdout_lines).strip()
+                stdout_text = "".join(stdout_lines).strip()
+                fallback_text = self._extract_final_text(stdout_text)
+                if fallback_text:
+                    return fallback_text
+
+                # Fall back to raw stdout only when no assistant message was
+                # recoverable from the JSONL stream.
+                return stdout_text
 
             finally:
                 # Ensure pipes are closed even on unexpected error
@@ -571,6 +647,34 @@ class CodexRuntime(Runtime):
                     return thread_id
 
         return None
+
+    def _extract_final_text(self, stdout: str) -> Optional[str]:
+        """Extract the last assistant text message from Codex JSONL stdout.
+
+        `codex exec --json` normally writes the final assistant message to the
+        `-o` file. When that file is empty, returning the raw JSONL stream
+        breaks downstream callers that expect the assistant's text reply.
+        """
+        last_text = None
+        for line in stdout.splitlines():
+            line = line.strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            if event.get("type") != "item.completed":
+                continue
+            item = event.get("item") or {}
+            if item.get("type") != "agent_message":
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                last_text = text.strip()
+
+        return last_text
 
     def _handle_error(self, result):
         """Handle CLI errors with concise messages."""
