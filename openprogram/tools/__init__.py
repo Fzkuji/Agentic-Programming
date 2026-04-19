@@ -11,10 +11,20 @@ from __future__ import annotations
 from typing import Any
 
 from .bash import TOOL as BASH
+from .read import TOOL as READ
+from .write import TOOL as WRITE
+from .edit import TOOL as EDIT
+from .glob import TOOL as GLOB
+from .grep import TOOL as GREP
 
 
 ALL_TOOLS: dict[str, dict[str, Any]] = {
     "bash": BASH,
+    "read": READ,
+    "write": WRITE,
+    "edit": EDIT,
+    "glob": GLOB,
+    "grep": GREP,
 }
 
 
@@ -28,4 +38,4 @@ def get_many(names: list[str]) -> list[dict[str, Any]]:
     return [get(n) for n in names]
 
 
-__all__ = ["ALL_TOOLS", "BASH", "get", "get_many"]
+__all__ = ["ALL_TOOLS", "BASH", "READ", "WRITE", "EDIT", "GLOB", "GREP", "get", "get_many"]

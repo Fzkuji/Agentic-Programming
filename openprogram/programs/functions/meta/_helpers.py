@@ -700,18 +700,15 @@ def generate_code(task: str, runtime: Runtime) -> str:
             return {"survey": survey, "gaps": gaps, "ideas": ideas}
 
     Pattern 3: LLM-driven dispatch (LLM chooses which function to call)
-    The function calls exec() once to let the LLM analyze the task and
-    choose which sub-function to invoke. Python code then parses the
-    LLM's choice and executes it. This requires:
-    - A function registry (available dict)
-    - build_catalog() to generate what the LLM sees
-    - parse_action() to extract the LLM's choice
-    - prepare_args() to merge all parameter sources
+    The function calls runtime.exec() with `tools=[...]` listing the
+    sub-functions that the LLM may invoke. The LLM emits structured
+    function_call events via the provider's native tool_use protocol; the
+    runtime dispatches locally and feeds results back until the LLM returns
+    a plain text reply.
 
-    Imports needed:
-        from openprogram.programs.functions.buildin.build_catalog import build_catalog
-        from openprogram.programs.functions.buildin.parse_action import parse_action
-        from openprogram.programs.functions.buildin.prepare_args import prepare_args
+    No catalog/parse/prepare_args glue needed — @agentic_function exposes a
+    JSON-schema tool spec automatically via its `.spec` property, and the
+    runtime's tool loop handles everything else.
 
     Full example:
 
@@ -745,123 +742,42 @@ def generate_code(task: str, runtime: Runtime) -> str:
             ])
 
         @agentic_function
-        def fix_call_params(func_name: str, missing: list, runtime: Runtime) -> dict:
-            \"\"\"Fill in missing function call parameters.
-
-            Args:
-                func_name: Name of the function being called.
-                missing: List of missing parameter names.
-
-            Returns:
-                Dict of parameter name -> value.
-            \"\"\"
-            reply = runtime.exec(content=[
-                {"type": "text", "text": (
-                    f"Function {func_name} is missing parameters: {missing}\\n"
-                    "Provide them as JSON."
-                )},
-            ])
-            from openprogram.programs.functions.buildin.parse_action import parse_action
-            result = parse_action(reply)
-            return result.get("args", result) if result else {}
-
-        @agentic_function
         def research_assistant(task: str, runtime: Runtime) -> str:
-            \"\"\"Analyze the task and choose the right sub-function.
+            \"\"\"Analyze the task and let the LLM choose the right sub-function.
 
             Args:
                 task: User's task description.
                 runtime: LLM runtime instance.
 
             Returns:
-                Sub-function result, or LLM's direct reply.
+                LLM's final reply after running any chosen sub-functions.
             \"\"\"
-            from openprogram.programs.functions.buildin.build_catalog import build_catalog
-            from openprogram.programs.functions.buildin.parse_action import parse_action
-            from openprogram.programs.functions.buildin.prepare_args import prepare_args
-
-            # Function registry
-            available = {
-                "summarize_text": {
-                    "function": summarize_text,
-                    "description": "Summarize text into a concise paragraph",
-                    "input": {
-                        "text": {"source": "context"},
-                    },
-                    "output": {"summary": str},
-                },
-                "polish_text": {
-                    "function": polish_text,
-                    "description": "Polish text in a specified style",
-                    "input": {
-                        "text": {"source": "context"},
-                        "style": {
-                            "source": "llm",
-                            "type": str,
-                            "options": ["academic", "casual", "concise"],
-                            "description": "Writing style",
-                        },
-                    },
-                    "output": {"polished_text": str},
-                },
-            }
-
-            catalog = build_catalog(available)
-
-            reply = runtime.exec(content=[
-                {"type": "text", "text": (
-                    f"{task}\\n\\n"
-                    "== Functions ==\\n"
-                    "To call a function, append the JSON at the end.\\n"
-                    "If no function is needed, reply directly.\\n\\n"
-                    f"{catalog}"
-                )},
-            ])
-
-            action = parse_action(reply)
-            if not action or action["call"] not in available:
-                return reply
-
-            args = prepare_args(
-                action=action,
-                available=available,
-                runtime=runtime,
-                context={"text": task},
-                fix_fn=fix_call_params,
+            return runtime.exec(
+                content=[{"type": "text", "text": task}],
+                tools=[summarize_text, polish_text],
+                tool_choice="auto",          # or "required" to force a call
             )
-            result = available[action["call"]]["function"](**args)
-            return result
 
-    ── Function registry structure (for Pattern 3) ──
+    ── Tool-choice options ──
 
-    available = {
-        "function_name": {
-            "function": the_callable,         # The actual function object
-            "description": "What it does",    # Shown to LLM
-            "input": {
-                "param_name": {
-                    "source": "context",      # Auto-filled by code, hidden from LLM
-                },
-                "other_param": {
-                    "source": "llm",          # LLM must decide this
-                    "type": str,              # Optional, for display
-                    "options": ["a", "b"],    # Optional, constrain choices
-                    "description": "...",     # Optional, shown to LLM
-                },
-            },
-            "output": {"field": type},        # What the function returns
-        },
-    }
+    tool_choice="auto"         — model decides whether to call a tool
+    tool_choice="required"     — model must call at least one tool
+    tool_choice={"type":"function","name":"X"}  — model must call X
 
-    Parameter sources:
-    | source    | Who provides   | LLM sees it? |
-    |-----------|----------------|--------------|
-    | "context" | Python code    | No           |
-    | "llm"     | LLM decides    | Yes          |
-    | runtime   | Auto-injected  | No           |
+    ── What the LLM sees for each tool ──
 
-    The LLM only outputs what it needs to decide. Everything else is
-    auto-filled by code.
+    Each @agentic_function passed to tools=[...] is exposed to the LLM as a
+    JSON-schema function spec auto-generated from its Python signature +
+    docstring + input= metadata:
+
+      - Function name becomes the tool name.
+      - Docstring becomes the tool description.
+      - Parameters become JSON-schema properties (type from annotation,
+        default = optional, runtime-injection params like `runtime` are hidden).
+      - input=... with `hidden: True` also hides a param from the LLM.
+
+    The LLM picks a tool, emits structured args per the schema, and the
+    runtime calls the function locally with those args — no parsing needed.
 
     ── Docstring rules ──
 
@@ -916,12 +832,20 @@ def generate_code(task: str, runtime: Runtime) -> str:
 
     ── Error handling for dispatch (Pattern 3) ──
 
-    | Situation                     | Handling                              |
-    |-------------------------------|---------------------------------------|
-    | Function name not in registry | Return LLM's raw reply                |
-    | Extra parameters from LLM    | Filter out, keep only valid ones      |
-    | Missing required parameters   | Call fix_call_params to fill them in  |
-    | JSON parse failure            | Return LLM's raw reply                |
+    Most edge cases the old parse_action flow worried about are gone under
+    tool_use:
+
+    | Situation                 | Why it's handled                         |
+    |---------------------------|------------------------------------------|
+    | Wrong function name       | Only declared tools are reachable        |
+    | Extra parameters          | Schema rejects them before dispatch      |
+    | Missing required params   | Schema requires them, model retries      |
+    | JSON parse failure        | Structured event — no text parsing       |
+
+    What you still might want to handle yourself:
+    - tool_call raises an exception → runtime feeds the error back into the
+      next turn as a function_call_output so the model can correct course.
+    - max_iterations exceeded → runtime.exec() raises RuntimeError; bubble up.
 
     ── Scope restriction ──
 

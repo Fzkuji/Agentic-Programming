@@ -69,81 +69,29 @@ research_pipeline
 └── generate_ideas
 ```
 
-### 3. 动态调用（LLM 选择函数）
+### 3. 动态调用（LLM 选择函数，tool_use）
 
-LLM 分析任务后决定调哪个子函数。需要函数注册表、目录构建、解析和参数准备。
+把子函数塞进 `runtime.exec(tools=[...])`，让 provider 原生 tool_use 协议处理
+分发。`@agentic_function` 自带 `.spec`（JSON Schema，自动从签名 + docstring
+生成）和 `.execute`，不需要写任何 catalog/parse/prepare_args 中间层。
 
 ```python
 @agentic_function
 def research_assistant(task: str, runtime: Runtime) -> str:
-    """分析研究任务，选择合适的子函数完成工作。
+    """分析任务，让 LLM 选择合适的子函数。
 
     Args:
-        task: 用户的研究任务描述。
+        task: 用户的任务描述。
         runtime: LLM 运行时实例。
 
     Returns:
-        子函数的执行结果，或 LLM 的直接回复。
+        LLM 在调完所有工具后给出的最终回复。
     """
-    # === 0. 函数注册表 ===
-    available = {
-        "summarize_text": {
-            "function": summarize_text,
-            "description": "将文本压缩为简洁的摘要",
-            "input": {
-                "text": {"source": "context"},
-            },
-            "output": {"summary": str},
-        },
-        "polish_text": {
-            "function": polish_text,
-            "description": "按指定风格润色文本",
-            "input": {
-                "text": {"source": "context"},
-                "style": {
-                    "source": "llm",
-                    "type": str,
-                    "options": ["academic", "casual", "concise"],
-                    "description": "润色风格",
-                },
-            },
-            "output": {"polished_text": str},
-        },
-    }
-
-    # === 1. 构建 LLM 可见的函数目录 ===
-    catalog = build_catalog(available)
-
-    # === 2. 调用 LLM ===
-    reply = runtime.exec(content=[
-        {"type": "text", "text": (
-            f"{task}\n\n"
-            "== Functions ==\n"
-            "如需调用函数，在回复末尾附上对应的 JSON。\n"
-            "如果不需要调用，直接返回结果。\n\n"
-            f"{catalog}"
-        )},
-    ])
-
-    # === 3. 解析 LLM 输出 ===
-    action = parse_action(reply)
-    if not action or action["call"] not in available:
-        return reply
-
-    # === 4. 准备参数 ===
-    args = prepare_args(
-        action=action,
-        available=available,
-        runtime=runtime,
-        context={"text": task},
-        fix_fn=fix_call_params,
+    return runtime.exec(
+        content=[{"type": "text", "text": task}],
+        tools=[summarize_text, polish_text, translate_to_chinese],
+        tool_choice="auto",   # "required" 强制调一个；指定 name 强制选某个
     )
-
-    # === 5. 调用函数 ===
-    result = available[action["call"]]["function"](**args)
-
-    # === 6. 后续处理 ===
-    return result
 ```
 
 Context tree:
@@ -152,97 +100,49 @@ research_assistant
 └── polish_text        ← LLM 选择的
 ```
 
-## 函数注册表
+工作原理：
 
-### 结构
+1. Runtime 把 `[summarize_text, polish_text, translate_to_chinese]` 转成 JSON
+   Schema 工具声明发给 LLM。
+2. LLM 决定调某一个，吐一个 `function_call` 事件。
+3. Runtime 本地调对应的 Python 函数，结果以 `function_call_output` 塞回。
+4. 循环直到 LLM 吐纯文本作为最终回复。
 
-```python
-{
-    "函数名": {
-        "function": 函数对象,
-        "description": "给 LLM 看的描述",
-        "input": {
-            "参数名": {
-                "source": "context" 或 "llm",
-                "type": 类型,               # 可选
-                "options": [...],            # 可选
-                "description": "参数说明",    # 可选
-            },
-        },
-        "output": {"字段名": 类型},
-    },
-}
-```
+## Tool spec 自动生成
 
-### 参数来源
+`agentic_function.spec` 从 Python 函数签名 + docstring + `input=` 元数据自动生成：
 
-| source | 谁提供 | LLM 是否可见 | 示例 |
-|--------|-------|-------------|------|
-| `"context"` | Python 代码从上下文填充 | 否 | text ← task |
-| `"llm"` | LLM 在回复中指定 | 是 | style = "academic" |
-| runtime | 框架自动注入 | 否 | 无需声明 |
+- 函数名 → tool name
+- docstring → tool description
+- 参数类型注解 → JSON Schema type
+- 有默认值 → optional，没有 → required
+- `runtime: Runtime` 这类注入参数 → 自动从 schema 剔除
+- `input={"x": {"hidden": True}}` → 也会剔除
 
-核心原则：**LLM 只输出它需要决定的参数，其他由代码自动填充。**
+不满意自动生成的 spec？直接覆盖 `.spec` 属性即可。
 
-### LLM 看到的效果
+## tool_choice
 
-`build_catalog()` 只展示 `source: "llm"` 的参数：
+| 值 | 效果 |
+|---|---|
+| `"auto"`（默认） | LLM 自己决定调不调 |
+| `"required"` | 必须调至少一个 tool（从 tools 列表里选） |
+| `"none"` | 禁止调 tool |
+| `{"type":"function","name":"X"}` | 必须调指定的 X |
 
-```
-summarize_text()
-    将文本压缩为简洁的摘要
-    调用: {"call": "summarize_text"}
-
-polish_text(style: str)
-    按指定风格润色文本
-    style: 润色风格 (可选: "academic", "casual", "concise")
-    调用: {"call": "polish_text", "args": {"style": "..."}}
-```
-
-## 参数补全（fix_call_params）
-
-当 LLM 选了函数但漏了必要参数时，`prepare_args` 自动调用 `fix_call_params` 补全：
-
-```python
-@agentic_function
-def fix_call_params(func_name: str, missing: list, runtime: Runtime) -> dict:
-    """补全缺失的函数调用参数。
-
-    Args:
-        func_name: 被调用的函数名。
-        missing: 缺失的参数名列表。
-        runtime: LLM 运行时实例。
-
-    Returns:
-        包含补全参数的字典。
-    """
-    reply = runtime.exec(content=[
-        {"type": "text", "text": (
-            f"函数 {func_name} 缺少以下参数: {missing}\n"
-            "请以 JSON 格式提供这些参数的值。"
-        )},
-    ])
-    result = parse_action(reply)
-    return result.get("args", result) if result else {}
-```
-
-触发条件：LLM 参数 + context 填充 + 默认值都补不了时才触发。
-
-Context tree:
-```
-research_assistant
-├── fix_call_params     ← 补全了 style
-└── polish_text         ← 用完整参数调用
-```
+配合 `parallel_tool_calls=False` 可进一步强制"只调一次"。
 
 ## 容错机制
 
+原生 tool_use 协议已经消化了旧 parse_action 时代需要手动处理的大部分 case：
+
 | 情况 | 处理 |
 |------|------|
-| 函数名不存在 | 返回 LLM 原始回复 |
-| 多余参数 | 过滤掉函数签名里没有的 |
-| 缺少必要参数 | 调 fix_call_params 补全 |
-| JSON 解析失败 | 返回 LLM 原始回复 |
+| 函数名写错 | 协议层限制，只能从 tools 列表里选 |
+| 多余 / 缺失参数 | JSON Schema 校验失败，模型按描述重填 |
+| JSON 解析失败 | 没有文本解析环节 |
+| 工具执行异常 | runtime 把异常作为 function_call_output 喂回 |
+| 循环不收敛 | runtime 到 `max_iterations` 抛 RuntimeError |
 
 ## Docstring 规范
 
@@ -313,13 +213,29 @@ runtime.exec(content=[{"type": "text", "text": text}])
 runtime.exec(content=[{"type": "text", "text": f"Please analyze: {text}. Return one word."}])
 ```
 
-## 工具函数
+## 内置原子工具
 
-| 函数 | 文件 | 作用 |
+放在 `openprogram/tools/<name>/`，每个工具一个目录，对齐 Claude Code 风格：
+
+| tool | 目录 | 作用 |
 |------|------|------|
-| `build_catalog` | `build_catalog.py` | 从注册表生成 LLM 可见的函数目录 |
-| `parse_action` | `parse_action.py` | 从 LLM 回复提取 `{"call": ..., "args": ...}` |
-| `prepare_args` | `prepare_args.py` | 合并所有参数来源，处理缺参 |
+| `bash` | `tools/bash/` | 跑 shell 命令 |
+| `read` | `tools/read/` | 按行读文件（支持 offset/limit） |
+| `write` | `tools/write/` | 创建或覆盖文件 |
+| `edit` | `tools/edit/` | 按字符串替换编辑文件 |
+| `glob` | `tools/glob/` | 文件名模式匹配 |
+| `grep` | `tools/grep/` | 内容正则搜索（优先调 ripgrep） |
+
+用法：
+
+```python
+from openprogram.tools import get_many
+
+reply = runtime.exec(
+    content=[{"type": "text", "text": "列出 cwd 下所有 Python 文件"}],
+    tools=get_many(["bash", "glob"]),
+)
+```
 
 ## 完整样例
 

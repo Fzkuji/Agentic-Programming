@@ -119,6 +119,10 @@ class Runtime:
         context: Optional[str] = None,
         response_format: Optional[dict] = None,
         model: Optional[str] = None,
+        tools: Optional[list] = None,
+        tool_choice: Any = "auto",
+        parallel_tool_calls: bool = True,
+        max_iterations: int = 20,
     ) -> str:
         """
         Call the LLM. Creates an exec node in the Context tree.
@@ -138,6 +142,22 @@ class Runtime:
 
             model:            Override the default model for this call.
 
+            tools:            Optional list of tools the LLM may call. Each
+                              entry may be an @agentic_function, a
+                              {"spec":..., "execute":...} dict, or an object
+                              with .spec and .execute attributes. When set,
+                              runs a tool loop until the model returns plain
+                              text (or max_iterations is hit).
+
+            tool_choice:      "auto" (default), "required", "none", or
+                              {"type":"function","name":"X"} to force a
+                              specific tool.
+
+            parallel_tool_calls: allow the model to emit multiple tool calls
+                                 in one turn (default True).
+
+            max_iterations:   safety cap on the tool loop (default 20).
+
         Returns:
             str — the LLM's reply text.
         """
@@ -151,6 +171,24 @@ class Runtime:
         # Handle plain string input
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
+
+        # --- Tool-use path -------------------------------------------------
+        # Delegate to provider's exec_with_tools. Providers that don't
+        # implement it will raise AttributeError / NotImplementedError.
+        if tools:
+            if not hasattr(self, "exec_with_tools"):
+                raise NotImplementedError(
+                    f"{type(self).__name__} does not support tool use yet. "
+                    "Use a provider like OpenAICodexRuntime, or drop the tools= arg."
+                )
+            return self.exec_with_tools(
+                content=content,
+                tools=tools,
+                tool_choice=tool_choice,
+                parallel_tool_calls=parallel_tool_calls,
+                max_iterations=max_iterations,
+                model=model,
+            )
 
         import time as _time
         parent_ctx = _current_ctx.get(None)

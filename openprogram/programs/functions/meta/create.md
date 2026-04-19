@@ -96,50 +96,47 @@ available = {
 
 ### 调用流程
 
+直接用原生 tool_use，没有 catalog/parse/prepare_args 这些中间层：
+
 ```python
-# 1. 构建函数目录（只展示 source="llm" 的参数）
-catalog = build_catalog(available)
-
-# 2. 调用 LLM
-reply = runtime.exec(content=[
-    {"type": "text", "text": f"{task}\n\n== Functions ==\n{catalog}"},
-])
-
-# 3. 解析 LLM 的选择
-action = parse_action(reply)
-# action = {"call": "polish_text", "args": {"style": "academic"}}
-
-# 4. 准备参数（合并 LLM 参数 + context 填充 + runtime 注入）
-args = prepare_args(action, available, runtime, context={"text": task})
-# args = {"text": task, "style": "academic", "runtime": runtime}
-
-# 5. 调用函数
-result = available[action["call"]]["function"](**args)
-
-# 6. 后续处理（result 可继续使用）
+# 把子函数放进 tools=[...]，LLM 发 function_call 事件，runtime 本地分发
+reply = runtime.exec(
+    content=[{"type": "text", "text": task}],
+    tools=[summarize_text, polish_text, translate_to_chinese],
+    tool_choice="auto",       # "required" 强制调一个；指定 name 强制选某个
+)
+# reply = LLM 在调完所有工具后给出的最终文字
 ```
+
+`@agentic_function` 本身带 `.spec`（OpenAI JSON Schema）和 `.execute`，
+runtime 自动把二者组合成工具。Python 信号里的 `runtime: Runtime` 这类注入参数
+对 LLM 不可见；`input={"x": {"hidden": True}}` 也能主动藏。
 
 ### 容错机制
 
+tool_use 的原生协议已经消化了大部分 parse_action 时代需要手动处理的 case：
+
 | 情况 | 处理 |
 |------|------|
-| 函数名不存在 | 返回 LLM 原始回复 |
-| 多余参数 | 过滤掉函数签名里没有的 |
-| 缺少必要参数 | 调 `fix_call_params` 让 LLM 补全 |
-| JSON 解析失败 | 返回 LLM 原始回复 |
-| LLM 信息不足 | 通过 `ask_user` 向用户提问 |
+| 函数名写错 | 协议层限制，只能从 tools 列表里选 |
+| 多余 / 缺失参数 | JSON Schema 校验失败，模型按描述重填 |
+| JSON 解析失败 | 没有文本解析环节 |
+| 工具执行异常 | runtime 把异常作为 function_call_output 喂回，模型可修正 |
+| 循环不收敛 | runtime 到 `max_iterations` 抛 RuntimeError |
 
 ### ask_user 机制
 
-当 LLM 判断信息不足以完成任务时，`check_task()` 通过 catalog 机制让 LLM 调用 `ask_user`：
+仍然有效，但建议写成一个 `ask_user` 工具，和其他工具一起塞进 `tools=[...]`：
 
 ```python
-# LLM 输出：
-{"call": "ask_user", "args": {"question": "输入格式是 JSON 还是纯文本？"}}
-```
+@agentic_function(input={"question": {"description": "问题"}, "runtime": {"hidden": True}})
+def ask_user(question: str, runtime: Runtime) -> str:
+    \"\"\"当任务信息不足时向用户提问，返回用户的回答。\"\"\"
+    return input_from_user(question)   # 具体实现由调用方注入
 
-`check_task()` 返回 `{"ready": False, "question": "..."}`，
-由调用方（create / fix / improve）通过 `ask_user()` 向用户提问，获取回答后继续。
+# LLM 发现信息不足时，直接 function_call("ask_user", {"question": "..."})
+# 不需要 check_task 特殊返回结构
+```
 
 ## 代码风格
 
@@ -150,8 +147,9 @@ result = available[action["call"]]["function"](**args)
 - 注册表 key：`"function"` 不是 `"fn"`
 
 ### 文件组织
-- 工具函数各自独立文件：`build_catalog.py`、`parse_action.py`、`prepare_args.py`
-- `available` 注册表写在使用它的函数内部，不定义为模块级常量
+- 原子工具（shell / file / search 等）放在 `openprogram/tools/<name>/`，
+  每个目录一个 `<name>.py` + `__init__.py`，参考 `bash/` 的结构。
+- `@agentic_function` 天然就是工具，不需要额外包装就能塞进 `tools=[...]`。
 
 ## 健壮性规则
 

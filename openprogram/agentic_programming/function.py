@@ -249,6 +249,27 @@ class agentic_function:
             return self
         return functools.partial(self._wrapper, obj)
 
+    @property
+    def spec(self) -> dict:
+        """JSON-schema tool spec auto-generated from signature + docstring.
+
+        Mirrors openprogram.tools.<name>.SPEC so an @agentic_function can be
+        passed directly to runtime.exec(tools=[fn]). Runtime-injected params
+        (runtime, exec_runtime, review_runtime) and any `hidden: True` entries
+        in input_meta are excluded — they aren't LLM-controllable.
+        """
+        if self._fn is None:
+            raise RuntimeError("agentic_function.spec accessed before a function was attached")
+        return _build_agentic_tool_spec(self._fn, self.input_meta)
+
+    def execute(self, **kwargs):
+        """Call the wrapped function with LLM-provided kwargs.
+
+        Used when this @agentic_function is exposed as a tool. Return value is
+        converted to a string by the tool-loop driver if it isn't one already.
+        """
+        return self._wrapper(**kwargs)
+
     def _make_wrapper(self, fn: Callable) -> Callable:
         sig = inspect.signature(fn)
 
@@ -407,6 +428,88 @@ class agentic_function:
 
         wrapper._is_agentic = True
         return wrapper
+
+
+_PY_TO_JSON_TYPE = {
+    str: "string",
+    int: "integer",
+    float: "number",
+    bool: "boolean",
+    list: "array",
+    dict: "object",
+    type(None): "null",
+}
+
+
+def _type_to_json_schema(ann) -> dict:
+    """Map a Python type annotation to a JSON Schema fragment."""
+    import typing
+
+    if ann is inspect.Parameter.empty:
+        return {}
+
+    origin = typing.get_origin(ann)
+    args = typing.get_args(ann)
+
+    # Optional[X] / Union[X, None]
+    if origin is typing.Union:
+        non_none = [a for a in args if a is not type(None)]
+        if len(non_none) == 1:
+            schema = _type_to_json_schema(non_none[0])
+            return schema
+        # Bare union — let the model send any; unconstrained
+        return {}
+
+    if ann in _PY_TO_JSON_TYPE:
+        return {"type": _PY_TO_JSON_TYPE[ann]}
+
+    if origin in (list, tuple):
+        if args:
+            return {"type": "array", "items": _type_to_json_schema(args[0])}
+        return {"type": "array"}
+
+    if origin is dict:
+        return {"type": "object"}
+
+    return {}
+
+
+def _build_agentic_tool_spec(fn: Callable, input_meta: dict) -> dict:
+    """Generate an OpenAI Responses-API-compatible tool spec from a Python fn."""
+    sig = inspect.signature(fn)
+    properties: dict[str, dict] = {}
+    required: list[str] = []
+    for name, param in sig.parameters.items():
+        if name in _RUNTIME_PARAMS:
+            continue
+        meta = input_meta.get(name) or {}
+        if meta.get("hidden"):
+            continue
+
+        schema = _type_to_json_schema(param.annotation) or {"type": "string"}
+        description = meta.get("description")
+        if description:
+            schema["description"] = description
+        elif meta.get("placeholder"):
+            schema["description"] = f"e.g. {meta['placeholder']}"
+        options = meta.get("options")
+        if options:
+            schema["enum"] = list(options)
+
+        properties[name] = schema
+        if param.default is inspect.Parameter.empty:
+            required.append(name)
+
+    parameters: dict = {"type": "object", "properties": properties}
+    if required:
+        parameters["required"] = required
+
+    description = (fn.__doc__ or "").strip() or f"Call {fn.__name__}."
+    return {
+        "name": fn.__name__,
+        "description": description,
+        "parameters": parameters,
+    }
 
 
 def traced(fn):

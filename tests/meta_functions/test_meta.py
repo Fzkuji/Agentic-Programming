@@ -4,8 +4,6 @@ Tests for meta.create() — generating agentic functions from descriptions.
 
 import pytest
 from openprogram import agentic_function, Runtime
-from openprogram.programs.functions.buildin.build_catalog import build_catalog
-from openprogram.programs.functions.buildin.prepare_args import prepare_args
 from openprogram.programs.functions.meta import create, edit
 from openprogram.programs.functions.meta._helpers import (
     extract_code as _extract_code,
@@ -203,56 +201,6 @@ def generated():
 
     assert fn.__name__ == "my_custom_fn"
     assert fn() == "ok"
-
-
-def test_build_catalog_renders_context_and_llm_inputs():
-    """build_catalog() includes parameter sources and metadata."""
-    catalog = build_catalog({
-        "summarize": {
-            "function": lambda text: text,
-            "description": "Summarize text",
-            "input": {
-                "text": {"source": "context"},
-                "style": {
-                    "source": "llm",
-                    "type": str,
-                    "options": ["brief", "detailed"],
-                    "description": "Summary style",
-                },
-            },
-            "output": {"summary": str},
-        }
-    })
-
-    assert "summarize(style: str)" in catalog
-    assert "Summarize text" in catalog
-    assert "Summary style" in catalog
-    assert '"brief"' in catalog
-    assert '"detailed"' in catalog
-
-
-def test_prepare_args_merges_context_and_runtime():
-    """prepare_args() fills context args and injects runtime."""
-    def summarize(text, style, runtime):
-        return text, style, runtime
-
-    runtime = Runtime(call=lambda content, model="test", response_format=None: "ok")
-    args = prepare_args(
-        action={"call": "summarize", "args": {"style": "brief"}},
-        available={
-            "summarize": {
-                "function": summarize,
-                "input": {
-                    "text": {"source": "context"},
-                    "style": {"source": "llm"},
-                },
-            }
-        },
-        runtime=runtime,
-        context={"text": "hello"},
-    )
-
-    assert args == {"text": "hello", "style": "brief", "runtime": runtime}
 
 
 # ── edit() tests (new API: fn-based) ────────────────────────────
