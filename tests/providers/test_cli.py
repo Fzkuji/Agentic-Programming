@@ -9,14 +9,14 @@ from unittest.mock import MagicMock, patch, mock_open
 from openprogram import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
 
-class TestCodexRuntime:
-    """Tests for CodexRuntime with mocked subprocess."""
+class TestOpenAICodexRuntime:
+    """Tests for OpenAICodexRuntime with mocked subprocess."""
 
     @pytest.fixture(autouse=True)
     def setup_mock(self, monkeypatch, tmp_path):
         """Mock shutil.which and subprocess.Popen.
 
-        CodexRuntime uses Popen + line-by-line stdout reading so it can
+        OpenAICodexRuntime uses Popen + line-by-line stdout reading so it can
         stream events live and be killable mid-call. The mock here mimics
         that: build a Popen-like object with stdin/stdout/stderr and a
         deterministic stdout_lines iterator.
@@ -90,7 +90,7 @@ class TestCodexRuntime:
         self._build_proc = build_proc
 
         def make_popen(cmd, **kwargs):
-            # Write mock output to the -o file so CodexRuntime reads it back.
+            # Write mock output to the -o file so OpenAICodexRuntime reads it back.
             for i, arg in enumerate(cmd):
                 if arg == "-o" and i + 1 < len(cmd):
                     with open(cmd[i + 1], "w") as f:
@@ -114,11 +114,11 @@ class TestCodexRuntime:
         yield
 
     def _make_runtime(self, **kwargs):
-        from openprogram.providers.codex import CodexRuntime
-        return CodexRuntime(cli_path="/usr/bin/codex", **kwargs)
+        from openprogram.providers.openai_codex import OpenAICodexRuntime
+        return OpenAICodexRuntime(cli_path="/usr/bin/codex", **kwargs)
 
     def _last_prompt(self) -> str:
-        """Last prompt string written to stdin by CodexRuntime."""
+        """Last prompt string written to stdin by OpenAICodexRuntime."""
         return self._prompts_written[-1] if self._prompts_written else ""
 
     def test_text_only_call(self):
@@ -301,9 +301,9 @@ class TestCodexRuntime:
     def test_cli_not_found(self, monkeypatch):
         """Missing CLI raises FileNotFoundError."""
         monkeypatch.setattr("shutil.which", lambda name: None)
-        from openprogram.providers.codex import CodexRuntime
+        from openprogram.providers.openai_codex import OpenAICodexRuntime
         with pytest.raises(FileNotFoundError, match="Codex CLI not found"):
-            CodexRuntime(cli_path=None)
+            OpenAICodexRuntime(cli_path=None)
 
     def test_cli_error_propagates(self):
         """CLI errors are raised as RuntimeError."""
@@ -333,9 +333,9 @@ class TestCodexRuntime:
 
         import time as _t
         monkeypatch.setattr(_t, "time", fake_time)
-        from openprogram.providers.codex import CodexRuntime
-        monkeypatch.setattr(CodexRuntime, "_enqueue_stream_lines", lambda self, stream, q: None)
-        monkeypatch.setattr(CodexRuntime, "_read_line_with_timeout", lambda self, q, remaining: "")
+        from openprogram.providers.openai_codex import OpenAICodexRuntime
+        monkeypatch.setattr(OpenAICodexRuntime, "_enqueue_stream_lines", lambda self, stream, q: None)
+        monkeypatch.setattr(OpenAICodexRuntime, "_read_line_with_timeout", lambda self, q, remaining: "")
         rt = self._make_runtime(timeout=10)
         with pytest.raises(TimeoutError, match="no output for 10s"):
             rt._call([{"type": "text", "text": "test"}])
@@ -416,9 +416,9 @@ def test_visualizer_codex_runtime_enables_search(monkeypatch):
 
     monkeypatch.setattr("openprogram.providers.create_runtime", fake_create_runtime)
 
-    server._create_runtime_for_visualizer("codex")
+    server._create_runtime_for_visualizer("openai-codex")
 
-    assert captured["provider"] == "codex"
+    assert captured["provider"] == "openai-codex"
     assert "session_id" not in captured["kwargs"]
     assert captured["kwargs"]["search"] is True
 

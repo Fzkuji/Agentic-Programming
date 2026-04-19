@@ -150,14 +150,14 @@ runtime = GeminiRuntime(
 **Prerequisites:**
 ```bash
 # install Codex CLI first, then sign in
-codex login
+codex login --device-auth
 ```
 
 **Usage:**
 ```python
-from openprogram.providers import CodexRuntime
+from openprogram.providers import OpenAICodexRuntime
 
-runtime = CodexRuntime(model="o4-mini")
+runtime = OpenAICodexRuntime(model="gpt-5.4-mini")
 ```
 
 **Pros:** Local CLI workflow, easy to reuse an existing Codex setup.
@@ -433,14 +433,14 @@ runtime = GeminiRuntime(
 **前置条件：**
 ```bash
 # 先安装 Codex CLI，然后登录
-codex login
+codex login --device-auth
 ```
 
 **用法：**
 ```python
-from openprogram.providers import CodexRuntime
+from openprogram.providers import OpenAICodexRuntime
 
-runtime = CodexRuntime(model="o4-mini")
+runtime = OpenAICodexRuntime(model="gpt-5.4-mini")
 ```
 
 **优点：** 本地 CLI 工作流友好，适合已经在用 Codex 的环境。

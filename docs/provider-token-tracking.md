@@ -102,7 +102,7 @@ self.last_usage = {
 
 ---
 
-## 4. Codex CLI (`codex.py`)
+## 4. Codex CLI (`openai_codex.py`)
 
 **Output Format**: JSONL stream (newline-delimited JSON events)
 

@@ -273,7 +273,7 @@ class ClaudeCodeRuntime(Runtime):
             # Falls back to a full process restart if compact fails.
             if self._should_compact():
                 try:
-                    self._compact()
+                    self.compact()
                     self._last_context_tokens = 0  # optimistic reset
                 except Exception:
                     self._restart_process()
@@ -324,7 +324,7 @@ class ClaudeCodeRuntime(Runtime):
 
             # Compact context periodically to prevent bloat
             if self._compact_every and self._turn_count % self._compact_every == 0:
-                self._compact()
+                self.compact()
 
             return reply
 
@@ -540,14 +540,18 @@ class ClaudeCodeRuntime(Runtime):
             return False
         return self._last_context_tokens >= thr
 
-    def _compact(self):
+    def compact(self):
         """Send /compact to compress the conversation context.
 
         This is a Claude Code slash command that summarizes prior messages
         to free up context window space. Keeps the session alive without
-        restarting the process.
+        restarting the process. Callable from outside (GUI agent loops
+        that want to compress at specific step boundaries).
         """
+        import sys as _sys
+        t0 = time.time()
         try:
+            tokens_before = self._last_context_tokens
             compact_msg = json.dumps({
                 "type": "user",
                 "message": {
@@ -557,10 +561,17 @@ class ClaudeCodeRuntime(Runtime):
             })
             self._proc.stdin.write(compact_msg + "\n")
             self._proc.stdin.flush()
-            # Read the compact response (don't care about content)
-            self._read_response()
-        except Exception:
-            pass  # Best-effort, never fail
+            result_text, events = self._read_response()
+            elapsed = time.time() - t0
+            event_types = [e.get("type", "?") for e in events[:8]]
+            print(
+                f"[compact] {elapsed:.1f}s | tokens {tokens_before}->"
+                f"{self._last_context_tokens} | "
+                f"result={result_text[:120]!r} | events={event_types}",
+                file=_sys.stderr,
+            )
+        except Exception as e:
+            print(f"[compact] ERROR after {time.time()-t0:.1f}s: {e}", file=_sys.stderr)
 
     def _encode_image(self, block: dict) -> Optional[dict]:
         """Convert an image content block to Anthropic base64 format."""

@@ -17,7 +17,7 @@ from typing import Optional
 # Globals — live here so server.py doesn't own provider state directly.
 # ---------------------------------------------------------------------------
 
-_CLI_PROVIDERS = {"codex", "claude-code", "gemini-cli"}
+_CLI_PROVIDERS = {"openai-codex", "claude-code", "gemini-cli"}
 
 _runtime_lock = threading.Lock()
 
@@ -92,7 +92,7 @@ def _create_runtime_for_visualizer(provider: str):
       - API providers:   default → stateless, Context tree injects history
     """
     from openprogram.providers import create_runtime
-    if provider == "codex":
+    if provider == "openai-codex":
         return create_runtime(provider=provider, search=True)
     return create_runtime(provider=provider)
 
@@ -102,13 +102,13 @@ def _detect_default_provider() -> tuple:
 
     Order prioritizes Claude Code CLI (sonnet) per project default.
     """
-    for p in ("claude-code", "codex", "gemini-cli", "anthropic", "gemini", "openai"):
+    for p in ("claude-code", "openai-codex", "gemini-cli", "anthropic", "gemini", "openai"):
         rt = None
         try:
             rt = _create_runtime_for_visualizer(p)
             if p in _CLI_PROVIDERS:
                 import shutil
-                cli_names = {"codex": "codex", "claude-code": "claude", "gemini-cli": "gemini"}
+                cli_names = {"openai-codex": "codex", "claude-code": "claude", "gemini-cli": "gemini"}
                 cli_bin = cli_names.get(p, p)
                 if not shutil.which(cli_bin):
                     raise RuntimeError(f"{cli_bin} not installed")
@@ -151,8 +151,8 @@ def _init_providers():
         _default_runtime = rt
 
         import shutil as _shutil
-        _cli_bins = {"codex": "codex", "claude-code": "claude", "gemini-cli": "gemini"}
-        for p_name in ("claude-code", "codex", "gemini-cli", "anthropic", "gemini", "openai"):
+        _cli_bins = {"openai-codex": "codex", "claude-code": "claude", "gemini-cli": "gemini"}
+        for p_name in ("claude-code", "openai-codex", "gemini-cli", "anthropic", "gemini", "openai"):
             try:
                 if p_name in _CLI_PROVIDERS:
                     if not _shutil.which(_cli_bins.get(p_name, p_name)):
@@ -199,10 +199,10 @@ def _get_exec_runtime(no_tools: bool = False):
         raise RuntimeError(
             "No provider available. Install a CLI (codex/claude/gemini) or set an API key."
         )
-    if no_tools and _exec_provider == "codex":
+    if no_tools and _exec_provider == "openai-codex":
         from openprogram.providers import create_runtime
         rt = create_runtime(
-            provider="codex", session_id=None, search=False,
+            provider="openai-codex", session_id=None, search=False,
             full_auto=False, sandbox="read-only",
         )
     elif no_tools and _exec_provider == "claude-code":

@@ -265,15 +265,15 @@ claude login
 
 ---
 
-## CodexRuntime
+## OpenAICodexRuntime
 
 Codex CLI。适合已经在本机登录 `codex` 的开发环境。
 
 ```python
-from openprogram.providers import CodexRuntime
+from openprogram.providers import OpenAICodexRuntime
 
-rt = CodexRuntime(
-    model="o4-mini",
+rt = OpenAICodexRuntime(
+    model="gpt-5.4-mini",
     timeout=120,
     full_auto=True,
 )
@@ -283,7 +283,7 @@ rt = CodexRuntime(
 
 ```bash
 npm install -g @openai/codex
-codex login
+codex login --device-auth
 ```
 
 ### 构造参数

@@ -291,7 +291,7 @@ def _list_providers() -> list[dict]:
     result = []
     checks = [
         # (name, label, available_check, env_keys_for_config_or_None_if_CLI)
-        ("codex", "Codex CLI", lambda: shutil.which("codex") is not None, None),
+        ("openai-codex", "Codex CLI", lambda: shutil.which("codex") is not None, None),
         ("claude-code", "Claude Code CLI", lambda: shutil.which("claude") is not None, None),
         ("gemini-cli", "Gemini CLI", lambda: shutil.which("gemini") is not None, None),
         ("anthropic", "Anthropic API", lambda: bool(_get_api_key("ANTHROPIC_API_KEY")), ["ANTHROPIC_API_KEY"]),
@@ -474,7 +474,7 @@ _THINKING_CONFIGS = {
         ],
         "default": "auto",
     },
-    "codex": {
+    "openai-codex": {
         "label": "reasoning effort",
         "options": [
             {"value": "none", "desc": "No reasoning"},
@@ -521,7 +521,7 @@ _THINKING_CONFIGS = {
 
 def _get_thinking_config(provider: str) -> dict:
     """Get thinking effort config for a provider."""
-    return _THINKING_CONFIGS.get(provider, _THINKING_CONFIGS.get("codex"))
+    return _THINKING_CONFIGS.get(provider, _THINKING_CONFIGS.get("openai-codex"))
 
 
 def _default_effort_for(runtime) -> str:
@@ -533,13 +533,13 @@ def _default_effort_for(runtime) -> str:
     rt_type = type(runtime).__name__
     mapping = {
         "ClaudeCodeRuntime": "claude-code",
-        "CodexRuntime": "codex",
+        "OpenAICodexRuntime": "openai-codex",
         "AnthropicRuntime": "anthropic",
         "OpenAIRuntime": "openai",
         "GeminiRuntime": "gemini",
         "GeminiCLIRuntime": "gemini-cli",
     }
-    provider = mapping.get(rt_type, "codex")
+    provider = mapping.get(rt_type, "openai-codex")
     return _THINKING_CONFIGS.get(provider, {}).get("default")
 
 
@@ -564,7 +564,7 @@ def _apply_thinking_effort(runtime, effort: str):
     # Resolve None/empty -> provider default (no hardcoded "medium")
     effort = _resolve_effort(effort, runtime)
 
-    if rt_type == "CodexRuntime":
+    if rt_type == "OpenAICodexRuntime":
         runtime._reasoning_effort = effort
     elif rt_type == "ClaudeCodeRuntime":
         old_effort = getattr(runtime, '_thinking_effort', None)
@@ -2083,6 +2083,33 @@ def create_app():
     @app.get("/api/providers")
     async def get_providers():
         return JSONResponse(content=_list_providers())
+
+    @app.get("/api/providers/{name}/onboarding")
+    async def get_onboarding(name: str):
+        """Return the onboarding schema (label + step metadata) for a provider."""
+        from openprogram.providers import onboarding as _ob
+        entry = _ob.get_provider(name)
+        if entry is None:
+            return JSONResponse(
+                content={"error": f"No onboarding for provider {name!r}"},
+                status_code=404,
+            )
+        return JSONResponse(content={
+            "provider": name,
+            "label": entry["label"],
+            "type": entry["type"],
+            "description": entry.get("description", ""),
+            "steps": [{"id": s["id"], "label": s["label"]} for s in entry["steps"]],
+        })
+
+    @app.post("/api/providers/{name}/onboarding/step/{step_id}")
+    async def run_onboarding_step(name: str, step_id: str, body: dict = None):
+        """Execute one onboarding step. Body is the step context (accumulates state)."""
+        from openprogram.providers import onboarding as _ob
+        ctx = dict(body or {})
+        result = _ob.run_step(name, step_id, ctx)
+        # Return both the result and the updated ctx so the client can keep state
+        return JSONResponse(content={"result": result, "context": ctx})
 
     @app.post("/api/provider/{name}")
     async def switch_provider(name: str, body: dict = None):

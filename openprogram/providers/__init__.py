@@ -9,7 +9,7 @@ Available providers:
     OpenAIRuntime       — OpenAI GPT API (text + image, response_format)
     GeminiRuntime       — Google Gemini API (text + image)
     ClaudeCodeRuntime   — Claude Code CLI (no API key, uses subscription)
-    CodexRuntime        — OpenAI Codex CLI (no API key in harness, uses codex auth)
+    OpenAICodexRuntime  — OpenAI Codex CLI (no API key in harness, uses codex auth)
     GeminiCLIRuntime    — Gemini CLI (no API key, uses Google account)
 
 Usage:
@@ -22,8 +22,8 @@ Usage:
     from openprogram.providers import GeminiRuntime
     rt = GeminiRuntime(api_key="...", model="gemini-2.5-flash")
 
-    from openprogram.providers import CodexRuntime
-    rt = CodexRuntime(model="o4-mini")
+    from openprogram.providers import OpenAICodexRuntime
+    rt = OpenAICodexRuntime(model="gpt-5.4-mini")
 
 Auto-detection:
     from openprogram.providers import detect_provider, create_runtime
@@ -43,7 +43,7 @@ import shutil
 PROVIDERS = {
     "openclaw":     ("OpenClawRuntime",    "openprogram.providers.openclaw",     "default"),
     "claude-code":  ("ClaudeCodeRuntime",  "openprogram.providers.claude_code",  "claude-sonnet-4-6"),
-    "codex":        ("CodexRuntime",       "openprogram.providers.codex",        "gpt-5.4-mini"),
+    "openai-codex": ("OpenAICodexRuntime", "openprogram.providers.openai_codex", "gpt-5.4-mini"),
     "gemini-cli":   ("GeminiCLIRuntime",   "openprogram.providers.gemini_cli",   "gemini-2.5-flash"),
     "anthropic":    ("AnthropicRuntime",    "openprogram.providers.anthropic",    "claude-sonnet-4-6"),
     "openai":       ("OpenAIRuntime",       "openprogram.providers.openai",       "gpt-4.1"),
@@ -64,7 +64,7 @@ def _detect_caller_env() -> tuple[str, str] | None:
     # Running inside Codex CLI?
     if os.environ.get("CODEX_CLI") or os.environ.get("CODEX_SANDBOX_TYPE"):
         if shutil.which("codex"):
-            return "codex", None
+            return "openai-codex", None
 
     return None
 
@@ -131,7 +131,7 @@ def detect_provider() -> tuple[str, str]:
     if shutil.which("claude"):
         return "claude-code", "sonnet"
     if shutil.which("codex"):
-        return "codex", None
+        return "openai-codex", None
     if shutil.which("gemini"):
         return "gemini-cli", "gemini-2.5-flash"
 
@@ -177,7 +177,7 @@ def check_providers() -> dict:
     cli_checks = {
         "openclaw": "openclaw",
         "claude-code": "claude",
-        "codex": "codex",
+        "openai-codex": "codex",
         "gemini-cli": "gemini",
     }
     api_checks = {
@@ -266,9 +266,9 @@ def __getattr__(name):
     if name == "ClaudeCodeRuntime":
         from openprogram.providers.claude_code import ClaudeCodeRuntime
         return ClaudeCodeRuntime
-    if name == "CodexRuntime":
-        from openprogram.providers.codex import CodexRuntime
-        return CodexRuntime
+    if name == "OpenAICodexRuntime":
+        from openprogram.providers.openai_codex import OpenAICodexRuntime
+        return OpenAICodexRuntime
     if name == "GeminiCLIRuntime":
         from openprogram.providers.gemini_cli import GeminiCLIRuntime
         return GeminiCLIRuntime
@@ -286,7 +286,7 @@ __all__ = [
     "OpenAIRuntime",
     "GeminiRuntime",
     "ClaudeCodeRuntime",
-    "CodexRuntime",
+    "OpenAICodexRuntime",
     "GeminiCLIRuntime",
     "OpenClawRuntime",
 ]

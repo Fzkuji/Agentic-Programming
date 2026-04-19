@@ -65,7 +65,7 @@ class TestProviderDetection:
         from openprogram import providers
         importlib.reload(providers)
 
-        assert providers.detect_provider() == ("codex", None)
+        assert providers.detect_provider() == ("openai-codex", None)
 
     def test_check_providers_marks_env_selected_provider_default(self, monkeypatch):
         """check_providers() marks the configured provider as the auto-selected default."""
@@ -101,5 +101,5 @@ class TestProviderLazyImport:
         assert "OpenAIRuntime" in providers.__all__
         assert "GeminiRuntime" in providers.__all__
         assert "ClaudeCodeRuntime" in providers.__all__
-        assert "CodexRuntime" in providers.__all__
+        assert "OpenAICodexRuntime" in providers.__all__
         assert "GeminiCLIRuntime" in providers.__all__

@@ -40,9 +40,9 @@ Unsupported (with warnings):
 - File/PDF content blocks (Codex CLI does not support document input)
 
 Usage:
-    from openprogram.providers.codex import CodexRuntime
+    from openprogram.providers.openai_codex import OpenAICodexRuntime
 
-    runtime = CodexRuntime(model="o4-mini")
+    runtime = OpenAICodexRuntime(model="o4-mini")
 
     @agentic_function
     def observe(task):
@@ -68,7 +68,7 @@ from typing import Optional
 from openprogram.agentic_programming.runtime import Runtime
 
 
-class CodexRuntime(Runtime):
+class OpenAICodexRuntime(Runtime):
     """
     Runtime that routes LLM calls through the OpenAI Codex CLI.
 
@@ -206,7 +206,7 @@ class CodexRuntime(Runtime):
 
                 elif btype == "audio":
                     warnings.warn(
-                        "CodexRuntime does not support audio content blocks. "
+                        "OpenAICodexRuntime does not support audio content blocks. "
                         "Audio block will be skipped. Consider using OpenAIRuntime API for audio support.",
                         UserWarning,
                         stacklevel=3,
@@ -214,7 +214,7 @@ class CodexRuntime(Runtime):
 
                 elif btype == "video":
                     warnings.warn(
-                        "CodexRuntime does not support video content blocks. "
+                        "OpenAICodexRuntime does not support video content blocks. "
                         "Video block will be skipped. Consider using GeminiRuntime for video.",
                         UserWarning,
                         stacklevel=3,
@@ -222,7 +222,7 @@ class CodexRuntime(Runtime):
 
                 elif btype == "file":
                     warnings.warn(
-                        "CodexRuntime does not support file/PDF content blocks. "
+                        "OpenAICodexRuntime does not support file/PDF content blocks. "
                         "File block will be skipped. Consider using OpenAIRuntime API for file support.",
                         UserWarning,
                         stacklevel=3,

@@ -109,6 +109,11 @@ def main():
     # providers
     sub.add_parser("providers", help="Show available LLM providers and detection status")
 
+    # configure — interactive provider setup wizard
+    p_cfg = sub.add_parser("configure", help="Interactive wizard to set up a provider (CLI login, API key, model)")
+    p_cfg.add_argument("provider", nargs="?", default=None,
+                       help="Provider id (e.g. openai-codex). If omitted, you pick from a menu.")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -132,6 +137,8 @@ def main():
         _cmd_list()
     elif args.command == "providers":
         _cmd_providers()
+    elif args.command == "configure":
+        _cmd_configure(args.provider)
     elif args.command == "create":
         _cmd_create(args.description, args.name, args.as_skill, args.provider, args.model)
     elif args.command == "create-app":
@@ -294,7 +301,7 @@ def _cmd_providers():
 
     cli_checks = {
         "claude-code": ("claude", "Claude Code CLI"),
-        "codex": ("codex", "Codex CLI"),
+        "openai-codex": ("codex", "Codex CLI"),
         "gemini-cli": ("gemini", "Gemini CLI"),
     }
     api_checks = {
@@ -304,7 +311,7 @@ def _cmd_providers():
     }
 
     # Detection order matches detect_provider()
-    detection_order = ["claude-code", "codex", "gemini-cli", "anthropic", "openai", "gemini"]
+    detection_order = ["claude-code", "openai-codex", "gemini-cli", "anthropic", "openai", "gemini"]
 
     for name in detection_order:
         _, _, default_model = PROVIDERS[name]
@@ -342,6 +349,85 @@ def _cmd_providers():
     else:
         print("No provider detected. Set up one of the above to get started.")
         print("See: https://github.com/Fzkuji/Agentic-Programming#quick-start")
+
+
+def _cmd_configure(provider: str | None):
+    """Interactive provider-setup wizard. Drives openprogram.providers.onboarding."""
+    from openprogram.providers import onboarding
+
+    catalog = onboarding.list_providers()
+    if not catalog:
+        print("No provider onboarding is currently registered.")
+        return
+
+    if provider is None:
+        print("Available providers to configure:\n")
+        for i, p in enumerate(catalog, 1):
+            print(f"  {i}. {p['id']:15s}  {p['label']}")
+            if p.get("description"):
+                print(f"     {p['description']}")
+        print()
+        choice = input(f"Pick one [1-{len(catalog)}] (default 1): ").strip() or "1"
+        try:
+            provider = catalog[int(choice) - 1]["id"]
+        except (ValueError, IndexError):
+            print(f"Invalid choice: {choice}")
+            return
+
+    entry = onboarding.get_provider(provider)
+    if entry is None:
+        print(f"Unknown provider: {provider}")
+        print(f"Available: {', '.join(p['id'] for p in catalog)}")
+        return
+
+    print(f"\nConfiguring: {entry['label']}")
+    if entry.get("description"):
+        print(f"  {entry['description']}")
+    print()
+
+    ctx: dict = {}
+    for step in entry["steps"]:
+        while True:  # loop on the same step until it's ok or user aborts
+            result = onboarding.run_step(provider, step["id"], ctx)
+            status = result["status"]
+            if status == "ok":
+                print(f"  [ok] {step['label']}: {result['message']}")
+                break
+            elif status == "needs_input":
+                print(f"  [?]  {result['message']}")
+                options = result.get("options") or []
+                default = result.get("default")
+                if options:
+                    for i, opt in enumerate(options, 1):
+                        marker = " (default)" if opt["value"] == default else ""
+                        print(f"       {i}. {opt['value']:18s} {opt.get('desc', '')}{marker}")
+                    pick = input(f"       Pick [1-{len(options)}]: ").strip()
+                    if not pick and default is not None:
+                        value = default
+                    else:
+                        try:
+                            value = options[int(pick) - 1]["value"]
+                        except (ValueError, IndexError):
+                            print(f"       Invalid choice: {pick}")
+                            continue
+                else:
+                    value = input(f"       > ").strip()
+                    if not value and default is not None:
+                        value = default
+                ctx[result["input_key"]] = value
+                continue  # re-run the step with input in ctx
+            else:  # error
+                print(f"  [x]  {step['label']}: {result['message']}")
+                fix = result.get("fix")
+                if fix:
+                    print(f"       Fix with: {fix}")
+                    retry = input("       Retry this step after running the fix? [Y/n]: ").strip().lower()
+                    if retry in ("", "y", "yes"):
+                        continue
+                print("Aborted.")
+                return
+
+    print("\nAll steps complete. You can now run agentic commands without specifying --provider.")
 
 
 def _cmd_list():
