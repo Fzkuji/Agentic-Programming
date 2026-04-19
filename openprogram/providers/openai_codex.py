@@ -1,18 +1,18 @@
 """
-OpenAICodexRuntime — HTTP-direct provider for OpenAI Codex.
+OpenAICodexRuntime — HTTP-direct provider for the ChatGPT/Codex subscription.
 
-Two modes, both routed through the same Runtime class:
+Single route:
+    URL:   https://chatgpt.com/backend-api/codex/responses
+    Auth:  Bearer <OAuth access_token> + chatgpt-account-id header
+    Creds: ~/.codex/auth.json (must have auth_mode=chatgpt),
+           auto-refreshed against https://auth.openai.com/oauth/token
+           when the access token is close to expiring.
 
-  auth_mode == "chatgpt"  (ChatGPT subscription)
-      URL:  https://chatgpt.com/backend-api/codex/responses
-      Auth: Bearer <OAuth access_token>  + chatgpt-account-id header
-      Creds: read from ~/.codex/auth.json, refreshed against
-             https://auth.openai.com/oauth/token when expired.
-
-  auth_mode == "apikey"  (standard OpenAI API billing)
-      URL:  https://api.openai.com/v1/responses
-      Auth: Bearer <OPENAI_API_KEY>
-      Creds: auth.json's OPENAI_API_KEY field, or the env var.
+This provider is subscription-only. API-key access to OpenAI models goes
+through OpenAIRuntime (openprogram.providers.openai), which hits
+api.openai.com with OPENAI_API_KEY. The two are intentionally separate:
+use `openai-codex` when you want to burn ChatGPT subscription credit,
+use `openai` when you want to burn API credit.
 
 No codex CLI subprocess is involved at call time. The codex CLI is only
 needed once, for `codex login --device-auth`, to create auth.json.
@@ -50,7 +50,6 @@ from openprogram.agentic_programming.runtime import Runtime
 # ----------------------------------------------------------------------------
 
 CHATGPT_BACKEND_URL = "https://chatgpt.com/backend-api/codex/responses"
-OPENAI_API_URL = "https://api.openai.com/v1/responses"
 OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token"
 OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 JWT_CLAIM_PATH = "https://api.openai.com/auth"
@@ -159,21 +158,15 @@ def _write_auth_json_atomic(data: dict[str, Any]) -> None:
 # ----------------------------------------------------------------------------
 
 class _Credentials:
-    """Resolved auth state for one call.
+    """Resolved ChatGPT OAuth credentials for one call."""
 
-    mode == "chatgpt":  uses OAuth token + chatgpt backend endpoint
-    mode == "apikey":   uses API key + api.openai.com endpoint
-    """
-
-    def __init__(self, mode: str, token: str, account_id: Optional[str], url: str):
-        self.mode = mode
+    def __init__(self, token: str, account_id: str):
         self.token = token
         self.account_id = account_id
-        self.url = url
 
 
 class _AuthState:
-    """Cached auth.json + refresh logic.
+    """Cached ~/.codex/auth.json (chatgpt mode) + refresh logic.
 
     Shared across calls from the same runtime. Thread-safe.
     """
@@ -183,82 +176,56 @@ class _AuthState:
         self._auth: Optional[dict[str, Any]] = None
 
     def _load(self) -> dict[str, Any]:
-        if self._auth is not None:
-            return self._auth
         path = _auth_path()
         if not path.exists():
             raise RuntimeError(
-                f"{path} not found. Run `codex login --device-auth` "
-                "(ChatGPT subscription) or `codex login --with-api-key`."
+                f"{path} not found. OpenAICodexRuntime requires the ChatGPT "
+                "subscription. Run: codex login --device-auth"
             )
-        self._auth = json.loads(path.read_text(encoding="utf-8"))
-        return self._auth
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def resolve(self) -> _Credentials:
-        """Return the current credentials, refreshing the OAuth token if needed.
+        """Return the current ChatGPT OAuth credentials, refreshing if near expiry.
 
-        Priority:
-          1. auth.json with auth_mode=chatgpt   → ChatGPT subscription (preferred
-             whenever available, since this is the whole point of this provider)
-          2. OPENAI_API_KEY env var              → OpenAI API billing
-          3. auth.json with auth_mode=apikey     → stored API key
-          4. error
+        This provider is **subscription-only** — it never falls back to
+        OPENAI_API_KEY. If you want to use API billing, use OpenAIRuntime
+        (the `openai` provider) instead.
         """
         with self._lock:
-            auth: dict[str, Any] | None = None
-            try:
-                auth = self._load()
-            except RuntimeError:
-                auth = None  # allow env-var fallback even with no auth.json
+            if self._auth is None:
+                self._auth = self._load()
+            auth = self._auth
 
-            # (1) ChatGPT subscription mode — always preferred.
-            # If OPENAI_API_KEY is in the env AND chatgpt auth is valid, we
-            # still use chatgpt. Otherwise the env var silently burns API
-            # credits instead of using the subscription we configured.
-            if auth and auth.get("auth_mode") == "chatgpt":
-                tokens = auth.get("tokens") or {}
-                access = tokens.get("access_token")
-                refresh = tokens.get("refresh_token")
-                if access and refresh:
-                    exp = _jwt_expiry_epoch(access)
-                    if exp is not None and exp - 60 < time.time():
-                        new_tokens = _refresh_oauth_token(refresh)
-                        access = new_tokens["access_token"]
-                        auth["tokens"]["access_token"] = access
-                        auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
-                        if "id_token" in new_tokens:
-                            auth["tokens"]["id_token"] = new_tokens["id_token"]
-                        _write_auth_json_atomic(auth)
-                        self._auth = auth
-                    account_id = tokens.get("account_id") or _extract_account_id(access)
-                    return _Credentials("chatgpt", access, account_id, CHATGPT_BACKEND_URL)
-
-            # (2) Env var API key
-            env_key = os.environ.get("OPENAI_API_KEY", "").strip()
-            if env_key:
-                return _Credentials("apikey", env_key, None, OPENAI_API_URL)
-
-            # (3) Stored API key from auth.json
-            if auth and auth.get("auth_mode") == "apikey":
-                tokens = auth.get("tokens") or {}
-                api_key = (
-                    tokens.get("api_key")
-                    or auth.get("OPENAI_API_KEY")
-                    or tokens.get("access_token")
-                )
-                if api_key:
-                    return _Credentials("apikey", api_key, None, OPENAI_API_URL)
-
-            # Nothing worked
-            if auth is None:
+            if auth.get("auth_mode") != "chatgpt":
                 raise RuntimeError(
-                    f"{_auth_path()} not found and OPENAI_API_KEY not set. "
-                    "Run `codex login --device-auth` to use ChatGPT subscription."
+                    f"{_auth_path()} has auth_mode={auth.get('auth_mode')!r}, "
+                    "need 'chatgpt'. OpenAICodexRuntime is subscription-only. "
+                    "Run: codex login --device-auth   "
+                    "(For API-key access, use the `openai` provider instead.)"
                 )
-            raise RuntimeError(
-                f"Could not resolve credentials from {_auth_path()} "
-                f"(auth_mode={auth.get('auth_mode')!r})."
-            )
+
+            tokens = auth.get("tokens") or {}
+            access = tokens.get("access_token")
+            refresh = tokens.get("refresh_token")
+            if not access or not refresh:
+                raise RuntimeError(
+                    f"{_auth_path()} is in chatgpt mode but missing access_token "
+                    "or refresh_token. Run: codex login --device-auth"
+                )
+
+            exp = _jwt_expiry_epoch(access)
+            if exp is not None and exp - 60 < time.time():
+                new_tokens = _refresh_oauth_token(refresh)
+                access = new_tokens["access_token"]
+                auth["tokens"]["access_token"] = access
+                auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
+                if "id_token" in new_tokens:
+                    auth["tokens"]["id_token"] = new_tokens["id_token"]
+                _write_auth_json_atomic(auth)
+                self._auth = auth
+
+            account_id = tokens.get("account_id") or _extract_account_id(access)
+            return _Credentials(access, account_id)
 
 
 # ----------------------------------------------------------------------------
@@ -301,17 +268,15 @@ def _convert_content_to_input(content: list[dict]) -> list[dict]:
 
 
 def _build_headers(creds: _Credentials) -> dict[str, str]:
-    h = {
+    return {
         "Authorization": f"Bearer {creds.token}",
+        "chatgpt-account-id": creds.account_id,
+        "originator": ORIGINATOR,
         "User-Agent": f"openprogram ({sys.platform})",
         "content-type": "application/json",
         "accept": "text/event-stream",
         "OpenAI-Beta": "responses=experimental",
     }
-    if creds.mode == "chatgpt":
-        h["chatgpt-account-id"] = creds.account_id
-        h["originator"] = ORIGINATOR
-    return h
 
 
 def _build_body(
@@ -487,11 +452,11 @@ class OpenAICodexRuntime(Runtime):
         headers = _build_headers(creds)
 
         client = self._get_client()
-        with client.stream("POST", creds.url, headers=headers, json=body) as r:
+        with client.stream("POST", CHATGPT_BACKEND_URL, headers=headers, json=body) as r:
             if r.status_code != 200:
                 err_body = r.read().decode("utf-8", errors="replace")
                 raise RuntimeError(
-                    f"Codex HTTP {r.status_code} ({creds.mode} mode, {creds.url}): "
+                    f"Codex HTTP {r.status_code} from {CHATGPT_BACKEND_URL}: "
                     f"{err_body[:500]}"
                 )
             text, usage = _parse_sse_response(r)
