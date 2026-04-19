@@ -85,8 +85,8 @@ class Context:
     Fields are grouped by who sets them:
 
     Set by @agentic_function (on entry, function nodes):
-        name, prompt, params, parent, children, render, compress,
-        start_time, _summarize_kwargs
+        name, prompt, params, parent, children, expose, render_range,
+        start_time
 
     Set by @agentic_function (on exit, function nodes):
         output OR error, status, end_time
@@ -117,36 +117,30 @@ class Context:
 
     # --- Display settings (set via @agentic_function decorator) ---
 
-    render: str = "summary"
-    # Default rendering level when others view this node via summarize().
+    expose: str = "io"
+    # What OUTSIDE observers see of this node after it completes.
+    # Three levels:
+    #   "io"     — only name + return value (subtree hidden)           [DEFAULT]
+    #   "full"   — docstring + params + output + LLM reply + subtree
+    #   "hidden" — not shown at all
     #
-    # Five levels, from most to least verbose:
-    #   "trace"   — prompt + full I/O + raw LLM reply + error
-    #   "detail"  — name(params) → status duration | input | output
-    #   "summary" — name: output_snippet duration  (DEFAULT)
-    #   "result"  — just the return value as JSON
-    #   "silent"  — not shown at all
+    # While a function is still running, its expose is ignored: callers see
+    # the full in-progress state. expose only gates post-completion visibility.
     #
-    # This is a DEFAULT hint. Callers can override it:
-    #   ctx.summarize(level="detail")  ← forces all nodes to render as "detail"
-
-    compress: bool = False
-    # When True: after this function completes, summarize() renders only
-    # this node's own result — its children are NOT expanded.
+    # Example:
+    #   navigate() calls observe/act/verify. navigate.expose="io" (default) →
+    #   after navigate returns, siblings see "navigate: {success: true}",
+    #   not the 10 sub-steps. navigate.expose="full" → the whole subtree
+    #   is visible.
+    #
+    # The children are ALWAYS recorded in the tree; expose only affects how
+    # render_context() picks nodes into the LLM prompt. tree() and save()
+    # always show the complete structure.
 
     source_file: str = ""
     # Absolute path to the source file where this function is defined.
     # Set automatically by @agentic_function. Used by the visualizer
     # to show source code even after server restart (when modules aren't loaded).
-    #
-    # Use for high-level orchestrating functions. Example:
-    #   navigate(compress=True) has children observe, act, verify.
-    #   After navigate finishes, others see "navigate: {success: true}"
-    #   without the 10 sub-steps inside.
-    #
-    # The children are still fully recorded in the tree — compress only
-    # affects how summarize() renders this node. tree() and save() always
-    # show the complete structure.
 
     # --- LLM call record ---
     raw_reply: str = None            # LLM response text. For function nodes: latest
@@ -162,15 +156,17 @@ class Context:
     # or any descendant that doesn't have its own handler.
     # Signature: fn(question: str) -> str
 
-    # --- Internal: decorator config ---
-    _summarize_kwargs: Optional[dict] = field(default=None, repr=False)
-    # The `summarize` dict from @agentic_function(summarize={...}).
-    # runtime.exec() uses this: ctx.summarize(**ctx._summarize_kwargs)
-    # If None, runtime.exec() calls ctx.summarize() with defaults (see all).
+    # --- Incoming context scope (set via @agentic_function decorator) ---
+    render_range: Optional[dict] = field(default=None, repr=False)
+    # Scope config for this node's render_context() calls. Forwarded as
+    # kwargs: exec_ctx.render_context(**parent_ctx.render_range).
+    # Keys: depth, siblings, include, exclude, branch, max_tokens
+    # (see render_context() docstring for each parameter's semantics).
+    # If None, runtime.exec() calls render_context() with defaults.
 
     # --- Optional: user-provided render function ---
     summary_fn: Optional[Callable] = field(default=None, repr=False)
-    # If set, _render() calls this instead of the built-in formatting.
+    # If set, _render_traceback() calls this instead of the built-in formatting.
     # Signature: fn(ctx: Context) -> str
 
     # ==================================================================
@@ -287,35 +283,40 @@ class Context:
         return 0.0
 
     # ==================================================================
-    # SUMMARIZE — query the tree for LLM context
+    # RENDER CONTEXT — query the tree for LLM context
     # ==================================================================
 
-    def summarize(
+    def render_context(
         self,
         depth: int = -1,
         siblings: int = -1,
         prompted_functions: Optional[set] = None,
-        level: Optional[str] = None,
         include: Optional[list] = None,
         exclude: Optional[list] = None,
         branch: Optional[list] = None,
         max_tokens: Optional[int] = None,
     ) -> str:
         """
-        Read from the Context tree and produce a text string for LLM input.
+        Walk the Context tree and produce a text prompt for the LLM.
 
         This is the ONLY way Context data flows into LLM calls.
-        runtime.exec() calls this automatically using the decorator's config.
+        runtime.exec() calls this automatically using each node's render_range.
 
-        Default behavior (all defaults):
-            - Shows ALL ancestors (root → parent chain)
-            - Shows ALL same-level siblings that completed before this node
-            - Does NOT show siblings' children (each sibling is one line)
-            - Does NOT show the current node itself
+        Every visible node is rendered according to its own `expose` field:
+            "io"     — one line showing name + return value; subtree hidden
+            "full"   — docstring + params + output + LLM reply; subtree expandable
+            "hidden" — skipped entirely
+        While a node is `running`, its expose is ignored and it's rendered full.
 
-        This default guarantees maximum prompt cache hit rate: every call
-        sees the previous call's context as a prefix, plus new content
-        appended at the end.
+        Default scope (all parameters at their defaults):
+            - ALL ancestors (root → parent chain)
+            - ALL same-level siblings that completed before this node
+            - Siblings' subtrees are only shown when sibling.expose == "full"
+              AND the sibling name is in `branch` (opt-in)
+            - The current node itself is not rendered
+
+        This guarantees maximum prompt-cache hit rate: every call sees the
+        previous call's context as a prefix, plus new content appended.
 
         Args:
             depth:      How many ancestor levels to show.
@@ -325,21 +326,15 @@ class Context:
                         -1 = all (default), 0 = none, N = last N siblings.
                         When N is set, keeps the N most recent (closest to current).
 
-            level:      Override render level for ALL nodes in the output.
-                        If None, each node uses its own `render` setting.
-                        Values: "trace" / "detail" / "summary" / "result" / "silent"
-
             include:    Path whitelist. Only show nodes whose path matches.
                         Supports * wildcard: "root/navigate_0/*" matches all children.
 
             exclude:    Path blacklist. Hide nodes whose path matches.
                         Supports * wildcard.
 
-            branch:     List of node names whose children should be expanded.
-                        By default, siblings are shown as one line (no children).
-                        branch=["observe"] would expand observe nodes to show
-                        their run_ocr/detect_all children.
-                        Respects compress: compressed nodes are NOT expanded.
+            branch:     List of node names whose subtrees should be expanded.
+                        Only meaningful for siblings with expose="full"
+                        (an "io" sibling refuses expansion regardless of branch).
 
             max_tokens: Approximate token budget for sibling context. When exceeded,
                         drops the oldest siblings first. The current call block is
@@ -350,13 +345,12 @@ class Context:
             Empty string if nothing to show.
 
         Examples:
-            ctx.summarize()                              # see everything (default)
-            ctx.summarize(depth=1, siblings=3)           # parent + last 3 siblings
-            ctx.summarize(depth=0, siblings=0)           # nothing (isolated mode)
-            ctx.summarize(level="detail")                # force all nodes to detail
-            ctx.summarize(include=["root/navigate_0/*"]) # only navigate's children
-            ctx.summarize(branch=["observe"])             # expand observe's children
-            ctx.summarize(max_tokens=1000)               # with token budget
+            ctx.render_context()                              # see everything (default)
+            ctx.render_context(depth=1, siblings=3)           # parent + last 3 siblings
+            ctx.render_context(depth=0, siblings=0)           # isolated (nothing visible)
+            ctx.render_context(include=["root/navigate_0/*"]) # only navigate's children
+            ctx.render_context(branch=["observe"])            # expand observe's children
+            ctx.render_context(max_tokens=1000)               # with token budget
         """
         lines = []
         # Track which functions have had their docstrings shown
@@ -384,9 +378,13 @@ class Context:
             for a in reversed(ancestors):
                 if not _node_allowed(a, include, exclude):
                     continue
-                ancestor_level = level
+                # Ancestors on the call chain are always shown "full" —
+                # the current call needs its own ancestor context to be
+                # legible. If we've already shown this function's
+                # docstring earlier in the session, collapse to "io".
+                ancestor_level = "full"
                 if a.name in prompted_functions:
-                    ancestor_level = "result"
+                    ancestor_level = "io"
                 else:
                     # Exec nodes don't mark their direct parent as prompted,
                     # because each exec is an independent LLM call that needs
@@ -409,8 +407,8 @@ class Context:
                             continue
                         if not _node_allowed(child, include, exclude):
                             continue
-                        child_level = level or child.render
-                        if child_level != "silent":
+                        child_level = child.expose
+                        if child_level != "hidden":
                             lines.append(child._render_traceback(child_indent, child_level))
 
         # --- Siblings: previous same-level nodes ---
@@ -426,21 +424,22 @@ class Context:
                 if not _node_allowed(c, include, exclude):
                     continue
 
-                render_level = level or c.render
-                if render_level == "silent":
+                render_level = c.expose
+                if render_level == "hidden":
                     continue
 
-                # Same function called in a loop: skip docstring, show only result
-                if c.name == self.name and render_level != "result":
-                    render_level = "result"
+                # Same function called in a loop: skip docstring, show only I/O
+                if c.name == self.name:
+                    render_level = "io"
 
                 rendered = c._render_traceback(sibling_indent, render_level)
 
-                if branch and c.name in branch:
-                    if not (c.compress and c.status != "running"):
-                        rendered += "\n" + c._render_branch_traceback(
-                            render_level, c._depth() + 1, include, exclude,
-                        )
+                # Only "full" siblings can expand their subtree, and only
+                # when the caller explicitly opts in via branch=[...].
+                if branch and c.name in branch and render_level == "full":
+                    rendered += "\n" + c._render_branch_traceback(
+                        c._depth() + 1, include, exclude,
+                    )
 
                 sibling_parts.append(rendered)
 
@@ -467,29 +466,28 @@ class Context:
     # RENDERING — format a single node as text
     # ==================================================================
 
-    def _render_traceback(self, indent: str, level: str) -> str:
-        """
-        Render this node in traceback format.
+    def _render_traceback(self, indent: str, expose: str) -> str:
+        """Render this node in traceback format.
 
-        Level controls how much detail:
-          - "summary" (default): name, docstring, params, output, status, duration
-          - "detail": summary + LLM raw_reply
-          - "result": name + return value only
-          - "silent": empty string
+        expose:
+          - "hidden": empty string (caller should skip before reaching here)
+          - "io":     compact — name + return value (for function nodes),
+                     → content / ← reply (for exec nodes)
+          - "full":   verbose — adds docstring, params, status, attempts, LLM reply
         """
         if self.summary_fn:
             return self.summary_fn(self)
 
-        if level == "silent":
+        if expose == "hidden":
             return ""
 
         # --- Exec nodes: compact → content / ← reply format ---
         if self.node_type == "exec":
             content = self.params.get("_content", "")
             reply = self.raw_reply or ""
-            if level == "result":
+            if expose == "io":
                 return f"{indent}→ {content[:200]}\n{indent}← {reply[:300]}"
-            # summary / detail: show more
+            # "full": show more
             lines = [f"{indent}→ {content[:500]}"]
             if reply:
                 lines.append(f"{indent}← {reply[:500]}")
@@ -497,71 +495,69 @@ class Context:
                 lines.append(f"{indent}  Error: {self.error}")
             return "\n".join(lines)
 
-        # --- Function nodes: standard rendering ---
+        # --- Function nodes ---
         dur = f", {self.duration_ms:.0f}ms" if self.end_time else ""
         lines = [f"{indent}- {self._call_path()}({_fmt_params(self.params)})"]
 
-        if level == "result":
+        if expose == "io":
             if self.output is not None:
                 lines.append(f"{indent}    return {_json(self.output, 200)}")
+            # Errors and failed attempts always surface, even in "io" mode —
+            # callers need to know if a sibling had retries or ultimately errored.
+            if self.error:
+                lines.append(f"{indent}    Error: {self.error}")
+            io_failed = [a for a in self.attempts if a.get("error")]
+            for child in self.children:
+                if child.node_type == "exec":
+                    io_failed.extend(a for a in child.attempts if a.get("error"))
+            for a in io_failed:
+                lines.append(f"{indent}    [Attempt {a['attempt']} FAILED] {a['error']}")
             return "\n".join(lines)
 
-        # docstring as annotation (not "Purpose:")
+        # "full"
         if self.prompt:
             lines.append(f'{indent}    """{self.prompt}"""')
-
         if self.output is not None:
             lines.append(f"{indent}    return {_json(self.output, 300)}")
         if self.error:
             lines.append(f"{indent}    Error: {self.error}")
 
-        # Show failed attempts (own + exec children's)
         failed_attempts = [a for a in self.attempts if a.get("error")]
         for child in self.children:
             if child.node_type == "exec":
                 failed_attempts.extend(a for a in child.attempts if a.get("error"))
-        if failed_attempts:
-            for a in failed_attempts:
-                lines.append(f"{indent}    [Attempt {a['attempt']} FAILED] {a['error']}")
-                if a.get("reply"):
-                    lines.append(f"{indent}      Reply was: {str(a['reply'])[:200]}")
+        for a in failed_attempts:
+            lines.append(f"{indent}    [Attempt {a['attempt']} FAILED] {a['error']}")
+            if a.get("reply"):
+                lines.append(f"{indent}      Reply was: {str(a['reply'])[:200]}")
 
         lines.append(f"{indent}    Status: {self.status}{dur}")
 
-        # detail adds LLM interaction
-        if level == "detail" and self.raw_reply is not None:
+        if self.raw_reply is not None:
             lines.append(f"{indent}    LLM reply: {self.raw_reply[:500]}")
 
         return "\n".join(lines)
 
     def _render_branch_traceback(
-        self, level: Optional[str], depth: int = 1,
+        self, depth: int = 1,
         include: Optional[list] = None, exclude: Optional[list] = None,
     ) -> str:
-        """Render children recursively in traceback format."""
+        """Render children recursively. Each child's expose controls its own
+        visibility; the subtree below a child is only expanded when the child
+        is in "full" mode."""
         lines = []
         for c in self.children:
             if not _node_allowed(c, include, exclude):
                 continue
-            render_level = level or c.render
-            if render_level != "silent":
-                indent = "    " * depth
-                lines.append(c._render_traceback(indent, render_level))
-                if c.children and not (c.compress and c.status != "running"):
-                    lines.append(c._render_branch_traceback(render_level, depth + 1, include, exclude))
+            # Running children: force "full" so the in-progress work is visible.
+            child_expose = "full" if c.status == "running" else c.expose
+            if child_expose == "hidden":
+                continue
+            indent = "    " * depth
+            lines.append(c._render_traceback(indent, child_expose))
+            if c.children and child_expose == "full":
+                lines.append(c._render_branch_traceback(depth + 1, include, exclude))
         return "\n".join(lines)
-
-    # --- Legacy _render for tree()/traceback() compatibility ---
-    def _render(self, level: str) -> str:
-        """Legacy render for backward compat. Delegates to _render_traceback."""
-        return self._render_traceback("", level)
-
-    def _render_branch(
-        self, level: Optional[str], indent: int = 1,
-        include: Optional[list] = None, exclude: Optional[list] = None,
-    ) -> str:
-        """Legacy branch render for backward compat."""
-        return self._render_branch_traceback(level, indent, include, exclude)
 
     # ==================================================================
     # TREE INSPECTION — human-readable views

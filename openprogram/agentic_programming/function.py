@@ -6,7 +6,7 @@ Usage is identical to a decorator function:
     @agentic_function
     def observe(task): ...
 
-    @agentic_function(render="detail", summarize={"depth": 1}, compress=True)
+    @agentic_function(expose="full", render_range={"depth": 1})
     def navigate(target): ...
 
 Internally it's a class (like torch.no_grad), but users interact with it
@@ -144,39 +144,31 @@ class agentic_function:
     value (or error) and timing.
 
     Args:
-        render:     How others see my results via summarize().
+        expose:     What outside observers see of me after I complete. [DEFAULT: "io"]
 
-                    "summary" — name, docstring, params, output, status, duration (DEFAULT)
-                    "detail"  — summary + LLM raw_reply
-                    "result"  — name + return value only
-                    "silent"  — not shown
+                    "io"     — only name + return value (subtree hidden)
+                    "full"   — docstring + params + output + LLM reply + subtree
+                    "hidden" — not shown at all
 
-                    This is a default. Callers can override per-query:
-                    ctx.summarize(level="detail") overrides all nodes' render.
+                    While I'm still running, expose is ignored and I'm rendered
+                    in full. The children are always recorded in the tree; expose
+                    only affects how render_context() picks nodes into the LLM
+                    prompt. tree() and save() always show the complete structure.
 
-        summarize:  What context I see when runtime.exec() auto-injects context.
+        render_range: What slice of the tree I bring into my own LLM calls.
 
-                    Dict of keyword arguments passed to ctx.summarize().
+                    Dict of keyword arguments passed to ctx.render_context() when
+                    runtime.exec() auto-injects context for this function.
                     Example: {"depth": 1, "siblings": 3}
 
-                    If None (default), runtime.exec() calls ctx.summarize()
-                    with no arguments → all ancestors + all siblings.
+                    If None (default), runtime.exec() calls render_context() with
+                    no arguments → all ancestors + all siblings (respecting each
+                    ancestor/sibling's own expose).
 
                     Common patterns:
                       {"depth": 0, "siblings": 0}    — isolated, see nothing
                       {"depth": 1, "siblings": 1}    — parent + last sibling
                       {"siblings": 3}                 — all ancestors + last 3
-
-        compress:   After this function completes, hide children from summarize().
-
-                    When True, other functions calling summarize() see only this
-                    node's own rendered result — the children (sub-calls) are NOT
-                    expanded, even if branch= is used.
-
-                    The children are still fully recorded in the tree. tree() and
-                    save() always show everything. compress only affects summarize().
-
-                    Default: False.
 
         input:      UI metadata for function parameters (used by the visualizer
                     to render structured input forms).
@@ -210,16 +202,16 @@ class agentic_function:
         self,
         fn: Optional[Callable] = None,
         *,
-        render: str = "summary",
-        summarize: Optional[dict] = None,
-        compress: bool = False,
+        expose: str = "io",
+        render_range: Optional[dict] = None,
         input: Optional[dict] = None,
         no_tools: bool = False,
         system: Optional[str] = None,
     ):
-        self.render = render
-        self.summarize_kwargs = summarize
-        self.compress = compress
+        if expose not in ("io", "full", "hidden"):
+            raise ValueError(f"expose must be 'io', 'full', or 'hidden', got {expose!r}")
+        self.expose = expose
+        self.render_range = render_range
         self.input_meta = input or {}
         self.no_tools = no_tools
         self.system = system
@@ -266,9 +258,8 @@ class agentic_function:
 
     def _make_async_wrapper(self, fn: Callable, sig: inspect.Signature) -> Callable:
         self_ref = self
-        render = self.render
-        compress = self.compress
-        summarize = self.summarize_kwargs
+        expose = self.expose
+        render_range = self.render_range
         system = self.system
 
         @functools.wraps(fn)
@@ -287,10 +278,9 @@ class agentic_function:
                 system=system or "",
                 params={},
                 parent=parent,
-                render=render,
-                compress=compress,
+                expose=expose,
+                render_range=render_range,
                 start_time=time.time(),
-                _summarize_kwargs=summarize,
             )
             if parent is not None:
                 parent.children.append(ctx)
@@ -340,9 +330,8 @@ class agentic_function:
 
     def _make_sync_wrapper(self, fn: Callable, sig: inspect.Signature) -> Callable:
         self_ref = self
-        render = self.render
-        compress = self.compress
-        summarize = self.summarize_kwargs
+        expose = self.expose
+        render_range = self.render_range
         system = self.system
 
         @functools.wraps(fn)
@@ -362,10 +351,9 @@ class agentic_function:
                 system=system or "",
                 params={},
                 parent=parent,
-                render=render,
-                compress=compress,
+                expose=expose,
+                render_range=render_range,
                 start_time=time.time(),
-                _summarize_kwargs=summarize,
             )
             if parent is not None:
                 parent.children.append(ctx)

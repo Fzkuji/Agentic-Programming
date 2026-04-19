@@ -89,7 +89,7 @@ LEVELS = {
 # Inner functions
 # ---------------------------------------------------------------------------
 
-@agentic_function(compress=True, summarize={"depth": 0, "siblings": 0})
+@agentic_function(render_range={"depth": 0, "siblings": 0})
 def _clarify(task: str, level: str, runtime: Runtime) -> dict:
     """Clarify a complex, autonomous task before execution.
 
@@ -136,7 +136,7 @@ def _clarify(task: str, level: str, runtime: Runtime) -> dict:
         }
 
 
-@agentic_function(compress=True, summarize={"siblings": -1})
+@agentic_function(render_range={"siblings": -1})
 def _step(task: str, standard: str, step_number: int,
           feedback: Optional[str], runtime: Runtime) -> dict:
     """Autonomously advance one step toward a complex, high-standard task.
@@ -196,7 +196,7 @@ def _step(task: str, standard: str, step_number: int,
         }
 
 
-@agentic_function(compress=True, summarize={"depth": 0, "siblings": 0})
+@agentic_function(render_range={"depth": 0, "siblings": 0})
 def _evaluate(task: str, standard: str, work_summary: str,
               runtime: Runtime) -> dict:
     """Evaluate work quality. Return JSON with passed/score/verdict."""

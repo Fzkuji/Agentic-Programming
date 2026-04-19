@@ -27,7 +27,7 @@ from openprogram.programs.functions.buildin._utils import parse_json
 _MISSING_RUNTIME = object()
 
 
-@agentic_function(compress=True, summarize={"depth": 0, "siblings": 0}, input={
+@agentic_function(render_range={"depth": 0, "siblings": 0}, input={
     "action": {"description": "What just happened", "placeholder": "e.g. started model training on 10k samples"},
     "runtime": {"hidden": True},
 })

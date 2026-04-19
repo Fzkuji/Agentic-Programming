@@ -36,8 +36,7 @@ def to_dict(ctx: "Context") -> dict:
         "attempts": ctx.attempts,
         "error": ctx.error,
         "status": ctx.status,
-        "render": ctx.render,
-        "compress": ctx.compress,
+        "expose": ctx.expose,
         "source_file": ctx.source_file,
         "start_time": ctx.start_time,
         "end_time": ctx.end_time,
@@ -54,8 +53,7 @@ def from_dict(data: dict, parent: Optional["Context"] = None) -> "Context":
         prompt=data.get("prompt", ""),
         params=data.get("params"),
         parent=parent,
-        render=data.get("render", "summary"),
-        compress=data.get("compress", False),
+        expose=data.get("expose", "io"),
         start_time=data.get("start_time"),
         node_type=data.get("node_type", "function"),
     )
@@ -95,8 +93,7 @@ def to_event_records(ctx: "Context") -> list[dict]:
         "params": {k: (getattr(v, '__name__', None) or str(v)) if callable(v) else v
                    for k, v in (ctx.params or {}).items()
                    if k not in ("runtime", "callback")} if ctx.params else {},
-        "render": ctx.render,
-        "compress": ctx.compress,
+        "expose": ctx.expose,
         "ts": ctx.start_time,
     }
     records = [enter]
@@ -183,8 +180,7 @@ def from_jsonl(path: str | os.PathLike[str]) -> "Context":
                 prompt=record.get("prompt", ""),
                 params=record.get("params") or {},
                 parent=parent,
-                render=record.get("render", "summary"),
-                compress=record.get("compress", False),
+                expose=record.get("expose", "io"),
                 start_time=record.get("ts", 0.0),
                 node_type=record.get("node_type", "function"),
             )

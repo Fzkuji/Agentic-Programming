@@ -36,76 +36,76 @@ class TestRenderSummary:
     """render='summary' — name, docstring, params, output, status, duration."""
 
     def test_contains_function_name(self):
-        @agentic_function(render="summary")
+        @agentic_function(expose="full")
         def my_task(x):
             """Do something."""
             return f"result_{x}"
 
         my_task(x=42)
         ctx = my_task.context
-        rendered = ctx._render_traceback("", "summary")
+        rendered = ctx._render_traceback("", "full")
         assert "my_task" in rendered
 
     def test_contains_docstring(self):
-        @agentic_function(render="summary")
+        @agentic_function(expose="full")
         def documented(x):
             """This is the prompt."""
             return "done"
 
         documented(x=1)
-        rendered = documented.context._render_traceback("", "summary")
+        rendered = documented.context._render_traceback("", "full")
         assert "This is the prompt." in rendered
 
     def test_contains_params(self):
-        @agentic_function(render="summary")
+        @agentic_function(expose="full")
         def parameterized(name, count=3):
             """Task."""
             return "done"
 
         parameterized(name="test", count=5)
-        rendered = parameterized.context._render_traceback("", "summary")
+        rendered = parameterized.context._render_traceback("", "full")
         assert "name=" in rendered
         assert "count=" in rendered
 
     def test_contains_output(self):
-        @agentic_function(render="summary")
+        @agentic_function(expose="full")
         def with_output():
             """Task."""
             return {"success": True}
 
         with_output()
-        rendered = with_output.context._render_traceback("", "summary")
+        rendered = with_output.context._render_traceback("", "full")
         assert "success" in rendered
 
     def test_contains_status(self):
-        @agentic_function(render="summary")
+        @agentic_function(expose="full")
         def status_fn():
             """Task."""
             return "ok"
 
         status_fn()
-        rendered = status_fn.context._render_traceback("", "summary")
+        rendered = status_fn.context._render_traceback("", "full")
         assert "Status: success" in rendered
 
     def test_contains_duration(self):
-        @agentic_function(render="summary")
+        @agentic_function(expose="full")
         def timed_fn():
             """Task."""
             return "ok"
 
         timed_fn()
-        rendered = timed_fn.context._render_traceback("", "summary")
+        rendered = timed_fn.context._render_traceback("", "full")
         assert "ms" in rendered
 
-    def test_no_raw_reply(self):
-        """Summary level should NOT include LLM raw_reply."""
-        @agentic_function(render="summary")
+    def test_io_excludes_raw_reply(self):
+        """expose='io' should NOT include LLM raw_reply (just return value)."""
+        @agentic_function(expose="io")
         def llm_fn():
             """Task."""
             return runtime.exec(content=[{"type": "text", "text": "hello"}])
 
         llm_fn()
-        rendered = llm_fn.context._render_traceback("", "summary")
+        rendered = llm_fn.context._render_traceback("", "io")
         assert "LLM reply:" not in rendered
 
 
@@ -113,25 +113,25 @@ class TestRenderDetail:
     """render='detail' — summary + LLM raw_reply."""
 
     def test_includes_summary_content(self):
-        @agentic_function(render="detail")
+        @agentic_function(expose="full")
         def detail_fn():
             """Detailed task."""
             return runtime.exec(content=[{"type": "text", "text": "analyze this"}])
 
         detail_fn()
-        rendered = detail_fn.context._render_traceback("", "detail")
+        rendered = detail_fn.context._render_traceback("", "full")
         assert "detail_fn" in rendered
         assert "Detailed task." in rendered
         assert "Status:" in rendered
 
     def test_includes_raw_reply(self):
-        @agentic_function(render="detail")
+        @agentic_function(expose="full")
         def detail_fn():
             """Task."""
             return runtime.exec(content=[{"type": "text", "text": "my_prompt"}])
 
         detail_fn()
-        rendered = detail_fn.context._render_traceback("", "detail")
+        rendered = detail_fn.context._render_traceback("", "full")
         assert "LLM reply:" in rendered
         assert "my_prompt" in rendered
 
@@ -140,44 +140,44 @@ class TestRenderResult:
     """render='result' — name + return value only."""
 
     def test_contains_name_and_value(self):
-        @agentic_function(render="result")
+        @agentic_function(expose="io")
         def result_fn(x):
             """Task."""
             return {"value": x * 2}
 
         result_fn(x=5)
-        rendered = result_fn.context._render_traceback("", "result")
+        rendered = result_fn.context._render_traceback("", "io")
         assert "result_fn" in rendered
         assert "10" in rendered
 
     def test_no_docstring(self):
-        @agentic_function(render="result")
+        @agentic_function(expose="io")
         def result_fn():
             """This should not appear."""
             return "ok"
 
         result_fn()
-        rendered = result_fn.context._render_traceback("", "result")
+        rendered = result_fn.context._render_traceback("", "io")
         assert "This should not appear" not in rendered
 
     def test_no_status(self):
-        @agentic_function(render="result")
+        @agentic_function(expose="io")
         def result_fn():
             """Task."""
             return "ok"
 
         result_fn()
-        rendered = result_fn.context._render_traceback("", "result")
+        rendered = result_fn.context._render_traceback("", "io")
         assert "Status:" not in rendered
 
     def test_none_output_minimal(self):
-        @agentic_function(render="result")
+        @agentic_function(expose="io")
         def none_fn():
             """Task."""
             return None
 
         none_fn()
-        rendered = none_fn.context._render_traceback("", "result")
+        rendered = none_fn.context._render_traceback("", "io")
         assert "none_fn" in rendered
         assert "return" not in rendered  # None output → no return line
 
@@ -186,13 +186,13 @@ class TestRenderSilent:
     """render='silent' — not shown at all."""
 
     def test_returns_empty_string(self):
-        @agentic_function(render="silent")
+        @agentic_function(expose="hidden")
         def silent_fn():
             """Hidden task."""
             return "secret"
 
         silent_fn()
-        rendered = silent_fn.context._render_traceback("", "silent")
+        rendered = silent_fn.context._render_traceback("", "hidden")
         assert rendered == ""
 
     def test_silent_excluded_from_summarize(self):
@@ -203,7 +203,7 @@ class TestRenderSilent:
             hidden()
             return visible()
 
-        @agentic_function(render="silent")
+        @agentic_function(expose="hidden")
         def hidden():
             return "secret"
 
@@ -216,40 +216,17 @@ class TestRenderSilent:
         root = parent.context
         # visible's summarize context should NOT contain "hidden"
         visible_ctx = root.children[1]
-        summary = visible_ctx.summarize()
+        summary = visible_ctx.render_context()
         assert "hidden" not in summary
         assert "parent" in summary
 
 
-class TestRenderLevelOverride:
-    """level= parameter in summarize() overrides per-node render settings."""
-
-    def test_force_detail_on_summary_nodes(self):
-        @agentic_function(render="summary")
-        def fn():
-            """Task."""
-            return runtime.exec(content=[{"type": "text", "text": "data"}])
-
-        fn()
-        # Force detail level
-        rendered = fn.context._render_traceback("", "detail")
-        assert "LLM reply:" in rendered
-
-    def test_force_result_on_detail_nodes(self):
-        @agentic_function(render="detail")
-        def fn():
-            """Task."""
-            return "value123"
-
-        fn()
-        rendered = fn.context._render_traceback("", "result")
-        assert "value123" in rendered
-        assert "Status:" not in rendered
-        assert "Task." not in rendered
+# (TestRenderLevelOverride removed — the level= override parameter was
+#  dropped when the 5-level render field collapsed into expose's 3 levels.)
 
 
 # ══════════════════════════════════════════════════════════════
-# Summarize parameter combination tests
+# render_context parameter combination tests
 # ══════════════════════════════════════════════════════════════
 
 class TestSummarizeDepth:
@@ -278,14 +255,14 @@ class TestSummarizeDepth:
     def test_depth_all(self):
         root = self._build_tree()
         leaf = root.children[0].children[0]
-        summary = leaf.summarize(depth=-1)
+        summary = leaf.render_context(depth=-1)
         assert "root_fn" in summary
         assert "mid_fn" in summary
 
     def test_depth_0(self):
         root = self._build_tree()
         leaf = root.children[0].children[0]
-        summary = leaf.summarize(depth=0)
+        summary = leaf.render_context(depth=0)
         # depth=0 means no ancestor lines, but current call line still shows call path
         lines = summary.strip().split("\n")
         # No ancestor lines (lines starting with "- root_fn(" or "- mid_fn(")
@@ -296,7 +273,7 @@ class TestSummarizeDepth:
     def test_depth_1(self):
         root = self._build_tree()
         leaf = root.children[0].children[0]
-        summary = leaf.summarize(depth=1)
+        summary = leaf.render_context(depth=1)
         assert "mid_fn" in summary  # parent
         # root may or may not appear depending on depth=1 interpretation
         assert "Current Call" in summary
@@ -336,7 +313,7 @@ class TestSummarizeSiblings:
     def test_siblings_all(self):
         root = self._build_siblings()
         step_d = root.children[3]
-        summary = step_d.summarize(siblings=-1)
+        summary = step_d.render_context(siblings=-1)
         assert "step_a" in summary
         assert "step_b" in summary
         assert "step_c" in summary
@@ -344,7 +321,7 @@ class TestSummarizeSiblings:
     def test_siblings_0(self):
         root = self._build_siblings()
         step_d = root.children[3]
-        summary = step_d.summarize(siblings=0)
+        summary = step_d.render_context(siblings=0)
         assert "step_a" not in summary
         assert "step_b" not in summary
         assert "step_c" not in summary
@@ -352,7 +329,7 @@ class TestSummarizeSiblings:
     def test_siblings_1(self):
         root = self._build_siblings()
         step_d = root.children[3]
-        summary = step_d.summarize(siblings=1)
+        summary = step_d.render_context(siblings=1)
         assert "step_a" not in summary
         assert "step_b" not in summary
         assert "step_c" in summary  # only the last sibling
@@ -360,63 +337,13 @@ class TestSummarizeSiblings:
     def test_siblings_2(self):
         root = self._build_siblings()
         step_d = root.children[3]
-        summary = step_d.summarize(siblings=2)
+        summary = step_d.render_context(siblings=2)
         assert "step_a" not in summary
         assert "step_b" in summary
         assert "step_c" in summary
 
 
-class TestSummarizeLevel:
-    """level= overrides render for all nodes in output."""
-
-    def test_level_detail(self):
-        @agentic_function
-        def parent():
-            """Parent."""
-            child()
-            return checker()
-
-        @agentic_function
-        def child():
-            """Child."""
-            return runtime.exec(content=[{"type": "text", "text": "child_data"}])
-
-        @agentic_function
-        def checker():
-            """Check."""
-            return runtime.exec(content=[{"type": "text", "text": "check"}])
-
-        parent()
-        root = parent.context
-        checker_ctx = root.children[1]
-        summary = checker_ctx.summarize(level="detail")
-        # child should be rendered with detail level (including LLM reply)
-        assert "LLM reply:" in summary
-
-    def test_level_result(self):
-        @agentic_function
-        def parent():
-            """Parent."""
-            worker()
-            return final()
-
-        @agentic_function
-        def worker():
-            """Worker."""
-            return "worker_output"
-
-        @agentic_function
-        def final():
-            """Final."""
-            return runtime.exec(content=[{"type": "text", "text": "final"}])
-
-        parent()
-        root = parent.context
-        final_ctx = root.children[1]
-        summary = final_ctx.summarize(level="result")
-        assert "worker_output" in summary
-        # result level should not show docstrings
-        assert "Worker." not in summary
+# (TestSummarizeLevel removed — the level= override param was dropped.)
 
 
 class TestSummarizeIncludeExclude:
@@ -448,14 +375,14 @@ class TestSummarizeIncludeExclude:
     def test_exclude_by_name(self):
         root = self._build()
         verify_ctx = root.children[2]
-        summary = verify_ctx.summarize(exclude=["root/act_0"])
+        summary = verify_ctx.render_context(exclude=["root/act_0"])
         assert "observe" in summary
         assert "act" not in summary
 
     def test_include_wildcard(self):
         root = self._build()
         verify_ctx = root.children[2]
-        summary = verify_ctx.summarize(include=["root/observe_0", "root/*"])
+        summary = verify_ctx.render_context(include=["root/observe_0", "root/*"])
         assert "observe" in summary
 
 
@@ -469,7 +396,7 @@ class TestSummarizeBranch:
             complex_step()
             return simple_step()
 
-        @agentic_function
+        @agentic_function(expose="full")
         def complex_step():
             """Complex."""
             sub_a()
@@ -492,7 +419,7 @@ class TestSummarizeBranch:
         root()
         root_ctx = root.context
         simple_ctx = root_ctx.children[1]
-        summary = simple_ctx.summarize(branch=["complex_step"])
+        summary = simple_ctx.render_context(branch=["complex_step"])
         assert "sub_a" in summary
         assert "sub_b" in summary
 
@@ -521,7 +448,7 @@ class TestSummarizeBranch:
         root()
         root_ctx = root.context
         simple_ctx = root_ctx.children[1]
-        summary = simple_ctx.summarize()  # no branch
+        summary = simple_ctx.render_context()  # no branch
         assert "sub_a" not in summary
 
 
@@ -548,7 +475,7 @@ class TestSummarizeMaxTokens:
         root = parent.context
         final_ctx = root.children[10]
         # Very small token budget — should drop older siblings
-        summary = final_ctx.summarize(max_tokens=50)
+        summary = final_ctx.render_context(max_tokens=50)
         # Should still have Current Call
         assert "Current Call" in summary
         # Oldest siblings should be dropped
@@ -565,7 +492,7 @@ class TestSummarizeCompress:
             compressed_fn()
             return check_fn()
 
-        @agentic_function(compress=True)
+        @agentic_function()
         def compressed_fn():
             """Compressed."""
             hidden_child()
@@ -584,7 +511,7 @@ class TestSummarizeCompress:
         root_ctx = root.context
         check_ctx = root_ctx.children[1]
         # Even with branch, compressed children should not appear
-        summary = check_ctx.summarize(branch=["compressed_fn"])
+        summary = check_ctx.render_context(branch=["compressed_fn"])
         assert "hidden_child" not in summary
 
 
@@ -614,7 +541,7 @@ class TestSummarizeCombinations:
 
         root()
         ctx = root.context.children[2]
-        summary = ctx.summarize(depth=0, siblings=0)
+        summary = ctx.render_context(depth=0, siblings=0)
         assert "step1" not in summary
         assert "step2" not in summary
         # Note: "root" appears in the call path (root.step3) but not as an ancestor line
@@ -645,7 +572,7 @@ class TestSummarizeCombinations:
 
         root()
         ctx = root.context.children[2]
-        summary = ctx.summarize(depth=1, siblings=1)
+        summary = ctx.render_context(depth=1, siblings=1)
         assert "root" in summary   # parent (depth=1)
         assert "step1" not in summary  # only last 1 sibling
         assert "step2" in summary

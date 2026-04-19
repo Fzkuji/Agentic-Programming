@@ -13,13 +13,13 @@ Architecture:
     Each iteration:
         1. step() — LLM sees the goal + recent history, decides next action AND executes it
         2. Python records the result as a sibling in the context tree
-        3. Repeat — the next step() sees previous siblings via summarize()
+        3. Repeat — the next step() sees previous siblings via render_context()
 
     Context management:
         - Steps are siblings under a shared parent context
-        - summarize(siblings=N) gives a sliding window — recent steps in detail,
+        - render_range={"siblings": N} gives a sliding window — recent steps,
           older steps truncated automatically
-        - compress=True folds completed steps into one-line summaries
+        - expose="io" folds completed steps into one-line summaries (default)
         - State is persisted to disk for crash recovery
 
 Usage:
@@ -52,7 +52,7 @@ from openprogram.programs.functions.buildin.wait import wait
 # Inner agentic function — one step of the loop
 # ---------------------------------------------------------------------------
 
-@agentic_function(compress=True, summarize={"siblings": -1})
+@agentic_function(render_range={"siblings": -1})
 def _step(goal: str, step_number: int, runtime: Runtime) -> dict:
     """Autonomously advance one step toward a complex goal.
 

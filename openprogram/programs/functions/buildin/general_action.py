@@ -29,7 +29,7 @@ from openprogram.programs.functions.buildin._utils import parse_json
 _MISSING_RUNTIME = object()
 
 
-@agentic_function(summarize={"depth": 0, "siblings": 0}, input={
+@agentic_function(render_range={"depth": 0, "siblings": 0}, input={
     "instruction": {
         "description": "Task to complete",
         "placeholder": "e.g. Install numpy and verify it imports",

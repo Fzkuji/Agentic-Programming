@@ -133,15 +133,15 @@ def test_multiple_children():
     assert [c.output for c in root.children] == ["a", "b", "c"]
 
 
-def test_compress_flag():
-    """compress=True is stored on the Context node."""
-    @agentic_function(compress=True)
-    def compressed():
-        """Compressed function."""
+def test_expose_default_is_io():
+    """expose='io' is the default (subtree hidden from outside observers)."""
+    @agentic_function()
+    def fn():
+        """Default expose."""
         return "done"
 
-    compressed()
-    assert compressed.context.compress is True
+    fn()
+    assert fn.context.expose == "io"
 
 
 def test_docstring_as_prompt():
@@ -219,17 +219,17 @@ def test_input_meta_default_empty():
 
 
 def test_input_meta_with_other_params():
-    """input= works alongside render, summarize, compress."""
+    """input= works alongside expose / render_range."""
     @agentic_function(
-        render="detail",
-        compress=True,
+        expose="full",
+        render_range={"depth": 1},
         input={"task": {"description": "A task"}},
     )
     def combined(task: str):
         return task
 
-    assert combined.render == "detail"
-    assert combined.compress is True
+    assert combined.expose == "full"
+    assert combined.render_range == {"depth": 1}
     assert combined.input_meta == {"task": {"description": "A task"}}
 
 

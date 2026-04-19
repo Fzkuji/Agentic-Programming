@@ -35,7 +35,7 @@ _EDIT_GENERATION_SUFFIX = (
 # ---------------------------------------------------------------------------
 
 
-@agentic_function(compress=True, summarize={"siblings": -1})
+@agentic_function(render_range={"siblings": -1})
 def _edit_round(
     task: str,
     original_code: str,
@@ -100,7 +100,7 @@ def _edit_round(
         return {"status": "rejected", "feedback": reason}
 
 
-@agentic_function(summarize={"depth": 0, "siblings": 0})
+@agentic_function(render_range={"depth": 0, "siblings": 0})
 def verify_edit(
     original_code: str,
     edited_code: str,
@@ -155,7 +155,7 @@ def verify_edit(
     return {"approved": not rejected, "reasoning": reply[:300]}
 
 
-@agentic_function(summarize={"depth": 0, "siblings": 0})
+@agentic_function(render_range={"depth": 0, "siblings": 0})
 def conclude_edit(task: str, runtime: Runtime) -> str:
     """Summarize what was edited based on all the steps taken.
 

@@ -66,7 +66,7 @@ def test_summarize_depth_0():
     def outer():
         return inner()
 
-    @agentic_function(summarize={"depth": 0, "siblings": 0})
+    @agentic_function(render_range={"depth": 0, "siblings": 0})
     def inner():
         return runtime.exec(content=[{"type": "text", "text": "isolated"}])
 
@@ -78,7 +78,7 @@ def test_summarize_depth_0():
 
 def test_compress_hides_children():
     """compress=True hides children in summarize."""
-    @agentic_function(compress=True)
+    @agentic_function()
     def compressed():
         sub()
         return "compressed result"
@@ -166,11 +166,12 @@ def test_summarize_max_tokens_keeps_current_call_and_prefers_newer_siblings():
 
     outer()
 
-    trimmed = outer.context.children[-1].summarize(siblings=-1, max_tokens=20)
-    roomy = outer.context.children[-1].summarize(siblings=-1, max_tokens=40)
+    trimmed = outer.context.children[-1].render_context(siblings=-1, max_tokens=5)
+    roomy = outer.context.children[-1].render_context(siblings=-1, max_tokens=15)
 
     assert "Current Call" in trimmed
     assert "Current Call" in roomy
+    # Tight budget drops older sibling, keeps newer.
     assert "label='first'" not in roomy
     assert "label='second'" in roomy
 
@@ -335,7 +336,7 @@ def test_summarize_branch_uses_consistent_indentation():
     def leaf():
         return "leaf done"
 
-    @agentic_function
+    @agentic_function(expose="full")
     def branch_node():
         leaf()
         return "branch done"
@@ -350,7 +351,7 @@ def test_summarize_branch_uses_consistent_indentation():
         return "ready"
 
     outer()
-    summary = outer.context.children[1].summarize(branch=["branch_node"])
+    summary = outer.context.children[1].render_context(branch=["branch_node"])
 
     assert "    - outer.branch_node()" in summary
     assert "        - outer.branch_node.leaf()" in summary

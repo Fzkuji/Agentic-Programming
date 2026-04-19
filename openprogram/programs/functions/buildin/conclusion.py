@@ -18,7 +18,7 @@ from openprogram.agentic_programming.function import agentic_function
 from openprogram.agentic_programming.runtime import Runtime
 
 
-@agentic_function(compress=True, summarize={"siblings": -1}, input={
+@agentic_function(render_range={"siblings": -1}, input={
     "task": {"description": "The completed task", "placeholder": "e.g. Write a summary of the research findings"},
     "runtime": {"hidden": True},
 })

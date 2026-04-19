@@ -529,7 +529,7 @@ def _reply_looks_like_follow_up(reply: str) -> bool:
     )
 
 
-@agentic_function(summarize={"depth": 0, "siblings": 0})
+@agentic_function(render_range={"depth": 0, "siblings": 0})
 def clarify(task: str, runtime: Runtime) -> dict:
     """Review a task before code generation and decide whether to ask the user first.
 

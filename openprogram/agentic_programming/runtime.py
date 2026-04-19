@@ -5,7 +5,7 @@ Runtime is a class that wraps an LLM provider. You instantiate it once
 with your provider config, then call rt.exec() inside @agentic_functions.
 
 exec() automatically:
-    1. Reads the Context tree (via summarize) to build execution context
+    1. Reads the Context tree (via render_context) to build execution context
     2. Prepends context to your content as a text block
     3. Calls _call() (override this for your provider)
     4. Records the reply to the Context tree
@@ -131,7 +131,7 @@ class Runtime:
                               {"type": "file", "path": "data.csv"}
 
             context:          Override auto-generated context string.
-                              If None: exec node calls summarize() on itself.
+                              If None: exec node calls render_context() on itself.
 
             response_format:  Expected output format (JSON schema).
                               Passed to _call() for provider-native handling.
@@ -166,12 +166,12 @@ class Runtime:
                 params={"_content": content_text},
                 parent=parent_ctx,
                 start_time=_time.time(),
-                render="result",
+                expose="io",
             )
             parent_ctx.children.append(exec_ctx)
             _emit_event("node_created", exec_ctx)
 
-        # --- Context: exec node summarizes itself ---
+        # --- Context: exec node renders context from its own perspective ---
         if context is None and exec_ctx is not None:
             if self.has_session:
                 # Session providers manage their own context
@@ -179,10 +179,10 @@ class Runtime:
                     context = parent_ctx.prompt
                     self._prompted_functions.add(parent_ctx.name)
             else:
-                # Use parent's summarize config
-                kwargs = dict(parent_ctx._summarize_kwargs) if parent_ctx._summarize_kwargs else {}
+                # Use parent's render_range config
+                kwargs = dict(parent_ctx.render_range) if parent_ctx.render_range else {}
                 kwargs["prompted_functions"] = self._prompted_functions
-                context = exec_ctx.summarize(**kwargs)
+                context = exec_ctx.render_context(**kwargs)
 
         # --- Merge content into context ---
         full_content = _merge_content(context, content, exec_ctx)
@@ -269,21 +269,21 @@ class Runtime:
                 params={"_content": content_text},
                 parent=parent_ctx,
                 start_time=_time.time(),
-                render="result",
+                expose="io",
             )
             parent_ctx.children.append(exec_ctx)
             _emit_event("node_created", exec_ctx)
 
-        # --- Context: exec node summarizes itself ---
+        # --- Context: exec node renders context from its own perspective ---
         if context is None and exec_ctx is not None:
             if self.has_session:
                 if parent_ctx.prompt and parent_ctx.name not in self._prompted_functions:
                     context = parent_ctx.prompt
                     self._prompted_functions.add(parent_ctx.name)
             else:
-                kwargs = dict(parent_ctx._summarize_kwargs) if parent_ctx._summarize_kwargs else {}
+                kwargs = dict(parent_ctx.render_range) if parent_ctx.render_range else {}
                 kwargs["prompted_functions"] = self._prompted_functions
-                context = exec_ctx.summarize(**kwargs)
+                context = exec_ctx.render_context(**kwargs)
 
         # --- Merge content into context ---
         full_content = _merge_content(context, content, exec_ctx)
