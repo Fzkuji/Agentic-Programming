@@ -291,12 +291,14 @@ def _build_body(
         "model": model,
         "store": False,
         "stream": True,
+        # ChatGPT backend rejects bodies without `instructions` (HTTP 400
+        # "Instructions are required"). Send a minimal placeholder when the
+        # caller didn't supply a system prompt so the request still validates.
+        "instructions": instructions or "You are a helpful assistant.",
         "input": _convert_content_to_input(content),
         "tool_choice": "auto",
         "parallel_tool_calls": True,
     }
-    if instructions:
-        body["instructions"] = instructions
     if reasoning_effort:
         body["reasoning"] = {"effort": reasoning_effort, "summary": "auto"}
     if response_format:
