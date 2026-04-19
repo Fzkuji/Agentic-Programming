@@ -195,50 +195,70 @@ class _AuthState:
         return self._auth
 
     def resolve(self) -> _Credentials:
-        """Return the current credentials, refreshing the OAuth token if needed."""
+        """Return the current credentials, refreshing the OAuth token if needed.
+
+        Priority:
+          1. auth.json with auth_mode=chatgpt   → ChatGPT subscription (preferred
+             whenever available, since this is the whole point of this provider)
+          2. OPENAI_API_KEY env var              → OpenAI API billing
+          3. auth.json with auth_mode=apikey     → stored API key
+          4. error
+        """
         with self._lock:
-            # Prefer OPENAI_API_KEY env var if set — lets users override auth.json
+            auth: dict[str, Any] | None = None
+            try:
+                auth = self._load()
+            except RuntimeError:
+                auth = None  # allow env-var fallback even with no auth.json
+
+            # (1) ChatGPT subscription mode — always preferred.
+            # If OPENAI_API_KEY is in the env AND chatgpt auth is valid, we
+            # still use chatgpt. Otherwise the env var silently burns API
+            # credits instead of using the subscription we configured.
+            if auth and auth.get("auth_mode") == "chatgpt":
+                tokens = auth.get("tokens") or {}
+                access = tokens.get("access_token")
+                refresh = tokens.get("refresh_token")
+                if access and refresh:
+                    exp = _jwt_expiry_epoch(access)
+                    if exp is not None and exp - 60 < time.time():
+                        new_tokens = _refresh_oauth_token(refresh)
+                        access = new_tokens["access_token"]
+                        auth["tokens"]["access_token"] = access
+                        auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
+                        if "id_token" in new_tokens:
+                            auth["tokens"]["id_token"] = new_tokens["id_token"]
+                        _write_auth_json_atomic(auth)
+                        self._auth = auth
+                    account_id = tokens.get("account_id") or _extract_account_id(access)
+                    return _Credentials("chatgpt", access, account_id, CHATGPT_BACKEND_URL)
+
+            # (2) Env var API key
             env_key = os.environ.get("OPENAI_API_KEY", "").strip()
             if env_key:
                 return _Credentials("apikey", env_key, None, OPENAI_API_URL)
 
-            auth = self._load()
-            mode = auth.get("auth_mode")
-
-            if mode == "apikey":
+            # (3) Stored API key from auth.json
+            if auth and auth.get("auth_mode") == "apikey":
                 tokens = auth.get("tokens") or {}
                 api_key = (
                     tokens.get("api_key")
                     or auth.get("OPENAI_API_KEY")
                     or tokens.get("access_token")
                 )
-                if not api_key:
-                    raise RuntimeError("auth_mode=apikey but no key in auth.json")
-                return _Credentials("apikey", api_key, None, OPENAI_API_URL)
+                if api_key:
+                    return _Credentials("apikey", api_key, None, OPENAI_API_URL)
 
-            if mode == "chatgpt":
-                tokens = auth.get("tokens") or {}
-                access = tokens.get("access_token")
-                refresh = tokens.get("refresh_token")
-                if not access or not refresh:
-                    raise RuntimeError("auth_mode=chatgpt but tokens missing")
-
-                exp = _jwt_expiry_epoch(access)
-                if exp is not None and exp - 60 < time.time():
-                    # Refresh: access token expires in <60s
-                    new_tokens = _refresh_oauth_token(refresh)
-                    access = new_tokens["access_token"]
-                    auth["tokens"]["access_token"] = access
-                    auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
-                    if "id_token" in new_tokens:
-                        auth["tokens"]["id_token"] = new_tokens["id_token"]
-                    _write_auth_json_atomic(auth)
-                    self._auth = auth
-
-                account_id = tokens.get("account_id") or _extract_account_id(access)
-                return _Credentials("chatgpt", access, account_id, CHATGPT_BACKEND_URL)
-
-            raise RuntimeError(f"Unsupported auth_mode {mode!r} in {_auth_path()}")
+            # Nothing worked
+            if auth is None:
+                raise RuntimeError(
+                    f"{_auth_path()} not found and OPENAI_API_KEY not set. "
+                    "Run `codex login --device-auth` to use ChatGPT subscription."
+                )
+            raise RuntimeError(
+                f"Could not resolve credentials from {_auth_path()} "
+                f"(auth_mode={auth.get('auth_mode')!r})."
+            )
 
 
 # ----------------------------------------------------------------------------
