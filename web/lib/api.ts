@@ -1,0 +1,211 @@
+import type {
+  Provider,
+  Model,
+  Capability,
+  ProviderConfig,
+  TestResult,
+  KeyPreview,
+  AgenticFunction,
+  ProgramsMeta,
+  AddCredentialBody,
+  AuthProfile,
+  CredentialView,
+  DiscoveredCredential,
+  PoolView,
+} from "./types";
+
+interface RawModel {
+  id: string;
+  name: string;
+  vision?: boolean;
+  tools?: boolean;
+  reasoning?: boolean;
+  context_window?: number;
+  enabled?: boolean;
+  custom?: boolean;
+  provider?: string;
+}
+
+function mapModel(m: RawModel, provider: string): Model {
+  const caps: Capability[] = [];
+  if (m.vision) caps.push("vision");
+  if (m.tools) caps.push("tools");
+  if (m.reasoning) caps.push("reasoning");
+  if (m.context_window) caps.push("ctx");
+  return {
+    id: m.id,
+    name: m.name || m.id,
+    provider: m.provider || provider,
+    enabled: m.enabled ?? false,
+    capabilities: caps,
+    context: m.context_window,
+    custom: m.custom,
+  };
+}
+
+async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
+  const r = await fetch(url, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+  });
+  if (!r.ok) {
+    const text = await r.text().catch(() => "");
+    throw new Error(`HTTP ${r.status}: ${text.slice(0, 300)}`);
+  }
+  return r.json() as Promise<T>;
+}
+
+export const api = {
+  listProviders: () =>
+    jsonFetch<{ providers: Provider[] }>("/api/providers/list").then((d) => d.providers),
+
+  listModels: (provider: string) =>
+    jsonFetch<{ models: RawModel[] }>(`/api/providers/${provider}/models`).then((d) =>
+      d.models.map((m) => mapModel(m, provider))
+    ),
+
+  listEnabledModels: () =>
+    jsonFetch<{ models: RawModel[] }>("/api/models/enabled").then((d) =>
+      d.models.map((m) => mapModel(m, m.provider ?? ""))
+    ),
+
+  toggleProvider: (provider: string, enabled: boolean) =>
+    jsonFetch<{ ok: true }>(`/api/providers/${provider}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  toggleModel: (provider: string, model: string, enabled: boolean) =>
+    jsonFetch<{ ok: true }>(`/api/providers/${provider}/models/${encodeURIComponent(model)}/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ enabled }),
+    }),
+
+  getProviderConfig: (provider: string) =>
+    jsonFetch<ProviderConfig>(`/api/providers/${provider}/config`),
+
+  setProviderConfig: (provider: string, patch: Partial<ProviderConfig>) =>
+    jsonFetch<ProviderConfig>(`/api/providers/${provider}/config`, {
+      method: "POST",
+      body: JSON.stringify(patch),
+    }),
+
+  fetchRemoteModels: (provider: string) =>
+    jsonFetch<{ fetched: number; added: number; total_custom: number }>(
+      `/api/providers/${provider}/fetch-models`,
+      { method: "POST" }
+    ),
+
+  testProvider: (provider: string, model?: string) =>
+    jsonFetch<TestResult>(`/api/providers/${provider}/test`, {
+      method: "POST",
+      body: JSON.stringify({ model }),
+    }),
+
+  deleteModel: (provider: string, model: string) =>
+    jsonFetch<{ ok: true }>(`/api/providers/${provider}/models/${encodeURIComponent(model)}`, {
+      method: "DELETE",
+    }),
+
+  getKey: (envVar: string, reveal = false) =>
+    jsonFetch<KeyPreview>(`/api/config/key/${envVar}${reveal ? "?reveal=1" : ""}`),
+
+  listFunctions: () => jsonFetch<AgenticFunction[]>("/api/functions"),
+
+  getProgramsMeta: () => jsonFetch<ProgramsMeta>("/api/programs/meta"),
+
+  setProgramsMeta: (meta: ProgramsMeta) =>
+    jsonFetch<{ ok: true }>("/api/programs/meta", {
+      method: "POST",
+      body: JSON.stringify(meta),
+    }),
+
+  getFunctionSource: (name: string) =>
+    jsonFetch<{ name: string; source: string; filepath: string }>(
+      `/api/function/${encodeURIComponent(name)}/source`
+    ),
+
+  runFunction: (name: string, params: Record<string, unknown>) =>
+    jsonFetch<{ result: unknown; error?: string }>(
+      `/api/run/${encodeURIComponent(name)}`,
+      { method: "POST", body: JSON.stringify(params) }
+    ),
+
+  listHistory: () =>
+    jsonFetch<{ id: string; title: string; created_at?: number }[]>("/api/history"),
+
+  pause: (conv_id: string) =>
+    jsonFetch<{ ok: true }>("/api/pause", {
+      method: "POST",
+      body: JSON.stringify({ conv_id }),
+    }),
+
+  resume: (conv_id: string) =>
+    jsonFetch<{ ok: true }>("/api/resume", {
+      method: "POST",
+      body: JSON.stringify({ conv_id }),
+    }),
+
+  stop: (conv_id: string) =>
+    jsonFetch<{ ok: true }>("/api/stop", {
+      method: "POST",
+      body: JSON.stringify({ conv_id }),
+    }),
+
+  switchModel: (provider: string, model: string) =>
+    jsonFetch<{ ok: true }>("/api/model", {
+      method: "POST",
+      body: JSON.stringify({ provider, model }),
+    }),
+
+  getAgentSettings: () => jsonFetch<Record<string, unknown>>("/api/agent_settings"),
+
+  setAgentSettings: (patch: Record<string, unknown>) =>
+    jsonFetch<{ ok: true }>("/api/agent_settings", {
+      method: "POST",
+      body: JSON.stringify(patch),
+    }),
+
+  // ----- Auth v2 -----------------------------------------------------------
+
+  listAuthProfiles: () =>
+    jsonFetch<{ profiles: AuthProfile[]; default: string }>("/api/auth/profiles"),
+
+  createAuthProfile: (name: string, display_name = "", description = "") =>
+    jsonFetch<AuthProfile>("/api/auth/profiles", {
+      method: "POST",
+      body: JSON.stringify({ name, display_name, description }),
+    }),
+
+  deleteAuthProfile: (name: string) =>
+    jsonFetch<{ deleted: string }>(`/api/auth/profiles/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
+
+  listAuthPools: (profile?: string) => {
+    const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
+    return jsonFetch<{ pools: PoolView[] }>(`/api/auth/pools${qs}`);
+  },
+
+  getAuthPool: (provider: string, profile: string) =>
+    jsonFetch<PoolView>(
+      `/api/auth/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}`,
+    ),
+
+  addCredential: (provider: string, profile: string, body: AddCredentialBody) =>
+    jsonFetch<CredentialView>(
+      `/api/auth/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}/credentials`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+
+  removeCredential: (provider: string, profile: string, credentialId: string) =>
+    jsonFetch<{ removed: string }>(
+      `/api/auth/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}/credentials/${encodeURIComponent(credentialId)}`,
+      { method: "DELETE" },
+    ),
+
+  discoverCredentials: () =>
+    jsonFetch<{ discovered: DiscoveredCredential[] }>("/api/auth/discover", {
+      method: "POST",
+    }),
+};
