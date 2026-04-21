@@ -106,12 +106,18 @@ def main():
     p_viz.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
     p_viz.add_argument("--no-browser", action="store_true", help="Don't open browser")
 
-    # providers
-    sub.add_parser("providers", help="Show available LLM providers and detection status")
-
-    # auth — v2 credential management (login, logout, list, discover, profile)
-    from openprogram.auth.cli import build_parser as _build_auth_parser
-    _build_auth_parser(sub)
+    # providers — single plural noun namespace for every LLM-provider
+    # management verb. Per docs/design/cli-naming.md the shape is
+    # `openprogram providers <verb>` or `openprogram providers profiles
+    # <verb>` (exactly one verb per command; nested `auth` layer is
+    # intentionally absent).
+    p_providers = sub.add_parser(
+        "providers",
+        help="Manage LLM providers (login, list, status, ...)",
+    )
+    providers_sub = p_providers.add_subparsers(dest="providers_cmd", metavar="verb")
+    from openprogram.auth.cli import build_parser as _build_provider_verbs
+    _build_provider_verbs(providers_sub)
 
     # config — namespaced configuration commands (provider, ...)
     p_config = sub.add_parser("config", help="Configure OpenProgram (providers, models, ...)")
@@ -143,10 +149,14 @@ def main():
     elif args.command == "list":
         _cmd_list()
     elif args.command == "providers":
-        _cmd_providers()
-    elif args.command == "auth":
-        from openprogram.auth.cli import dispatch as _auth_dispatch
-        sys.exit(_auth_dispatch(args))
+        # Bare `providers` — show the old detection-status overview.
+        # Any verb gets dispatched through the credential-management
+        # handler (every verb is auth-adjacent at the moment).
+        if getattr(args, "providers_cmd", None) is None:
+            _cmd_providers()
+        else:
+            from openprogram.auth.cli import dispatch as _providers_dispatch
+            sys.exit(_providers_dispatch(args))
     elif args.command == "config":
         if args.config_target == "provider":
             _cmd_configure(args.name)

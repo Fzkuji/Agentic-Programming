@@ -1,28 +1,28 @@
 """Command-line entry points for auth v2.
 
-Wired into ``openprogram`` via ``openprogram auth <subcommand>``. The
+Wired into ``openprogram`` via ``openprogram providers <subcommand>``. The
 goal is feature parity with ``gh auth login`` / ``codex login`` — a
 single interactive wizard that handles every provider's setup without
 the user needing to know which auth kind it is.
 
 Subcommands:
 
-  * ``openprogram auth login <provider>`` — interactive wizard. Detects
+  * ``openprogram providers login <provider>`` — interactive wizard. Detects
     what's possible for the provider (paste key / device-code / import
     from another CLI) and drives the right flow.
-  * ``openprogram auth list`` — tabular view of pools per profile with
+  * ``openprogram providers list`` — tabular view of pools per profile with
     masked secret previews.
-  * ``openprogram auth discover`` — non-destructive scan of external
+  * ``openprogram providers discover`` — non-destructive scan of external
     sources. Shows what could be imported but doesn't commit.
-  * ``openprogram auth adopt`` — accept a previously-discovered
+  * ``openprogram providers adopt`` — accept a previously-discovered
     credential into the store. Usually follows ``discover``.
-  * ``openprogram auth logout <provider> [--profile P]`` — remove all
+  * ``openprogram providers logout <provider> [--profile P]`` — remove all
     credentials for the provider in the given profile and print any
     non-executable :class:`RemovalStep` so the user knows what they
     still need to clean up manually.
-  * ``openprogram auth profile {list,create,delete} [...]`` — profile
+  * ``openprogram providers profiles {list,create,delete} [...]`` — profile
     CRUD without requiring the WebUI.
-  * ``openprogram auth status <provider> [--profile P]`` — show the
+  * ``openprogram providers status <provider> [--profile P]`` — show the
     active credential for a provider and whether AuthManager would
     resolve it right now.
 
@@ -72,19 +72,22 @@ from .types import (
 # ---------------------------------------------------------------------------
 
 def build_parser(sub: "argparse._SubParsersAction") -> None:
-    """Attach the ``auth`` command tree onto an existing argparse parent.
+    """Register credential-management verbs directly on the parent.
+
+    Per docs/design/cli-naming.md, commands have the shape
+    ``<noun> [<noun> ...] <verb>``. This function is called with the
+    ``providers`` subparser as its parent, so the verbs land as
+    ``providers login``, ``providers list``, etc. ``profiles`` is the
+    only nested noun (`providers profiles list` / `create` / `delete`).
 
     Expected use from :func:`openprogram.cli.main`::
 
-        sub = parser.add_subparsers(...)
-        from openprogram.auth.cli import build_parser as build_auth
-        build_auth(sub)
+        p_providers = sub.add_parser("providers", ...)
+        providers_sub = p_providers.add_subparsers(dest="providers_cmd")
+        from openprogram.auth.cli import build_parser
+        build_parser(providers_sub)
     """
-    p = sub.add_parser(
-        "auth",
-        help="Manage credentials (login, logout, list, discover).",
-    )
-    auth_sub = p.add_subparsers(dest="auth_cmd", metavar="subcommand")
+    auth_sub = sub
 
     # login
     p_login = auth_sub.add_parser("login", help="Log into a provider")
@@ -124,9 +127,10 @@ def build_parser(sub: "argparse._SubParsersAction") -> None:
     p_status.add_argument("provider")
     p_status.add_argument("--profile", default=DEFAULT_PROFILE_NAME)
 
-    # profile
-    p_profile = auth_sub.add_parser("profile", help="Profile management")
-    prof_sub = p_profile.add_subparsers(dest="profile_cmd", metavar="action")
+    # profiles (plural noun, per CLI naming convention — see
+    # docs/design/cli-naming.md). Verbs follow: list/create/delete.
+    p_profiles = auth_sub.add_parser("profiles", help="Profile management")
+    prof_sub = p_profiles.add_subparsers(dest="profiles_cmd", metavar="verb")
     prof_sub.add_parser("list", help="List profiles")
     pc = prof_sub.add_parser("create", help="Create a profile")
     pc.add_argument("name")
@@ -138,11 +142,14 @@ def build_parser(sub: "argparse._SubParsersAction") -> None:
 
 
 def dispatch(args: argparse.Namespace) -> int:
-    """Run the selected auth subcommand.
+    """Run the selected credential-management verb.
 
-    Returns a shell-style exit code so the outer ``main()`` can
-    propagate it to ``sys.exit``."""
-    cmd = args.auth_cmd
+    Reads :attr:`providers_cmd` from the argparse namespace (the parent
+    subparser dest) rather than any private auth-scoped dest. Returns a
+    shell-style exit code so the outer ``main()`` can propagate to
+    ``sys.exit``.
+    """
+    cmd = args.providers_cmd
     if cmd == "login":
         return _cmd_login(args.provider, args.profile, args.method)
     if cmd == "list":
@@ -155,25 +162,25 @@ def dispatch(args: argparse.Namespace) -> int:
         return _cmd_logout(args.provider, args.profile, skip_confirm=args.yes)
     if cmd == "status":
         return _cmd_status(args.provider, args.profile)
-    if cmd == "profile":
-        return _dispatch_profile(args)
-    # No subcommand — print the auth help. We do it from here so the
-    # caller doesn't need to carry the parser object around.
-    print("Usage: openprogram auth <subcommand>\n"
-          "Subcommands: login, list, discover, adopt, logout, status, profile",
+    if cmd == "profiles":
+        return _dispatch_profiles(args)
+    # No subcommand — print the help hint.
+    print("Usage: openprogram providers <verb>\n"
+          "Verbs: login, logout, list, status, discover, adopt, profiles",
           file=sys.stderr)
     return 2
 
 
-def _dispatch_profile(args: argparse.Namespace) -> int:
-    pc = args.profile_cmd
+def _dispatch_profiles(args: argparse.Namespace) -> int:
+    pc = args.profiles_cmd
     if pc == "list":
         return _cmd_profile_list()
     if pc == "create":
         return _cmd_profile_create(args.name, args.display_name, args.description)
     if pc == "delete":
         return _cmd_profile_delete(args.name, args.yes)
-    print("Usage: openprogram auth profile {list,create,delete}", file=sys.stderr)
+    print("Usage: openprogram providers profiles <verb>\n"
+          "Verbs: list, create, delete", file=sys.stderr)
     return 2
 
 
@@ -400,8 +407,8 @@ def _cmd_list(profile_filter: Optional[str], as_json: bool) -> int:
 
     if not pools:
         print("No credential pools yet. Try:")
-        print("  openprogram auth discover        # scan for existing credentials")
-        print("  openprogram auth login <prov>    # add one manually")
+        print("  openprogram providers discover        # scan for existing credentials")
+        print("  openprogram providers login <prov>    # add one manually")
         return 0
 
     print(f"{'provider':28s}  {'profile':16s}  credential")
@@ -470,7 +477,7 @@ def _cmd_discover(as_json: bool) -> int:
             print(f"{f['source_id']:28s}  (error)                   {f['error']}")
             continue
         print(f"{f['source_id']:28s}  {f['provider']:24s}  {f['preview']}")
-    print("\nAdopt one with:  openprogram auth adopt <source_id>")
+    print("\nAdopt one with:  openprogram providers adopt <source_id>")
     return 0
 
 
@@ -486,7 +493,7 @@ def _cmd_adopt(source_id: str, profile: str) -> int:
     src = _source_by_id(source_id, profile)
     if src is None:
         print(f"Unknown source: {source_id!r}. "
-              f"Run `openprogram auth discover` to see available ids.",
+              f"Run `openprogram providers discover` to see available ids.",
               file=sys.stderr)
         return 1
 
@@ -599,7 +606,7 @@ def _cmd_status(provider: str, profile: str) -> int:
         except AuthConfigError as e:
             print(f"No credential configured for {provider}/{profile}.")
             print(f"  → {e}")
-            print(f"Try: openprogram auth login {provider} --profile {profile}")
+            print(f"Try: openprogram providers login {provider} --profile {profile}")
             return 1
         except AuthError as e:
             print(f"Credential exists but is not usable: {e}")

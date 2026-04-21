@@ -41,10 +41,18 @@ def isolated(tmp_path, monkeypatch, capsys):
 
 
 def _parse(argv):
+    """Build the same argparse tree openprogram.cli.main sets up, so
+    the test drives the exact code path real invocations take.
+
+    Shape: ``openprogram providers <verb> ...`` — `build_parser` wires
+    verbs directly on the `providers` subparser.
+    """
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command")
-    build_parser(sub)
-    return parser.parse_args(["auth", *argv])
+    p_providers = sub.add_parser("providers")
+    providers_sub = p_providers.add_subparsers(dest="providers_cmd")
+    build_parser(providers_sub)
+    return parser.parse_args(["providers", *argv])
 
 
 # ---- list ----------------------------------------------------------------
@@ -55,8 +63,8 @@ def test_list_empty_suggests_next_steps(isolated):
     assert rc == 0
     out = cap.readouterr().out
     assert "No credential pools yet" in out
-    assert "auth discover" in out
-    assert "auth login" in out
+    assert "providers discover" in out
+    assert "providers login" in out
 
 
 def test_list_json_emits_array(isolated):
@@ -177,7 +185,7 @@ def test_status_reports_missing_credential(isolated):
     assert rc == 1
     out = cap.readouterr().out
     assert "No credential configured" in out
-    assert "openprogram auth login openai" in out
+    assert "openprogram providers login openai" in out
 
 
 def test_status_reports_valid_credential(isolated):
@@ -230,7 +238,7 @@ def test_login_unknown_method(isolated):
 def test_profile_list(isolated):
     _, pm, _, cap = isolated
     pm.create_profile("work")
-    rc = dispatch(_parse(["profile", "list"]))
+    rc = dispatch(_parse(["profiles", "list"]))
     assert rc == 0
     out = cap.readouterr().out
     assert "work" in out
@@ -239,17 +247,17 @@ def test_profile_list(isolated):
 
 def test_profile_create_and_delete(isolated):
     _, _, _, cap = isolated
-    assert dispatch(_parse(["profile", "create", "scratch"])) == 0
+    assert dispatch(_parse(["profiles", "create", "scratch"])) == 0
     assert "Created profile scratch" in cap.readouterr().out
-    assert dispatch(_parse(["profile", "delete", "scratch", "--yes"])) == 0
+    assert dispatch(_parse(["profiles", "delete", "scratch", "--yes"])) == 0
     assert "Deleted profile scratch" in cap.readouterr().out
 
 
 def test_profile_create_duplicate(isolated):
     _, _, _, cap = isolated
-    dispatch(_parse(["profile", "create", "dup"]))
+    dispatch(_parse(["profiles", "create", "dup"]))
     cap.readouterr()
-    rc = dispatch(_parse(["profile", "create", "dup"]))
+    rc = dispatch(_parse(["profiles", "create", "dup"]))
     assert rc == 1
 
 

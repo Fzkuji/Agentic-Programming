@@ -55,7 +55,7 @@ from openprogram.auth.types import (
 )
 
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 
 # ---------------------------------------------------------------------------

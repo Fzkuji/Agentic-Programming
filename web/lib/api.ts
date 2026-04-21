@@ -168,44 +168,44 @@ export const api = {
 
   // ----- Auth v2 -----------------------------------------------------------
 
-  listAuthProfiles: () =>
-    jsonFetch<{ profiles: AuthProfile[]; default: string }>("/api/auth/profiles"),
+  listProviderProfiles: () =>
+    jsonFetch<{ profiles: AuthProfile[]; default: string }>("/api/providers/profiles"),
 
-  createAuthProfile: (name: string, display_name = "", description = "") =>
-    jsonFetch<AuthProfile>("/api/auth/profiles", {
+  createProviderProfile: (name: string, display_name = "", description = "") =>
+    jsonFetch<AuthProfile>("/api/providers/profiles", {
       method: "POST",
       body: JSON.stringify({ name, display_name, description }),
     }),
 
-  deleteAuthProfile: (name: string) =>
-    jsonFetch<{ deleted: string }>(`/api/auth/profiles/${encodeURIComponent(name)}`, {
+  deleteProviderProfile: (name: string) =>
+    jsonFetch<{ deleted: string }>(`/api/providers/profiles/${encodeURIComponent(name)}`, {
       method: "DELETE",
     }),
 
-  listAuthPools: (profile?: string) => {
+  listProviderPools: (profile?: string) => {
     const qs = profile ? `?profile=${encodeURIComponent(profile)}` : "";
-    return jsonFetch<{ pools: PoolView[] }>(`/api/auth/pools${qs}`);
+    return jsonFetch<{ pools: PoolView[] }>(`/api/providers/pools${qs}`);
   },
 
-  getAuthPool: (provider: string, profile: string) =>
+  getProviderPool: (provider: string, profile: string) =>
     jsonFetch<PoolView>(
-      `/api/auth/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}`,
+      `/api/providers/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}`,
     ),
 
-  addCredential: (provider: string, profile: string, body: AddCredentialBody) =>
+  addProviderCredential: (provider: string, profile: string, body: AddCredentialBody) =>
     jsonFetch<CredentialView>(
-      `/api/auth/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}/credentials`,
+      `/api/providers/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}/credentials`,
       { method: "POST", body: JSON.stringify(body) },
     ),
 
-  removeCredential: (provider: string, profile: string, credentialId: string) =>
+  removeProviderCredential: (provider: string, profile: string, credentialId: string) =>
     jsonFetch<{ removed: string }>(
-      `/api/auth/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}/credentials/${encodeURIComponent(credentialId)}`,
+      `/api/providers/pools/${encodeURIComponent(provider)}/${encodeURIComponent(profile)}/credentials/${encodeURIComponent(credentialId)}`,
       { method: "DELETE" },
     ),
 
-  discoverCredentials: () =>
-    jsonFetch<{ discovered: DiscoveredCredential[] }>("/api/auth/discover", {
+  discoverProviderCredentials: () =>
+    jsonFetch<{ discovered: DiscoveredCredential[] }>("/api/providers/discover", {
       method: "POST",
     }),
 };

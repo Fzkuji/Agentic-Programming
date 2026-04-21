@@ -61,7 +61,7 @@ def client(tmp_path):
 
 def test_list_profiles_includes_default(client):
     c, store, pm = client
-    resp = c.get("/api/auth/profiles")
+    resp = c.get("/api/providers/profiles")
     assert resp.status_code == 200
     body = resp.json()
     assert body["default"] == DEFAULT_PROFILE_NAME
@@ -71,7 +71,7 @@ def test_list_profiles_includes_default(client):
 
 def test_create_profile_ok(client):
     c, *_ = client
-    resp = c.post("/api/auth/profiles", json={"name": "work", "display_name": "Work"})
+    resp = c.post("/api/providers/profiles", json={"name": "work", "display_name": "Work"})
     assert resp.status_code == 200
     assert resp.json()["name"] == "work"
     assert resp.json()["display_name"] == "Work"
@@ -79,29 +79,29 @@ def test_create_profile_ok(client):
 
 def test_create_profile_duplicate_is_400(client):
     c, *_ = client
-    c.post("/api/auth/profiles", json={"name": "dup"})
-    r = c.post("/api/auth/profiles", json={"name": "dup"})
+    c.post("/api/providers/profiles", json={"name": "dup"})
+    r = c.post("/api/providers/profiles", json={"name": "dup"})
     assert r.status_code == 400
 
 
 def test_create_profile_invalid_name_is_400(client):
     c, *_ = client
-    r = c.post("/api/auth/profiles", json={"name": "../evil"})
+    r = c.post("/api/providers/profiles", json={"name": "../evil"})
     assert r.status_code == 400
 
 
 def test_delete_profile(client):
     c, *_ = client
-    c.post("/api/auth/profiles", json={"name": "scratch"})
-    r = c.delete("/api/auth/profiles/scratch")
+    c.post("/api/providers/profiles", json={"name": "scratch"})
+    r = c.delete("/api/providers/profiles/scratch")
     assert r.status_code == 200
-    r = c.get("/api/auth/profiles")
+    r = c.get("/api/providers/profiles")
     assert "scratch" not in [p["name"] for p in r.json()["profiles"]]
 
 
 def test_delete_default_profile_forbidden(client):
     c, *_ = client
-    r = c.delete(f"/api/auth/profiles/{DEFAULT_PROFILE_NAME}")
+    r = c.delete(f"/api/providers/profiles/{DEFAULT_PROFILE_NAME}")
     assert r.status_code == 400
 
 
@@ -109,7 +109,7 @@ def test_delete_default_profile_forbidden(client):
 
 def test_list_pools_empty(client):
     c, *_ = client
-    r = c.get("/api/auth/pools")
+    r = c.get("/api/providers/pools")
     assert r.status_code == 200
     assert r.json() == {"pools": []}
 
@@ -117,7 +117,7 @@ def test_list_pools_empty(client):
 def test_add_api_key_and_list(client):
     c, store, _ = client
     r = c.post(
-        "/api/auth/pools/openai/default/credentials",
+        "/api/providers/pools/openai/default/credentials",
         json={"type": "api_key", "api_key": "sk-abcdef-longenough-1234"},
     )
     assert r.status_code == 200
@@ -127,7 +127,7 @@ def test_add_api_key_and_list(client):
     assert view["payload"]["api_key_preview"] != "sk-abcdef-longenough-1234"
     assert "…" in view["payload"]["api_key_preview"]
 
-    r = c.get("/api/auth/pools")
+    r = c.get("/api/providers/pools")
     body = r.json()
     assert len(body["pools"]) == 1
     assert body["pools"][0]["credentials"][0]["kind"] == "api_key"
@@ -136,7 +136,7 @@ def test_add_api_key_and_list(client):
 def test_add_oauth_credential(client):
     c, *_ = client
     r = c.post(
-        "/api/auth/pools/anthropic/default/credentials",
+        "/api/providers/pools/anthropic/default/credentials",
         json={
             "type": "oauth",
             "access_token": "ACC-tokenvalue-here",
@@ -156,7 +156,7 @@ def test_add_oauth_credential(client):
 def test_add_missing_required_field_is_400(client):
     c, *_ = client
     r = c.post(
-        "/api/auth/pools/openai/default/credentials",
+        "/api/providers/pools/openai/default/credentials",
         json={"type": "api_key"},
     )
     assert r.status_code == 400
@@ -165,7 +165,7 @@ def test_add_missing_required_field_is_400(client):
 def test_add_unknown_type_is_400(client):
     c, *_ = client
     r = c.post(
-        "/api/auth/pools/openai/default/credentials",
+        "/api/providers/pools/openai/default/credentials",
         json={"type": "magic_key", "api_key": "x"},
     )
     assert r.status_code == 400
@@ -173,19 +173,19 @@ def test_add_unknown_type_is_400(client):
 
 def test_get_pool_not_found(client):
     c, *_ = client
-    r = c.get("/api/auth/pools/nothing/default")
+    r = c.get("/api/providers/pools/nothing/default")
     assert r.status_code == 404
 
 
 def test_remove_credential(client):
     c, store, _ = client
     c.post(
-        "/api/auth/pools/openai/default/credentials",
+        "/api/providers/pools/openai/default/credentials",
         json={"type": "api_key", "api_key": "sk-xxxxxxxxxxxxxxxx"},
     )
     pool = store.find_pool("openai", "default")
     cred_id = pool.credentials[0].credential_id
-    r = c.delete(f"/api/auth/pools/openai/default/credentials/{cred_id}")
+    r = c.delete(f"/api/providers/pools/openai/default/credentials/{cred_id}")
     assert r.status_code == 200
     assert r.json()["removed"] == cred_id
     # Cred is gone.
@@ -195,7 +195,7 @@ def test_remove_credential(client):
 
 def test_remove_nonexistent_credential_is_404(client):
     c, *_ = client
-    r = c.delete("/api/auth/pools/openai/default/credentials/cred_nope")
+    r = c.delete("/api/providers/pools/openai/default/credentials/cred_nope")
     assert r.status_code == 404
 
 
@@ -216,7 +216,7 @@ def test_list_pools_filtered_by_profile(client):
             payload=ApiKeyPayload(api_key="default-key"),
         )],
     ))
-    r = c.get("/api/auth/pools?profile=work")
+    r = c.get("/api/providers/pools?profile=work")
     body = r.json()
     assert len(body["pools"]) == 1
     assert body["pools"][0]["profile_id"] == "work"
@@ -233,7 +233,7 @@ def test_discover_returns_list(client, monkeypatch):
         "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
     ]:
         monkeypatch.delenv(var, raising=False)
-    r = c.post("/api/auth/discover")
+    r = c.post("/api/providers/discover")
     assert r.status_code == 200
     assert "discovered" in r.json()
     # On a clean machine nothing is found; on a dev machine many things
@@ -245,7 +245,7 @@ def test_discover_returns_list(client, monkeypatch):
 def test_discover_picks_up_env_var(client, monkeypatch):
     c, *_ = client
     monkeypatch.setenv("OPENAI_API_KEY", "sk-discoverable")
-    r = c.post("/api/auth/discover")
+    r = c.post("/api/providers/discover")
     found = r.json()["discovered"]
     env_found = [e for e in found if e.get("source_id") == "env:OPENAI_API_KEY"]
     assert env_found, f"expected env:OPENAI_API_KEY in {[e.get('source_id') for e in found]}"
