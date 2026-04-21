@@ -103,7 +103,21 @@ def _write_auth_json_atomic(data: dict[str, Any]) -> None:
 
 
 class _AuthState:
-    """Cached auth.json (chatgpt mode) + refresh. Thread-safe."""
+    """Cached auth.json (chatgpt mode) + refresh.
+
+    Process-wide singleton (see ``_auth_state`` at module bottom). Sharing
+    one instance across every ``OpenAICodexRuntime`` is load-bearing: the
+    OAuth refresh_token rotates on every refresh, so if two runtimes each
+    read ``auth.json`` independently and both try to refresh near expiry,
+    the second refresh fails with 400 and the user gets booted to the
+    login screen. Centralizing the cache + lock serializes the refresh.
+
+    Refresh also races against a concurrently-running ``codex`` CLI that
+    shares the same file. We mitigate by re-reading ``auth.json`` under
+    the lock if our cached refresh_token is rejected; that's cheap and
+    handles the "CLI rotated it while webui was idle" case without a
+    forced re-login.
+    """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -112,44 +126,82 @@ class _AuthState:
     def resolve(self) -> tuple[str, str]:
         """Return (access_token, account_id), refreshing if near expiry."""
         with self._lock:
-            if self._auth is None:
-                path = _auth_path()
-                if not path.exists():
-                    raise RuntimeError(
-                        f"{path} not found. OpenAICodexRuntime requires the "
-                        "ChatGPT subscription. Run: codex login --device-auth"
-                    )
-                self._auth = json.loads(path.read_text(encoding="utf-8"))
+            return self._resolve_locked()
 
-            auth = self._auth
-            if auth.get("auth_mode") != "chatgpt":
-                raise RuntimeError(
-                    f"{_auth_path()} has auth_mode={auth.get('auth_mode')!r}, "
-                    "need 'chatgpt'. OpenAICodexRuntime is subscription-only. "
-                    "Run: codex login --device-auth"
-                )
+    def _load_from_disk(self) -> dict[str, Any]:
+        path = _auth_path()
+        if not path.exists():
+            raise RuntimeError(
+                f"{path} not found. OpenAICodexRuntime requires the "
+                "ChatGPT subscription. Run: codex login --device-auth"
+            )
+        return json.loads(path.read_text(encoding="utf-8"))
 
-            tokens = auth.get("tokens") or {}
-            access = tokens.get("access_token")
-            refresh = tokens.get("refresh_token")
-            if not access or not refresh:
-                raise RuntimeError(
-                    f"{_auth_path()} is in chatgpt mode but missing tokens. "
-                    "Run: codex login --device-auth"
-                )
+    def _resolve_locked(self) -> tuple[str, str]:
+        if self._auth is None:
+            self._auth = self._load_from_disk()
 
-            exp = _jwt_expiry_epoch(access)
-            if exp is not None and exp - 60 < time.time():
-                new_tokens = _refresh_oauth_token(refresh)
-                access = new_tokens["access_token"]
-                auth["tokens"]["access_token"] = access
-                auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
-                if "id_token" in new_tokens:
-                    auth["tokens"]["id_token"] = new_tokens["id_token"]
-                _write_auth_json_atomic(auth)
+        auth = self._auth
+        if auth.get("auth_mode") != "chatgpt":
+            raise RuntimeError(
+                f"{_auth_path()} has auth_mode={auth.get('auth_mode')!r}, "
+                "need 'chatgpt'. OpenAICodexRuntime is subscription-only. "
+                "Run: codex login --device-auth"
+            )
 
+        tokens = auth.get("tokens") or {}
+        access = tokens.get("access_token")
+        refresh = tokens.get("refresh_token")
+        if not access or not refresh:
+            raise RuntimeError(
+                f"{_auth_path()} is in chatgpt mode but missing tokens. "
+                "Run: codex login --device-auth"
+            )
+
+        exp = _jwt_expiry_epoch(access)
+        if exp is None or exp - 60 >= time.time():
             account_id = tokens.get("account_id") or _extract_account_id(access)
             return access, account_id
+
+        # Near expiry — refresh. If the refresh_token we have was already
+        # consumed (codex CLI rotated it out from under us), reload the
+        # file and try once more before surrendering.
+        try:
+            new_tokens = _refresh_oauth_token(refresh)
+        except RuntimeError as first_err:
+            try:
+                self._auth = self._load_from_disk()
+            except Exception:
+                raise first_err
+            fresh_tokens = self._auth.get("tokens") or {}
+            fresh_refresh = fresh_tokens.get("refresh_token")
+            fresh_access = fresh_tokens.get("access_token")
+            if fresh_refresh and fresh_refresh != refresh:
+                # Someone else already rotated it. Trust the rotated
+                # access_token if it's still valid; otherwise refresh with
+                # the fresh refresh_token.
+                fresh_exp = _jwt_expiry_epoch(fresh_access) if fresh_access else None
+                if fresh_access and fresh_exp is not None and fresh_exp - 60 >= time.time():
+                    account_id = fresh_tokens.get("account_id") or _extract_account_id(fresh_access)
+                    return fresh_access, account_id
+                new_tokens = _refresh_oauth_token(fresh_refresh)
+            else:
+                raise first_err
+
+        auth = self._auth
+        auth["tokens"]["access_token"] = new_tokens["access_token"]
+        auth["tokens"]["refresh_token"] = new_tokens["refresh_token"]
+        if "id_token" in new_tokens:
+            auth["tokens"]["id_token"] = new_tokens["id_token"]
+        _write_auth_json_atomic(auth)
+        access = new_tokens["access_token"]
+        account_id = auth["tokens"].get("account_id") or _extract_account_id(access)
+        return access, account_id
+
+
+# Process-wide singleton — see docstring on _AuthState for why this must
+# not be per-runtime.
+_auth_state = _AuthState()
 
 
 _KNOWN_CODEX_MODELS = [
@@ -212,7 +264,7 @@ class OpenAICodexRuntime(Runtime):
         system: str | None = None,
         **_ignored: Any,
     ) -> None:
-        self._auth = _AuthState()
+        self._auth = _auth_state  # process-wide singleton; see class docstring
         access, account_id = self._auth.resolve()
 
         super().__init__(model=f"openai-codex:{model}", api_key=access)
