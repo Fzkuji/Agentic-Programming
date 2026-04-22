@@ -36,6 +36,7 @@ from .apply_patch import TOOL as APPLY_PATCH
 from .bash import TOOL as BASH
 from .canvas import TOOL as CANVAS
 from .clarify import TOOL as CLARIFY
+from .cron import TOOL as CRON
 from .edit import TOOL as EDIT
 from .execute_code import TOOL as EXECUTE_CODE
 from .glob import TOOL as GLOB
@@ -78,6 +79,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "execute_code": EXECUTE_CODE,
     "mixture_of_agents": MIXTURE_OF_AGENTS,
     "canvas": CANVAS,
+    "cron": CRON,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
@@ -108,7 +110,7 @@ TOOLSETS: dict[str, list[str]] = {
     "research": _builtin_list(DEFAULT_TOOLS) + [
         "web_fetch", "web_search", "image_generate", "image_analyze",
         "pdf", "spawn_program", "memory", "clarify", "execute_code",
-        "mixture_of_agents", "canvas",
+        "mixture_of_agents", "canvas", "cron",
     ],
     "full": _builtin_list(ALL_TOOLS.keys()),
 }
@@ -198,6 +200,7 @@ __all__ = [
     "EXECUTE_CODE",
     "MIXTURE_OF_AGENTS",
     "CANVAS",
+    "CRON",
     "get",
     "get_many",
     "list_available",
