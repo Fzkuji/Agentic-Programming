@@ -178,8 +178,11 @@
 .message-actions {
   display: flex;
   gap: 2px;
-  margin-top: 6px;
-  margin-left: 44px;            /* align under the avatar+name, not the avatar */
+  margin-top: 4px;
+  /* Match .message-content's left indent exactly so icons sit under
+     the text, not under the avatar. Avatar is 28px + 8px gap = 36px,
+     which is also what .message-content reserves. */
+  padding-left: 36px;
   opacity: 0;
   transition: opacity 150ms ease;
 }

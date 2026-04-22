@@ -54,17 +54,34 @@
   }
 
   window.ensureMessageActions = function (messageEl) {
-    if (!messageEl || messageEl.querySelector(':scope > .message-actions')) return;
+    if (!messageEl) return;
     // Skip system messages / runtime-only containers — retry on a
     // runtime block has its own existing UI, and system notes are
     // informational.
     if (messageEl.classList.contains('system')) return;
 
+    var existing = messageEl.querySelector(':scope > .message-actions');
+    if (existing) {
+      // Bar exists but may have been knocked out of last-child
+      // position by a later innerHTML update (chat-ws.js rebuilds
+      // targetEl's body on 'result'). Keep it pinned to the bottom.
+      if (existing !== messageEl.lastElementChild) {
+        messageEl.appendChild(existing);
+      }
+      return;
+    }
+
+    var isUser = messageEl.classList.contains('user');
+
     var bar = document.createElement('div');
     bar.className = 'message-actions';
-    bar.appendChild(makeBtn('copy',   'Copy',      ICON.copy));
-    bar.appendChild(makeBtn('retry',  'Retry from here', ICON.retry));
-    bar.appendChild(makeBtn('branch', 'Branch into a new conversation', ICON.branch));
+    bar.appendChild(makeBtn('copy',  'Copy',            ICON.copy));
+    bar.appendChild(makeBtn('retry', 'Retry from here', ICON.retry));
+    // User messages don't get Branch — forking your own prompt into a
+    // new conversation isn't a thing people do. Assistant replies do.
+    if (!isUser) {
+      bar.appendChild(makeBtn('branch', 'Branch into a new conversation', ICON.branch));
+    }
     messageEl.appendChild(bar);
   };
 
@@ -220,6 +237,12 @@
     // bar is already there.
     container.querySelectorAll('.message').forEach(window.ensureMessageActions);
     var obs = new MutationObserver(function (muts) {
+      // Two jobs: (1) attach action bars to freshly added .message
+      // nodes; (2) whenever any mutation happens inside an existing
+      // .message, re-pin its action bar to the last-child position
+      // — streaming deltas keep inserting new content blocks and
+      // would otherwise shove the bar into the middle.
+      var touched = new Set();
       for (var i = 0; i < muts.length; i++) {
         var m = muts[i];
         for (var j = 0; j < m.addedNodes.length; j++) {
@@ -231,7 +254,18 @@
             n.querySelectorAll('.message').forEach(window.ensureMessageActions);
           }
         }
+        // Find the enclosing .message (if any) for the mutation
+        // target; mark it so we re-pin its actions below.
+        var t = m.target;
+        while (t && t !== container) {
+          if (t.nodeType === 1 && t.classList && t.classList.contains('message')) {
+            touched.add(t);
+            break;
+          }
+          t = t.parentNode;
+        }
       }
+      touched.forEach(window.ensureMessageActions);
     });
     obs.observe(container, { childList: true, subtree: true });
   }
