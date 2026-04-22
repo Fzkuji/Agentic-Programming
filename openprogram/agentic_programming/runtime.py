@@ -74,6 +74,7 @@ class Runtime:
         model: str = "default",
         max_retries: int = 2,
         api_key: Optional[str] = None,
+        skills: "bool | list[str] | None" = None,
     ):
         """
         Args:
@@ -91,7 +92,14 @@ class Runtime:
                          Default 2 (try once, retry once on failure).
             api_key:     Optional API key. If omitted, resolved from the
                          provider's standard env var (OPENAI_API_KEY, etc).
+            skills:      Skill discovery for the system prompt. Three shapes:
+                         - None (default) or False → skills disabled
+                         - True → probe default_skill_dirs() (user + repo)
+                         - list[str] → explicit directory list
+                         When enabled, the <available_skills> block is
+                         appended to system_prompt on every exec() call.
         """
+        import uuid as _uuid
         self._closed = False  # Set early so __del__ is safe even if __init__ raises.
         self._prompted_functions: set[str] = set()  # Functions whose docstrings have been sent
 
@@ -106,6 +114,21 @@ class Runtime:
         self.last_usage = None  # Last call's token usage: {input_tokens, output_tokens, ...}
         self.usage_is_cumulative = False  # True if last_usage accumulates across calls (e.g. Codex CLI)
         self.api_key = api_key
+        # Skills config: resolved to a (possibly empty) list of dirs at
+        # first use; actual SKILL.md loading is lazy and cached so we
+        # don't rescan the filesystem every exec().
+        self._skills_config = skills
+        self._skills_cache_key: tuple[str, ...] | None = None
+        self._skills_prompt_block: str = ""
+        # Unified reasoning knob, matches pi-ai's ThinkingLevel:
+        #   "off" | "low" | "medium" | "high" | "xhigh"
+        # API runtimes pass this straight through to AgentSession → provider
+        # SimpleStreamOptions.reasoning. CLI subclasses override however their
+        # backend expects (flags, env vars, etc).
+        self.thinking_level: str = "off"
+        # Stable id across successive exec() calls — provider uses it as
+        # prompt_cache_key (Codex) so repeat prefixes hit the cache.
+        self.session_id = f"op-{_uuid.uuid4().hex[:16]}"
 
         # Resolve "provider:model_id" form against the pi-ai model registry.
         self.api_model = None
@@ -119,6 +142,44 @@ class Runtime:
                     f"Pass `call=`, subclass Runtime, or use a valid pi-ai model id."
                 )
             self.api_model = resolved
+
+    # --- Skills ---
+
+    def _resolved_skill_dirs(self) -> list[str]:
+        """Turn the constructor's ``skills`` argument into a concrete dir list.
+
+        None / False → []. True → default dirs. list → as-is.
+        """
+        cfg = self._skills_config
+        if not cfg:
+            return []
+        if cfg is True:
+            from openprogram.agentic_programming.skills import default_skill_dirs
+            return default_skill_dirs()
+        if isinstance(cfg, (list, tuple)):
+            return [str(d) for d in cfg]
+        return []
+
+    def _skills_block(self) -> str:
+        """Return the ``<available_skills>`` XML block for this runtime.
+
+        Cached per dir tuple so repeat exec() calls don't rescan unless the
+        configured dirs change. Empty string when skills are disabled or no
+        SKILL.md files were found — callers can unconditionally concatenate.
+        """
+        dirs = tuple(self._resolved_skill_dirs())
+        if self._skills_cache_key == dirs:
+            return self._skills_prompt_block
+        if not dirs:
+            self._skills_cache_key = dirs
+            self._skills_prompt_block = ""
+            return ""
+        from openprogram.agentic_programming.skills import (
+            format_skills_for_prompt, load_skills,
+        )
+        self._skills_prompt_block = format_skills_for_prompt(load_skills(dirs))
+        self._skills_cache_key = dirs
+        return self._skills_prompt_block
 
     # --- Path dispatch ---
 
@@ -269,6 +330,9 @@ class Runtime:
 
             call_input = _merge_content(context, content, exec_ctx)
             system_text = _find_system_prompt(parent_ctx)
+            skills_block = self._skills_block()
+            if skills_block:
+                system_text = (system_text + skills_block) if system_text else skills_block.lstrip("\n")
             if system_text:
                 call_input.insert(0, {"type": "text", "text": system_text, "role": "system"})
 
@@ -368,6 +432,9 @@ class Runtime:
 
             call_input = _merge_content(context, content, exec_ctx)
             system_text = _find_system_prompt(parent_ctx)
+            skills_block = self._skills_block()
+            if skills_block:
+                system_text = (system_text + skills_block) if system_text else skills_block.lstrip("\n")
             if system_text:
                 call_input.insert(0, {"type": "text", "text": system_text, "role": "system"})
         else:
@@ -482,12 +549,101 @@ class Runtime:
             history = []
             current = ctx.messages[0]
 
+        skills_block = self._skills_block()
+        if skills_block:
+            system_prompt = (system_prompt + skills_block) if system_prompt else skills_block.lstrip("\n")
+
         session = AgentSession(
             model=self.api_model,
             tools=agent_tools,
             system_prompt=system_prompt,
             api_key=self.api_key,
+            session_id=self.session_id,
+            thinking_level=self.thinking_level,
         )
+
+        # Forward agent stream events to self.on_stream so callers (the webui
+        # server) can relay partial text/tool-call updates to the frontend
+        # in real time. Without this the UI only sees the final result.
+        import time as _t_stream
+        _stream_start = _t_stream.time()
+        _unsub = None
+        # Accumulate structured blocks (thinking / tool calls) for persistence.
+        # This is what the UI reloads from conv history on refresh — the
+        # streamed scaffold only exists live in the DOM.
+        self.last_blocks = []
+        _thinking_buf = {"text": ""}
+        _tool_index = {}
+        # Subscribe even if on_stream is None so persistence accumulation
+        # still runs (callers that reload history want thinking/tool blocks
+        # even when they didn't watch the live stream).
+        if True:
+            def _elapsed() -> str:
+                return f"{_t_stream.time() - _stream_start:.1f}"
+
+            def _forward(ev):
+                cb = self.on_stream
+                t = getattr(ev, "type", None)
+                try:
+                    if t == "message_update":
+                        inner = getattr(ev, "assistant_message_event", None)
+                        inner_type = getattr(inner, "type", None)
+                        if inner_type == "text_delta":
+                            if cb:
+                                cb({"type": "text", "text": getattr(inner, "delta", "") or "", "elapsed": _elapsed()})
+                        elif inner_type == "thinking_delta":
+                            delta = getattr(inner, "delta", "") or ""
+                            _thinking_buf["text"] += delta
+                            if cb:
+                                cb({"type": "thinking", "text": delta, "elapsed": _elapsed()})
+                    elif t == "tool_execution_start":
+                        call_id = getattr(ev, "tool_call_id", "") or ""
+                        tool_name = getattr(ev, "tool_name", "?") or "?"
+                        input_str = str(getattr(ev, "args", "") or "")
+                        _tool_index[call_id] = {
+                            "type": "tool",
+                            "tool_call_id": call_id,
+                            "tool": tool_name,
+                            "input": input_str,
+                            "result": "",
+                            "is_error": False,
+                            "elapsed": _elapsed(),
+                        }
+                        if cb:
+                            cb({
+                                "type": "tool_use",
+                                "tool_call_id": call_id,
+                                "tool": tool_name,
+                                "input": input_str,
+                                "elapsed": _elapsed(),
+                            })
+                    elif t == "tool_execution_end":
+                        result = getattr(ev, "result", "")
+                        try:
+                            result_str = result if isinstance(result, str) else str(result)
+                        except Exception:
+                            result_str = ""
+                        call_id = getattr(ev, "tool_call_id", "") or ""
+                        is_error = bool(getattr(ev, "is_error", False))
+                        block = _tool_index.get(call_id)
+                        if block is not None:
+                            block["result"] = result_str
+                            block["is_error"] = is_error
+                            block["elapsed_end"] = _elapsed()
+                        if cb:
+                            cb({
+                                "type": "tool_result",
+                                "tool_call_id": call_id,
+                                "tool": getattr(ev, "tool_name", "?") or "?",
+                                "result": result_str,
+                                "is_error": is_error,
+                                "elapsed": _elapsed(),
+                            })
+                except Exception:
+                    pass
+
+            _unsub = session.agent.subscribe(_forward)
+
         try:
             session.replace_messages(history)
             pre_run_len = len(session.messages)
@@ -496,7 +652,18 @@ class Runtime:
             if exec_ctx is not None:
                 _record_session_trace(exec_ctx, new_messages)
         finally:
+            if _unsub is not None:
+                try:
+                    _unsub()
+                except Exception:
+                    pass
             session.close()
+
+        # Freeze streaming blocks into `last_blocks` for persistence.
+        if _thinking_buf["text"]:
+            self.last_blocks.append({"type": "thinking", "text": _thinking_buf["text"]})
+        for _blk in _tool_index.values():
+            self.last_blocks.append(_blk)
 
         if final is None:
             raise RuntimeError("Agent session produced no assistant message")
@@ -504,10 +671,15 @@ class Runtime:
             raise RuntimeError(final.error_message or "Agent session failed")
 
         if final.usage is not None:
+            # `final.usage.input` is already net of cache reads (see
+            # _shared.openai_responses — we subtract cached_tokens). Surface
+            # cache separately so the UI doesn't flicker on prompt-cache hits.
             self.last_usage = {
                 "input_tokens": final.usage.input,
                 "output_tokens": final.usage.output,
                 "total_tokens": final.usage.total_tokens,
+                "cache_read": getattr(final.usage, "cache_read", 0) or 0,
+                "cache_create": getattr(final.usage, "cache_write", 0) or 0,
             }
         return _assistant_text(final)
 
@@ -626,10 +798,17 @@ def _build_pi_context(content: list[dict]):
 
 
 def _assistant_text(message) -> str:
-    """Extract the concatenated text from an AssistantMessage."""
+    """Extract the concatenated text from an AssistantMessage.
+
+    Blocks may be pydantic content objects *or* raw dicts — providers streaming
+    incremental output often append dicts to ``content`` directly.
+    """
     out = []
     for block in message.content:
-        if getattr(block, "type", None) == "text":
+        if isinstance(block, dict):
+            if block.get("type") == "text":
+                out.append(block.get("text", ""))
+        elif getattr(block, "type", None) == "text":
             out.append(block.text)
     return "".join(out)
 
