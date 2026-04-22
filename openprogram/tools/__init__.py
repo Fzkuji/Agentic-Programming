@@ -37,6 +37,7 @@ from .bash import TOOL as BASH
 from .edit import TOOL as EDIT
 from .glob import TOOL as GLOB
 from .grep import TOOL as GREP
+from .image_generate import TOOL as IMAGE_GENERATE
 from .list import TOOL as LIST
 from .process import TOOL as PROCESS
 from .read import TOOL as READ
@@ -60,6 +61,7 @@ ALL_TOOLS: dict[str, dict[str, Any]] = {
     "todo_write": TODO_WRITE,
     "web_fetch": WEB_FETCH,
     "web_search": WEB_SEARCH,
+    "image_generate": IMAGE_GENERATE,
 }
 
 # Default tool set (à la Claude Code): dedicated file ops for safe common
@@ -87,7 +89,7 @@ DEFAULT_TOOLS: list[str] = [
 # "full"    — every registered tool. Mostly for debugging / listing.
 TOOLSETS: dict[str, list[str]] = {
     "default": DEFAULT_TOOLS,
-    "research": _builtin_list(DEFAULT_TOOLS) + ["web_fetch", "web_search"],  # + image/pdf/memory as later steps land
+    "research": _builtin_list(DEFAULT_TOOLS) + ["web_fetch", "web_search", "image_generate"],  # + pdf/memory as later steps land
     "full": _builtin_list(ALL_TOOLS.keys()),
 }
 
@@ -167,6 +169,7 @@ __all__ = [
     "TODO_WRITE",
     "WEB_FETCH",
     "WEB_SEARCH",
+    "IMAGE_GENERATE",
     "get",
     "get_many",
     "list_available",
