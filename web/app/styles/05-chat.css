@@ -229,20 +229,17 @@
   pointer-events: none;
 }
 
-/* < N / M > sibling navigator. Sits below the action bar on
-   messages with retry/edit siblings; clicking the chevrons calls
-   /api/chat/checkout to switch HEAD. */
+/* < N / M > sibling navigator. Lives INSIDE .message-actions so it
+   shares the bar's hover-gated visibility and sits on the same row
+   as the copy/retry/edit icons. */
 .message-nav {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding-left: 30px;            /* match .message-actions indent */
-  margin-top: 2px;
+  gap: 2px;
+  margin-left: 6px;
   font-size: 12px;
   color: var(--text-muted);
   user-select: none;
-  /* Always visible when the message has siblings — otherwise users
-     never notice a retry created a new version. */
 }
 .message-nav-btn {
   display: inline-flex;

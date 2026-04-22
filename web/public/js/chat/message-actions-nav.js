@@ -30,17 +30,17 @@
     return b;
   }
 
-  // Called by message-actions.js after ensureMessageActions. Adds
-  // (or refreshes) a `< N / M >` strip on any message whose sibling
-  // count > 1. Idempotent: if the strip already exists it gets
-  // updated in place.
+  // Called by message-actions.js after ensureMessageActions. Appends
+  // the `< N / M >` strip into the action bar itself so it shares the
+  // bar's hover-gated visibility and sits on the same row. Idempotent.
   window.ensureSiblingNav = function (messageEl) {
     if (!messageEl) return;
     var idx = parseInt(messageEl.getAttribute('data-sibling-index') || '0', 10);
     var total = parseInt(messageEl.getAttribute('data-sibling-total') || '0', 10);
-    var existing = messageEl.querySelector(':scope > .message-nav');
+    var bar = messageEl.querySelector(':scope > .message-actions');
+    if (!bar) return;
+    var existing = bar.querySelector(':scope > .message-nav');
 
-    // No siblings to navigate — remove any stale strip and bail.
     if (total < 2) {
       if (existing) existing.remove();
       return;
@@ -50,10 +50,6 @@
       existing.querySelector('.message-nav-label').textContent = idx + ' / ' + total;
       existing.querySelector('[data-nav="prev"]').disabled = idx <= 1;
       existing.querySelector('[data-nav="next"]').disabled = idx >= total;
-      // Re-pin to bottom if something displaced it.
-      if (existing !== messageEl.lastElementChild) {
-        messageEl.appendChild(existing);
-      }
       return;
     }
 
@@ -65,7 +61,7 @@
     label.textContent = idx + ' / ' + total;
     nav.appendChild(label);
     nav.appendChild(makeNavBtn('next', idx >= total));
-    messageEl.appendChild(nav);
+    bar.appendChild(nav);
   };
 
   function resolveSiblingId(messageEl, dir) {
