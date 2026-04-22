@@ -248,14 +248,20 @@ def import_from_codex_file(
     # The Codex CLI stores two shapes depending on how the user logged in:
     #   1. ChatGPT OAuth  → {"auth_mode": "chatgpt", "tokens": {...}}
     #   2. Bare API key   → {"auth_mode": "apikey", "OPENAI_API_KEY": "sk-..."}
-    # We handle both; callers get a Credential either way.
+    #
+    # The chatgpt shape matches this runtime's Responses-backend needs,
+    # so we emit a Codex-provider OAuth credential. The apikey shape is
+    # semantically just "use OpenAI directly" — it has no chatgpt_account
+    # id, can't drive the ChatGPT backend, and belongs under the `openai`
+    # provider. We emit it there so the user's key ends up in a pool that
+    # something can actually use.
     auth_mode = (data.get("auth_mode") or "").lower()
     if auth_mode == "apikey" or (not data.get("tokens") and data.get("OPENAI_API_KEY")):
         api_key = (data.get("OPENAI_API_KEY") or "").strip()
         if not api_key:
             return None
         return Credential(
-            provider_id=PROVIDER_ID,
+            provider_id="openai",
             profile_id=profile_id,
             kind="api_key",
             payload=ApiKeyPayload(api_key=api_key),
@@ -264,6 +270,7 @@ def import_from_codex_file(
                 "imported_from": "codex_cli",
                 "source_path": str(path),
                 "auth_mode": "apikey",
+                "routed_from": "openai-codex",
             },
             read_only=False,
         )

@@ -312,10 +312,16 @@ def _cmd_login(provider: str, profile: str, method: Optional[str]) -> int:
         return 1
 
     store.add_credential(cred)
-    print(f"\n✓ Saved credential {cred.credential_id} for {provider}/{profile}")
+    saved_provider = cred.provider_id
+    saved_profile = cred.profile_id
+    print(f"\n✓ Saved credential {cred.credential_id} for "
+          f"{saved_provider}/{saved_profile}")
     print(f"  kind: {cred.kind}")
     print(f"  preview: {_payload_summary(cred)}")
-    print(f"  store: {store.root}/{provider}/{profile}.json")
+    print(f"  store: {store.root}/{saved_provider}/{saved_profile}.json")
+    if saved_provider != provider:
+        print(f"\n  Note: routed to {saved_provider!r} (not {provider!r}) "
+              f"because that's where this credential shape belongs.")
     return 0
 
 
@@ -1114,10 +1120,12 @@ def _run_setup_wizard() -> int:
                     )
                     if not pick:
                         continue
-                # Existing pool? Skip silently to avoid clobbering.
+                # Dedup by source label — credential_id is freshly
+                # minted every try_import, so id-equality never matches
+                # and we used to create duplicates on every wizard run.
                 existing = store.find_pool(cred.provider_id, cred.profile_id)
                 if existing and any(
-                    c.credential_id == cred.credential_id for c in existing.credentials
+                    c.source == cred.source for c in existing.credentials
                 ):
                     continue
                 try:

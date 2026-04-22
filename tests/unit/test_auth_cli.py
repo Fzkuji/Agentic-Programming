@@ -338,10 +338,12 @@ def test_login_import_codex_when_file_exists(isolated, monkeypatch):
     assert cred.metadata["account_id"] == "acc_xyz"
 
 
-def test_login_import_codex_apikey_mode(isolated, monkeypatch):
-    """Codex CLI in apikey mode stores a bare OPENAI_API_KEY, not OAuth
-    tokens. The import adapter must recognise this shape and produce an
-    api_key Credential (vs. returning None as if nothing was found)."""
+def test_login_import_codex_apikey_routes_to_openai(isolated, monkeypatch):
+    """Codex CLI in apikey mode stores a bare OPENAI_API_KEY — not OAuth.
+    That shape can't drive the Codex runtime (no chatgpt_account_id, no
+    JWT) so the import adapter routes it to the `openai` pool instead
+    and leaves `openai-codex` empty. The user's key ends up where
+    something can actually use it."""
     store, _, tmp, cap = isolated
     codex_dir = tmp / "fake_codex"
     codex_dir.mkdir()
@@ -352,12 +354,17 @@ def test_login_import_codex_apikey_mode(isolated, monkeypatch):
     }))
     rc = dispatch(_parse(["login", "openai-codex", "--method", "import_from_cli"]))
     assert rc == 0
-    pool = store.find_pool("openai-codex", "default")
+    # Routed away from openai-codex:
+    assert store.find_pool("openai-codex", "default") is None
+    # Saved under openai:
+    pool = store.find_pool("openai", "default")
     assert pool is not None
     cred = pool.credentials[0]
     assert cred.kind == "api_key"
     assert cred.payload.api_key == "sk-proj-from-codex-apikey"
-    assert cred.metadata["auth_mode"] == "apikey"
+    assert cred.metadata["routed_from"] == "openai-codex"
+    # User-facing note explaining the redirect.
+    assert "routed to 'openai'" in cap.readouterr().out
 
 
 def test_login_import_codex_when_file_missing(isolated):

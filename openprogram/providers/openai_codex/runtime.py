@@ -150,6 +150,23 @@ class OpenAICodexRuntime(Runtime):
         self._cached_access_token: str = ""
 
         cred = _ensure_credential(self._manager, self._profile_id)
+        if cred.kind != "oauth":
+            # OpenAICodexRuntime targets the ChatGPT Responses backend
+            # (requires a chatgpt-account-id header minted from the JWT).
+            # Bare API keys don't carry that, so they belong under the
+            # `openai` pool, not `openai-codex`. Surface this clearly
+            # instead of crashing on a missing .access_token attribute.
+            raise AuthConfigError(
+                f"openai-codex/{self._profile_id} credential is "
+                f"{cred.kind!r}, but this runtime needs OAuth. "
+                "This usually means your ~/.codex/auth.json is in apikey "
+                "mode. Use `providers logout openai-codex --yes` and then "
+                "`providers login openai --method api_key` (or adopt "
+                "env:OPENAI_API_KEY) — your key belongs under the `openai` "
+                "provider, not `openai-codex`.",
+                provider_id=auth_adapter.PROVIDER_ID,
+                profile_id=self._profile_id,
+            )
         access = cred.payload.access_token
         account_id = _account_id_for(cred)
         self._cached_access_token = access
