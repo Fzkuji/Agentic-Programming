@@ -164,12 +164,26 @@ class PkceLoginMethod(LoginMethod):
         await ui.show_progress("Opening browser for authentication…")
         await ui.open_url(auth_url)
 
-        # Race the callback server against a manual-paste prompt. Whichever
-        # returns first wins. This is the openclaw pattern: give the user
-        # an escape hatch if their browser + localhost don't cooperate.
-        code = await _race_callback_and_manual_paste(
-            ui=ui, cfg=self._cfg, expected_state=state,
-        )
+        # Wait for the browser to hit our localhost callback. We used
+        # to race this against a manual-paste prompt, but the prompt
+        # runs `input()` on a worker thread that Python can't cancel
+        # when the callback wins — asyncio.run() then hangs joining
+        # the blocked thread. Keep the flow single-armed; SSH/headless
+        # users can Ctrl+C and copy the redirect URL into `providers
+        # login --paste-url <url>` (not yet implemented — local flow
+        # first).
+        try:
+            code = await asyncio.wait_for(
+                _run_callback_server(self._cfg, state),
+                timeout=self._cfg.timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"OAuth flow timed out after {self._cfg.timeout_seconds}s. "
+                "Browser didn't redirect back to the local callback. "
+                "If you're on SSH, forward the port with "
+                "`ssh -L 1455:localhost:1455 <host>` and retry."
+            )
 
         tokens = await _exchange_code_for_tokens(
             cfg=self._cfg, code=code, verifier=verifier, redirect_uri=redirect_uri,

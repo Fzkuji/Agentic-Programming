@@ -403,15 +403,34 @@ class _TerminalLoginUi:
         print(f"\nGo to {verification_uri} and enter code: {user_code}\n", flush=True)
 
 
+_LOGIN_NOTES: dict[str, tuple[str, list[str]]] = {
+    "openai-codex": (
+        "Sign in with ChatGPT",
+        [
+            "Browser will open for OpenAI authentication.",
+            "Complete sign-in and the callback will finish automatically.",
+            "Requires a ChatGPT Plus / Pro / Team / Enterprise account.",
+            "OAuth callback listens on localhost:1455 — don't have another",
+            "codex / pi process holding that port.",
+        ],
+    ),
+}
+
+
 def _login_pkce_oauth(provider: str, profile: str) -> Credential:
     """Run a PKCE OAuth flow for `provider`, blocking the CLI until done."""
     from openprogram.auth.methods.pkce_oauth import PkceLoginMethod
+    from .tui import print_note
 
     if provider == "openai-codex":
         from openprogram.providers.openai_codex import auth_adapter
         config = auth_adapter.build_pkce_config()
     else:
         raise AuthConfigError(f"no PKCE config registered for {provider!r}")
+
+    title, body = _LOGIN_NOTES.get(provider, (f"{provider} OAuth", []))
+    if body:
+        print_note(title, body)
 
     method = PkceLoginMethod(provider_id=provider, config=config, profile_id=profile)
     ui = _TerminalLoginUi()
