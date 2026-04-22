@@ -299,36 +299,51 @@
     // additions. Idempotent: ensureMessageActions is a no-op if the
     // bar is already there.
     container.querySelectorAll('.message').forEach(window.ensureMessageActions);
+
+    // Observer work is batched through requestAnimationFrame so that
+    // any DOM mutations ensureMessageActions itself causes (adding
+    // bar / nav / re-pinning) coalesce with subsequent streaming
+    // mutations into a single frame of work — instead of recursing
+    // synchronously and potentially looping. Belt-and-braces on top
+    // of the idempotence fixes in ensureMessageActions itself.
+    var _pendingTargets = new Set();
+    var _rafPending = false;
+    function _flushTargets() {
+      _rafPending = false;
+      var targets = _pendingTargets;
+      _pendingTargets = new Set();
+      targets.forEach(window.ensureMessageActions);
+    }
+    function _queueTarget(el) {
+      if (!el) return;
+      _pendingTargets.add(el);
+      if (!_rafPending) {
+        _rafPending = true;
+        requestAnimationFrame(_flushTargets);
+      }
+    }
+
     var obs = new MutationObserver(function (muts) {
-      // Two jobs: (1) attach action bars to freshly added .message
-      // nodes; (2) whenever any mutation happens inside an existing
-      // .message, re-pin its action bar to the last-child position
-      // — streaming deltas keep inserting new content blocks and
-      // would otherwise shove the bar into the middle.
-      var touched = new Set();
       for (var i = 0; i < muts.length; i++) {
         var m = muts[i];
         for (var j = 0; j < m.addedNodes.length; j++) {
           var n = m.addedNodes[j];
           if (n.nodeType !== 1) continue;
           if (n.classList && n.classList.contains('message')) {
-            window.ensureMessageActions(n);
+            _queueTarget(n);
           } else if (n.querySelectorAll) {
-            n.querySelectorAll('.message').forEach(window.ensureMessageActions);
+            n.querySelectorAll('.message').forEach(_queueTarget);
           }
         }
-        // Find the enclosing .message (if any) for the mutation
-        // target; mark it so we re-pin its actions below.
         var t = m.target;
         while (t && t !== container) {
           if (t.nodeType === 1 && t.classList && t.classList.contains('message')) {
-            touched.add(t);
+            _queueTarget(t);
             break;
           }
           t = t.parentNode;
         }
       }
-      touched.forEach(window.ensureMessageActions);
     });
     obs.observe(container, { childList: true, subtree: true });
   }
