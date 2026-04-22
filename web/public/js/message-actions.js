@@ -68,6 +68,11 @@
       if (existing !== messageEl.lastElementChild) {
         messageEl.appendChild(existing);
       }
+      // Re-run nav — sibling counts may have changed since we last
+      // rendered (a new retry just came in).
+      if (typeof window.ensureSiblingNav === 'function') {
+        window.ensureSiblingNav(messageEl);
+      }
       return;
     }
 
@@ -77,12 +82,26 @@
     bar.className = 'message-actions';
     bar.appendChild(makeBtn('copy',  'Copy',            ICON.copy));
     bar.appendChild(makeBtn('retry', 'Retry from here', ICON.retry));
+    // User messages get Edit (pencil) — fork the turn with new text.
+    // See message-actions-edit.js. Assistant replies don't (you can't
+    // edit the model's output and expect the edit to re-run).
+    if (isUser && typeof window.makeMessageEditButton === 'function') {
+      bar.appendChild(window.makeMessageEditButton(makeBtn));
+    }
     // User messages don't get Branch — forking your own prompt into a
     // new conversation isn't a thing people do. Assistant replies do.
     if (!isUser) {
       bar.appendChild(makeBtn('branch', 'Branch into a new conversation', ICON.branch));
     }
     messageEl.appendChild(bar);
+
+    // Sibling navigator (< N / M >) — rendered below the action bar
+    // if the message has retry/edit siblings. See
+    // message-actions-nav.js. Called after the bar is in the DOM so
+    // it lands in the right position.
+    if (typeof window.ensureSiblingNav === 'function') {
+      window.ensureSiblingNav(messageEl);
+    }
   };
 
   // -----------------------------------------------------------------

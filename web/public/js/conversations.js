@@ -244,10 +244,33 @@ function renderConversationMessages(conv) {
     // walks back to the nearest user turn, so passing an assistant
     // id (may be "{x}_reply") is equally valid.
     if (msg.id) div.setAttribute('data-msg-id', msg.id);
+    // ContextGit metadata — sibling counts drive <N/M> nav, timestamp
+    // drives the hover tooltip. See message-actions-nav.js.
+    if (msg.sibling_index && msg.sibling_total) {
+      div.setAttribute('data-sibling-index', String(msg.sibling_index));
+      div.setAttribute('data-sibling-total', String(msg.sibling_total));
+    }
+    if (msg.timestamp || msg.created_at) {
+      div.setAttribute('data-created-at', String(msg.timestamp || msg.created_at));
+    }
     container.appendChild(div);
     if (typeof window.ensureMessageActions === 'function') {
       window.ensureMessageActions(div);
     }
+  }
+
+  // Expose the full message list to the nav module so it can walk
+  // siblings without a round-trip. Populated here since this is the
+  // only place we see the whole conversation at once.
+  window._allMessages = conv.messages.slice();
+  // Container-level run_active flag — CSS greys out Edit/Retry when
+  // true. Flipped elsewhere when runs start / end; set it from the
+  // snapshot we just loaded so initial state is right.
+  var chatContainer = document.getElementById('chatMessages');
+  if (chatContainer) {
+    chatContainer.setAttribute(
+      'data-run-active', conv.run_active ? 'true' : 'false',
+    );
   }
 
   if (!_skipScrollToBottom) scrollToBottom();

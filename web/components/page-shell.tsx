@@ -15,7 +15,7 @@ const PAGE_HTML: Record<Page, string> = {
 // Only page-specific scripts — shared ones (state/helpers/sidebar/providers/
 // settings/ui/scrollbar) are loaded once by AppShell.
 const JS_FILES_BY_PAGE: Record<Page, string[]> = {
-  chat: ["tree.js", "tree-render.js", "tree-retry.js", "tree-log.js", "chat.js", "chat-ws.js", "workdir.js", "message-actions.js", "init.js"],
+  chat: ["tree.js", "tree-render.js", "tree-retry.js", "tree-log.js", "chat.js", "chat-ws.js", "workdir.js", "message-actions.js", "message-actions-edit.js", "message-actions-nav.js", "init.js"],
   settings: [],
   programs: ["programs.js"],
   chats: [],

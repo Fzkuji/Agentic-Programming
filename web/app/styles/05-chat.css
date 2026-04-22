@@ -217,6 +217,120 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ContextGit — run-active gating. When an agent run is in flight,
+   grey out Edit and Retry buttons so the user can't fork mid-run
+   (the server rejects it anyway with 409, but the UI should make
+   the rule obvious). Copy and Branch stay enabled — they don't
+   fork the DAG. */
+[data-run-active="true"] .message-action-btn[data-action="retry"],
+[data-run-active="true"] .message-action-btn[data-action="edit"] {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* < N / M > sibling navigator. Sits below the action bar on
+   messages with retry/edit siblings; clicking the chevrons calls
+   /api/chat/checkout to switch HEAD. */
+.message-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 30px;            /* match .message-actions indent */
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+}
+.message:hover .message-nav,
+.message-nav:focus-within {
+  opacity: 1;
+}
+.message-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.message-nav-btn:hover:not([disabled]) {
+  background: rgba(0, 0, 0, 0.08);
+  color: var(--text-primary);
+}
+@media (prefers-color-scheme: dark) {
+  .message-nav-btn:hover:not([disabled]) { background: rgba(255, 255, 255, 0.1); }
+}
+.message-nav-btn[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+.message-nav-btn svg { width: 12px; height: 12px; }
+.message-nav-label {
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: center;
+}
+
+/* Inline edit mode — the bubble's content swaps out for a textarea
+   and Save/Cancel buttons. */
+.message.is-editing .message-actions,
+.message.is-editing .message-nav {
+  display: none;
+}
+.message-edit-textarea {
+  width: 100%;
+  min-height: 60px;
+  padding: 8px 10px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+}
+.message-edit-textarea:focus {
+  border-color: var(--accent-blue);
+}
+.message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+.message-edit-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+.message-edit-btn:hover:not([disabled]) {
+  background: var(--bg-hover, rgba(0,0,0,0.05));
+}
+.message-edit-btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.message-edit-btn.message-edit-save {
+  background: var(--accent-blue);
+  color: #fff;
+  border-color: var(--accent-blue);
+}
+.message-edit-btn.message-edit-save:hover:not([disabled]) {
+  filter: brightness(1.08);
+}
 .message-action-btn svg {
   width: 14px;
   height: 14px;

@@ -8,6 +8,15 @@
   currentConvId = m ? m[1] : null;
 })();
 
+// ContextGit: data-run-active on the chat container drives CSS
+// greying-out of Edit/Retry buttons while an agent run is in flight.
+// conversations.js sets the initial state on load; we flip it here
+// when chat_ack (start) and chat_response terminal types arrive.
+function setRunActive(active) {
+  var c = document.getElementById('chatMessages');
+  if (c) c.setAttribute('data-run-active', active ? 'true' : 'false');
+}
+
 function connect() {
   var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host + '/ws');
@@ -81,9 +90,20 @@ function handleMessage(msg) {
         window._pendingUserBubble.setAttribute('data-msg-id', msg.data.msg_id);
         window._pendingUserBubble = null;
       }
+      // ContextGit: a fresh chat_ack means a run just started.
+      // Flip the container flag so Edit/Retry grey out until the
+      // run finishes (signalled by chat_response / error / result).
+      setRunActive(true);
       break;
     case 'chat_response':
       handleChatResponse(msg.data);
+      // Terminal response types signal the run is finished — lift
+      // the Edit/Retry grey-out. 'streaming' / 'delta' types leave
+      // the flag on because more is still coming.
+      if (msg.data && (msg.data.type === 'result' || msg.data.type === 'error' ||
+                       msg.data.type === 'cancelled')) {
+        setRunActive(false);
+      }
       break;
     case 'conversation_loaded':
       loadConversationData(msg.data);
