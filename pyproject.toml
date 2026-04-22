@@ -27,7 +27,13 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+    # Used by `openprogram providers setup` / `login` for an interactive
+    # arrow-key menu. Falls back to plain input() when not installed,
+    # so this is officially optional — installing openprogram without
+    # extras still works, just with a flatter prompt.
+    "questionary>=2.0.0",
+]
 
 [project.optional-dependencies]
 dev = [

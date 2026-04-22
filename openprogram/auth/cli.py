@@ -282,16 +282,23 @@ def _cmd_login(provider: str, profile: str, method: Optional[str]) -> int:
         return 1
 
     if method is None:
-        print(f"Login to {provider} (profile: {profile})")
-        print("Available methods:")
-        for i, (mid, label) in enumerate(choices, 1):
-            print(f"  {i}. {mid:24s} — {label}")
-        try:
-            pick = input(f"Pick a method [1-{len(choices)}] (default 1): ").strip() or "1"
-            chosen = choices[int(pick) - 1][0]
-        except (EOFError, ValueError, IndexError):
-            print("Aborted.", file=sys.stderr)
-            return 1
+        # Prefer the arrow-key picker; if questionary isn't installed
+        # it returns None and we fall through to the numeric prompt.
+        from .wizard import pick_login_method_interactive
+        chosen_or_none = pick_login_method_interactive(provider, choices)
+        if chosen_or_none is not None:
+            chosen = chosen_or_none
+        else:
+            print(f"Login to {provider} (profile: {profile})")
+            print("Available methods:")
+            for i, (mid, label) in enumerate(choices, 1):
+                print(f"  {i}. {mid:24s} — {label}")
+            try:
+                pick = input(f"Pick a method [1-{len(choices)}] (default 1): ").strip() or "1"
+                chosen = choices[int(pick) - 1][0]
+            except (EOFError, ValueError, IndexError):
+                print("Aborted.", file=sys.stderr)
+                return 1
     else:
         chosen = method
         if chosen not in {m for m, _ in choices}:
@@ -1028,21 +1035,17 @@ def _print_doctor_report(pools_count: int, profiles_count: int, findings) -> Non
 # ---------------------------------------------------------------------------
 
 def _cmd_setup() -> int:
-    """Interactive wizard inspired by OpenClaw's ``setup.ts``.
+    """Interactive wizard — arrow-key menus when questionary is
+    installed, plain input() fallback otherwise.
 
-    Flow:
-      1. intro — explain what we're about to do
-      2. scan — run discover; surface any adoptable credentials
-      3. offer per-finding: adopt / skip
-      4. offer manual login for popular providers not already covered
-      5. outro — point at `providers list` and `providers doctor`
-
-    Entirely prompt-driven. No TUI framework dependency — plain input()
-    so it works over SSH, in CI logs, and inside screen/tmux. On
-    EOF/^C the wizard exits cleanly with a summary of what was done.
+    The questionary path is the primary UX (modelled after OpenClaw's
+    clack-based setup). The fallback exists so environments without the
+    dep — minimal installs, some CI sandboxes — still get a usable
+    wizard, just without the navigation ergonomics.
     """
     try:
-        return _run_setup_wizard()
+        from .wizard import run_interactive_setup
+        return run_interactive_setup()
     except (KeyboardInterrupt, EOFError):
         print("\n\nSetup interrupted. Run `openprogram providers setup` again "
               "when you're ready. Progress so far is already saved.",
