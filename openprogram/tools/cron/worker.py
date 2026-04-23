@@ -164,9 +164,12 @@ def _save_state(state: dict[str, str]) -> None:
 
 
 def _spawn(entry: dict[str, Any], log_dir: str) -> subprocess.Popen[bytes] | None:
-    """Fire an entry by launching ``openprogram deep-work`` detached."""
+    """Fire an entry. Prompt entries launch ``openprogram deep-work``;
+    command entries run the shell string directly. Returns ``None`` when
+    the entry has neither field set."""
     prompt = (entry.get("prompt") or "").strip()
-    if not prompt:
+    command = (entry.get("command") or "").strip()
+    if not prompt and not command:
         return None
     os.makedirs(log_dir, exist_ok=True)
     ts = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -174,6 +177,17 @@ def _spawn(entry: dict[str, Any], log_dir: str) -> subprocess.Popen[bytes] | Non
     log_fh = open(log_path, "w", buffering=1, encoding="utf-8")
     log_fh.write(f"# cron fire — entry {entry.get('id')} @ {ts}\n")
     log_fh.write(f"# expr: {entry.get('cron')}\n")
+    if command:
+        log_fh.write(f"# command: {command}\n\n")
+        log_fh.flush()
+        return subprocess.Popen(
+            command,
+            shell=True,
+            stdout=log_fh,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
     log_fh.write(f"# prompt: {prompt}\n\n")
     log_fh.flush()
     cmd = [sys.executable, "-m", "openprogram.cli", "deep-work", prompt, "--no-interactive"]
@@ -182,7 +196,7 @@ def _spawn(entry: dict[str, Any], log_dir: str) -> subprocess.Popen[bytes] | Non
         stdout=log_fh,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
-        start_new_session=True,  # detach from worker's process group
+        start_new_session=True,
     )
 
 
@@ -216,7 +230,9 @@ def _tick(state: dict[str, str], *, reboot: bool = False) -> int:
         if not reboot:
             state[eid] = stamp
         fired += 1
-        print(f"[{stamp}] fire {eid}  pid={proc.pid}  ({expr}) {(entry.get('prompt') or '')[:60]}")
+        body = entry.get("prompt") or entry.get("command") or ""
+        kind = "$" if entry.get("command") else ">"
+        print(f"[{stamp}] fire {eid}  pid={proc.pid}  ({expr}) {kind} {body[:60]}")
     return fired
 
 
@@ -273,8 +289,9 @@ def list_next() -> None:
         expr = (e.get("cron") or "").strip()
         matches = match(expr, now)
         tag = "MATCH" if matches else "----"
-        prompt = (e.get("prompt") or "")[:60]
-        print(f"  {e.get('id','?')}  {expr:20s}  {tag}  → {prompt}")
+        body = (e.get("prompt") or e.get("command") or "")[:60]
+        kind = "$" if e.get("command") else ">"
+        print(f"  {e.get('id','?')}  {expr:20s}  {tag}  {kind} {body}")
 
 
 __all__ = ["match", "run_forever", "run_once", "list_next"]

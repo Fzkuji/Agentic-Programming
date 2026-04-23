@@ -69,7 +69,11 @@ SPEC: dict[str, Any] = {
             },
             "prompt": {
                 "type": "string",
-                "description": "The prompt / task the daemon should hand to a fresh agent when the schedule fires. Required for create.",
+                "description": "The prompt / task the daemon should hand to a fresh agent when the schedule fires. Either `prompt` or `command` is required for create.",
+            },
+            "command": {
+                "type": "string",
+                "description": "Shell command to run when the schedule fires — runs directly, no agent involved. Mutually exclusive with `prompt`. Example: `python backup.py` or `rsync -a ~/src /backup/`.",
             },
             "notes": {
                 "type": "string",
@@ -131,6 +135,7 @@ def execute(
     action: str | None = None,
     cron: str | None = None,
     prompt: str | None = None,
+    command: str | None = None,
     notes: str | None = None,
     id: str | None = None,
     **kw: Any,
@@ -138,6 +143,7 @@ def execute(
     action = action or read_string_param(kw, "action", "op")
     cron_expr = cron or read_string_param(kw, "cron", "schedule", "expression")
     prompt = prompt or read_string_param(kw, "prompt", "task", "text")
+    command = command or read_string_param(kw, "command", "cmd", "shell")
     notes = notes or read_string_param(kw, "notes", "note", "description")
     entry_id = id or read_string_param(kw, "id", "entry_id", "slug")
 
@@ -153,7 +159,9 @@ def execute(
             return f"No cron entries in `{path}`."
         lines = [f"Cron entries in `{path}`:"]
         for e in entries:
-            line = f"- `{e.get('id','?')}`  {e.get('cron','?')}  → {(e.get('prompt') or '')[:80]}"
+            body = e.get("prompt") or e.get("command") or ""
+            kind = "$" if e.get("command") else ">"
+            line = f"- `{e.get('id','?')}`  {e.get('cron','?')}  {kind} {body[:80]}"
             if e.get("notes"):
                 line += f"   _({e['notes']})_"
             lines.append(line)
@@ -179,26 +187,33 @@ def execute(
     if action == "create":
         if not cron_expr:
             return "Error: `cron` expression is required for create."
-        if not prompt:
-            return "Error: `prompt` is required for create."
+        if prompt and command:
+            return "Error: pass either `prompt` (agent task) or `command` (shell), not both."
+        if not prompt and not command:
+            return "Error: either `prompt` or `command` is required for create."
         if not _valid_cron(cron_expr):
             return (
                 f"Error: {cron_expr!r} doesn't look like a cron expression "
                 "(want 5 fields like `0 9 * * *`, or a macro like `@daily`)."
             )
-        new_entry = {
+        new_entry: dict[str, Any] = {
             "id": _mint_id(),
             "cron": cron_expr.strip(),
-            "prompt": prompt,
             "notes": notes or "",
             "created_at": int(time.time()),
         }
+        if prompt:
+            new_entry["prompt"] = prompt
+            body_label, body_value = "prompt", prompt
+        else:
+            new_entry["command"] = command
+            body_label, body_value = "command", command
         entries.append(new_entry)
         _save(path, entries)
         return (
             f"Created cron entry `{new_entry['id']}` in `{path}`:\n"
             f"  schedule: {new_entry['cron']}\n"
-            f"  prompt:   {prompt[:160]}\n"
+            f"  {body_label}: {body_value[:160]}\n"
             "Start the worker in another shell to fire entries:\n"
             "  openprogram cron-worker            # run until Ctrl+C\n"
             "  openprogram cron-worker --list     # show which entries match now"
