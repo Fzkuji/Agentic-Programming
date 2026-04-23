@@ -42,6 +42,18 @@ from .watchdog import (
     WatchdogConfig,
     WatchdogTiming,
 )
+from .events import (
+    CliEvent,
+    CompactBoundary,
+    Done,
+    Error,
+    SessionInfo,
+    TextDelta,
+    ThinkingDelta,
+    ToolCall,
+    ToolResult,
+    Usage,
+)
 from .plugin import CliBackendAuthEpochMode, CliBackendPlugin
 from .runner import CliRunner, PreparedExecution, PrepareExecutionContext
 
@@ -66,6 +78,17 @@ __all__ = [
     # plugin
     "CliBackendAuthEpochMode",
     "CliBackendPlugin",
+    # events
+    "CliEvent",
+    "TextDelta",
+    "ThinkingDelta",
+    "ToolCall",
+    "ToolResult",
+    "SessionInfo",
+    "Usage",
+    "CompactBoundary",
+    "Done",
+    "Error",
     # runner
     "CliRunner",
     "PreparedExecution",

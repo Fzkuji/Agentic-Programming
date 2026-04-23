@@ -19,29 +19,15 @@ changing any import or call site.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
 from typing import AsyncIterator, Iterable, Optional
 
 from .config import CliBackendConfig
+from .events import CliEvent
 from .plugin import (
     CliBackendPlugin,
     PreparedExecution,
     PrepareExecutionContext,
 )
-
-
-@dataclass(frozen=True)
-class CliEvent:
-    """One normalized event emitted by a CLI run.
-
-    Phase 0 keeps this deliberately minimal — Phase 1 will add a proper
-    discriminated shape (text_delta / tool_call_start / tool_call_end /
-    thinking_delta / usage / done / error) once we know which fields all
-    four CLIs actually produce.
-    """
-
-    type: str
-    data: dict
 
 
 class CliRunner:
