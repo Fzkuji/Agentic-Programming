@@ -8,10 +8,12 @@ plugin. The shared ``CliRunner`` drives the CLI path via
 from .anthropic import stream_simple
 from .cli_backend import CLAUDE_CODE_CONFIG, CLAUDE_CODE_PLUGIN
 from .cli_runtime import ClaudeCodeRuntime
+from .runtime import AnthropicRuntime
 
 __all__ = [
     "stream_simple",
     "CLAUDE_CODE_CONFIG",
     "CLAUDE_CODE_PLUGIN",
     "ClaudeCodeRuntime",
+    "AnthropicRuntime",
 ]

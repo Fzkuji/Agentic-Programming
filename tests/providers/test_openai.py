@@ -32,8 +32,8 @@ class TestOpenAIRuntime:
         sys.modules["openai"] = self.mock_openai
         monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-        if "openprogram.legacy_providers.openai" in sys.modules:
-            del sys.modules["openprogram.legacy_providers.openai"]
+        if "openprogram.providers.openai_responses.runtime" in sys.modules:
+            del sys.modules["openprogram.providers.openai_responses.runtime"]
 
         yield
 
@@ -41,11 +41,11 @@ class TestOpenAIRuntime:
             sys.modules["openai"] = self._original
         elif "openai" in sys.modules:
             del sys.modules["openai"]
-        if "openprogram.legacy_providers.openai" in sys.modules:
-            del sys.modules["openprogram.legacy_providers.openai"]
+        if "openprogram.providers.openai_responses.runtime" in sys.modules:
+            del sys.modules["openprogram.providers.openai_responses.runtime"]
 
     def _make_runtime(self, **kwargs):
-        from openprogram.legacy_providers.openai import OpenAIRuntime
+        from openprogram.providers.openai_responses.runtime import OpenAIRuntime
         return OpenAIRuntime(api_key="test-key", **kwargs)
 
     def test_text_block_conversion(self):
@@ -127,7 +127,7 @@ class TestOpenAIRuntime:
     def test_no_api_key_raises(self, monkeypatch):
         """Missing API key raises ValueError."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        from openprogram.legacy_providers.openai import OpenAIRuntime
+        from openprogram.providers.openai_responses.runtime import OpenAIRuntime
         with pytest.raises(ValueError, match="API key"):
             OpenAIRuntime(api_key=None)
 

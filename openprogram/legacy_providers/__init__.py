@@ -44,9 +44,9 @@ PROVIDERS = {
     "claude-code":  ("ClaudeCodeRuntime",  "openprogram.providers.anthropic.cli_runtime",  "claude-sonnet-4-6"),
     "openai-codex": ("OpenAICodexRuntime", "openprogram.legacy_providers.openai_codex", "gpt-5.4-mini"),
     "gemini-cli":   ("GoogleGeminiCLIRuntime", "openprogram.providers.google_gemini_cli.runtime", "gemini-2.5-flash"),
-    "anthropic":    ("AnthropicRuntime",    "openprogram.legacy_providers.anthropic",    "claude-sonnet-4-6"),
-    "openai":       ("OpenAIRuntime",       "openprogram.legacy_providers.openai",       "gpt-4.1"),
-    "gemini":       ("GeminiRuntime",       "openprogram.legacy_providers.gemini",       "gemini-2.5-flash"),
+    "anthropic":    ("AnthropicRuntime",    "openprogram.providers.anthropic.runtime",          "claude-sonnet-4-6"),
+    "openai":       ("OpenAIRuntime",       "openprogram.providers.openai_responses.runtime",   "gpt-4.1"),
+    "gemini":       ("GeminiRuntime",       "openprogram.providers.google.runtime",              "gemini-2.5-flash"),
 }
 
 
@@ -251,13 +251,13 @@ def create_runtime(provider: str = None, model: str = None, **kwargs):
 def __getattr__(name):
     """Lazy imports — only load a provider when accessed."""
     if name == "AnthropicRuntime":
-        from openprogram.legacy_providers.anthropic import AnthropicRuntime
+        from openprogram.providers.anthropic.runtime import AnthropicRuntime
         return AnthropicRuntime
     if name == "OpenAIRuntime":
-        from openprogram.legacy_providers.openai import OpenAIRuntime
+        from openprogram.providers.openai_responses.runtime import OpenAIRuntime
         return OpenAIRuntime
     if name == "GeminiRuntime":
-        from openprogram.legacy_providers.gemini import GeminiRuntime
+        from openprogram.providers.google.runtime import GeminiRuntime
         return GeminiRuntime
     if name == "ClaudeCodeRuntime":
         from openprogram.providers.anthropic.cli_runtime import ClaudeCodeRuntime
