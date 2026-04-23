@@ -1,38 +1,43 @@
 """CliRunner — one shared subprocess runner for every CLI backend.
 
-1b: minimal non-live-session path.
+Progress:
 
-- Builds argv from ``CliBackendConfig`` + per-call overrides
-  (model_id, system_prompt, image_paths, session resume)
-- Spawns a fresh subprocess per call
-- Reads stdout via the parser picked by ``parsers.parser_for(config)``
-- Yields ``CliEvent`` values, then ``Done`` (or ``Error``) once the
-  process exits
+- 1a: ``CliEvent`` union
+- 1b: minimal one-shot subprocess path, argv/env builder, parser dispatch
+- 1c: session-id capture + disk persistence + resume
+- 1d: watchdog (no-output stall → kill + recoverable Error)
 
-Not yet implemented (later sub-phases):
+Still TODO:
 
-- Session-id capture + resume_args injection (1c)
-- Watchdog timeouts with fresh vs resume timings (1d)
 - Live-session (``live_session="claude-stdio"``) long-running mode (1e)
-- ``prepare_execution`` async hook + ``cleanup`` (wire-up only so far)
-- ``text_transforms`` input/output rewrites
+- ``text_transforms`` input/output rewrites (part of 1f)
+- ``ClaudeCodeRuntime`` migration (1f)
 """
 
 from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 import os
+import signal
 import time
+from pathlib import Path
 from typing import AsyncIterator, Iterable, Optional
 
 from .config import CliBackendConfig
-from .events import CliEvent, Done, Error
+from .events import CliEvent, Done, Error, SessionInfo
 from .parsers import LineParser, parser_for
 from .plugin import (
     CliBackendPlugin,
     PreparedExecution,
     PrepareExecutionContext,
+)
+from .watchdog import (
+    CLI_FRESH_WATCHDOG_DEFAULTS,
+    CLI_RESUME_WATCHDOG_DEFAULTS,
+    CLI_WATCHDOG_MIN_TIMEOUT_MS,
+    WatchdogTiming,
 )
 
 
@@ -49,15 +54,21 @@ class CliRunner:
         *,
         workspace_dir: str,
         overall_timeout_ms: int = 600_000,
+        session_state_path: Optional[str] = None,
     ) -> None:
         self.plugin = plugin
         self.workspace_dir = workspace_dir
         self.overall_timeout_ms = overall_timeout_ms
         self._config: CliBackendConfig = plugin.config
-        # Session id captured from the previous run — 1c fills this.
-        self._session_id: Optional[str] = None
         self._live_proc: Optional[asyncio.subprocess.Process] = None
         self._auth_epoch: int = 0
+        # Session id persisted across ``run()`` calls. Stored on disk so
+        # restarts resume into the CLI's own session instead of orphaning it.
+        self._session_state_path: Path = Path(
+            session_state_path
+            or str(Path(workspace_dir) / ".openprogram" / "cli_session.json")
+        )
+        self._session_id: Optional[str] = self._load_session_id()
 
     # --- public entry points -----------------------------------------
 
@@ -118,6 +129,10 @@ class CliRunner:
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self.workspace_dir,
                 env=env,
+                # New session so watchdog can reap descendants as a group.
+                # Shell wrappers (``sh -c "..."``) fork child processes the
+                # parent kill() doesn't reach — group-kill terminates them.
+                start_new_session=True,
             )
         except FileNotFoundError as e:
             yield Error(
@@ -141,32 +156,58 @@ class CliRunner:
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
+        # Compute watchdog budget for this call.
+        watchdog_ms = self._compute_watchdog_ms(resume=resume)
+
         # Read stdout.
         assert proc.stdout is not None
+        stalled = False
         try:
-            if cfg.output == "jsonl":
-                async for line_bytes in proc.stdout:
-                    line = line_bytes.decode("utf-8", errors="replace")
-                    for ev in parser(line, call_start):
+            if cfg.output == "json":
+                # Whole-blob mode: apply watchdog to the single read.
+                try:
+                    blob_bytes = await asyncio.wait_for(
+                        proc.stdout.read(), timeout=watchdog_ms / 1000
+                    )
+                except asyncio.TimeoutError:
+                    stalled = True
+                else:
+                    blob = blob_bytes.decode("utf-8", errors="replace")
+                    for ev in parser(blob, call_start):
+                        self._capture_session(ev)
                         yield ev
-            elif cfg.output == "text":
-                async for line_bytes in proc.stdout:
+            else:
+                # jsonl / text / unknown — line-oriented with per-line watchdog.
+                while True:
+                    try:
+                        line_bytes = await asyncio.wait_for(
+                            proc.stdout.readline(), timeout=watchdog_ms / 1000
+                        )
+                    except asyncio.TimeoutError:
+                        stalled = True
+                        break
+                    if not line_bytes:
+                        break
                     line = line_bytes.decode("utf-8", errors="replace")
                     for ev in parser(line, call_start):
-                        yield ev
-            elif cfg.output == "json":
-                blob = (await proc.stdout.read()).decode("utf-8", errors="replace")
-                for ev in parser(blob, call_start):
-                    yield ev
-            else:  # defensive — unknown format treated as text
-                async for line_bytes in proc.stdout:
-                    line = line_bytes.decode("utf-8", errors="replace")
-                    for ev in parser(line, call_start):
+                        self._capture_session(ev)
                         yield ev
         except asyncio.CancelledError:
-            proc.kill()
+            self._kill_tree(proc)
+            await proc.wait()
             await self._run_cleanup(prepared)
             raise
+
+        if stalled:
+            self._kill_tree(proc)
+            await proc.wait()
+            yield Error(
+                message=f"CLI produced no output for {watchdog_ms}ms",
+                recoverable=True,
+                kind="WatchdogStall",
+            )
+            await self._run_cleanup(prepared)
+            return
 
         # Wait for exit + collect stderr.
         returncode = await proc.wait()
@@ -199,8 +240,121 @@ class CliRunner:
         return None
 
     def bump_auth_epoch(self) -> None:
-        """Invalidate current live process / resume state."""
+        """Invalidate current live process + persisted session id.
+
+        Auth changed — the CLI's existing session keyed off the old
+        credentials is useless, so we drop it rather than resume into it.
+        """
         self._auth_epoch += 1
+        self._session_id = None
+        self._save_session_id(None)
+
+    # --- session persistence -----------------------------------------
+
+    def _session_key(self) -> str:
+        """Key under which this runner's session id is stored on disk.
+
+        Keyed by plugin id so two backends sharing a workspace don't clobber
+        each other. Auth-profile scoping is orthogonal — callers that care
+        pass a distinct ``session_state_path`` per profile.
+        """
+        return self.plugin.id
+
+    def _load_session_id(self) -> Optional[str]:
+        try:
+            raw = self._session_state_path.read_text()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return None
+        try:
+            blob = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(blob, dict):
+            return None
+        sid = blob.get(self._session_key())
+        return sid if isinstance(sid, str) and sid else None
+
+    def _save_session_id(self, sid: Optional[str]) -> None:
+        try:
+            self._session_state_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return
+        blob: dict[str, str] = {}
+        if self._session_state_path.exists():
+            try:
+                loaded = json.loads(self._session_state_path.read_text())
+                if isinstance(loaded, dict):
+                    blob = {k: v for k, v in loaded.items() if isinstance(v, str)}
+            except (OSError, json.JSONDecodeError):
+                blob = {}
+        key = self._session_key()
+        if sid is None:
+            blob.pop(key, None)
+        else:
+            blob[key] = sid
+        try:
+            self._session_state_path.write_text(json.dumps(blob, indent=2))
+        except OSError:
+            pass
+
+    def _capture_session(self, ev: CliEvent) -> None:
+        """If the event carries a session id, persist it for future resumes."""
+        if isinstance(ev, SessionInfo) and ev.session_id:
+            if ev.session_id != self._session_id:
+                self._session_id = ev.session_id
+                self._save_session_id(ev.session_id)
+
+    # --- subprocess helpers ------------------------------------------
+
+    @staticmethod
+    def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+        """SIGKILL the whole process group — kills shell wrappers' children too."""
+        if proc.returncode is not None:
+            return
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+    # --- watchdog -----------------------------------------------------
+
+    def _compute_watchdog_ms(self, *, resume: bool) -> int:
+        """Resolve fresh/resume watchdog to an absolute millisecond budget.
+
+        Priority: backend override in ``cfg.reliability`` > built-in defaults.
+        Result is clamped to ``[CLI_WATCHDOG_MIN_TIMEOUT_MS, overall_timeout_ms]``
+        so a pathological config can't disable the watchdog entirely.
+        """
+        timing: WatchdogTiming
+        defaults = (
+            CLI_RESUME_WATCHDOG_DEFAULTS if resume else CLI_FRESH_WATCHDOG_DEFAULTS
+        )
+        override: Optional[WatchdogTiming] = None
+        rel = self._config.reliability
+        if rel is not None and rel.watchdog is not None:
+            override = rel.watchdog.resume if resume else rel.watchdog.fresh
+        timing = override or defaults
+
+        if timing.no_output_timeout_ms is not None:
+            budget = timing.no_output_timeout_ms
+        elif timing.no_output_timeout_ratio is not None:
+            budget = int(self.overall_timeout_ms * timing.no_output_timeout_ratio)
+        else:
+            budget = self.overall_timeout_ms
+
+        if timing.min_ms is not None:
+            budget = max(budget, timing.min_ms)
+        if timing.max_ms is not None:
+            budget = min(budget, timing.max_ms)
+
+        budget = max(budget, CLI_WATCHDOG_MIN_TIMEOUT_MS)
+        budget = min(budget, self.overall_timeout_ms)
+        return budget
 
     # --- internals ----------------------------------------------------
 
@@ -216,13 +370,21 @@ class CliRunner:
         cfg = self._config
         argv: list[str] = [cfg.command]
 
-        # ``session_args`` always apply when session mode is active.
-        if cfg.session_args and cfg.session_mode != "none" and self._session_id:
-            argv.extend(self._fill_session(cfg.session_args))
-
-        # ``resume_args`` apply only on resume runs.
-        if resume and cfg.resume_args and self._session_id:
-            argv.extend(self._fill_session(cfg.resume_args))
+        # Resume takes priority when requested and we have a prior session.
+        # ``resume_args`` and ``session_args`` are mutually exclusive on one
+        # call — resume_args exists precisely because some CLIs use a
+        # different flag to resume vs. start fresh (``--resume <id>`` vs.
+        # ``--session-id <id>``).
+        apply_session_args = (
+            cfg.session_args and cfg.session_mode != "none" and self._session_id
+        )
+        apply_resume_args = (
+            resume and cfg.resume_args and self._session_id
+        )
+        if apply_resume_args:
+            argv.extend(self._fill_session(cfg.resume_args or ()))
+        elif apply_session_args:
+            argv.extend(self._fill_session(cfg.session_args or ()))
 
         # Model.
         cli_model = (cfg.model_aliases or {}).get(model_id, model_id)
@@ -230,14 +392,15 @@ class CliRunner:
             argv.extend([cfg.model_arg, cli_model])
 
         # Session id as a standalone arg (``session_arg``, like ``--session-id``).
-        if cfg.session_arg and cfg.session_mode == "always":
+        # If we don't have one yet, pre-mint a uuid the CLI will echo back via
+        # its first "system" message — that's how we seed resume persistence.
+        if cfg.session_arg and cfg.session_mode == "always" and not apply_resume_args:
             sid = self._session_id
             if sid is None:
-                # 1c will persist+rotate; for 1b we generate a fresh uuid so
-                # the CLI has something stable to key its own state on.
                 import uuid
                 sid = uuid.uuid4().hex
                 self._session_id = sid
+                self._save_session_id(sid)
             argv.extend([cfg.session_arg, sid])
 
         # System prompt (free-form text flag — ``system_prompt_arg``).

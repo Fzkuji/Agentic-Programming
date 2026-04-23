@@ -187,6 +187,102 @@ def test_argv_builder_model_and_session_and_system(tmp_path: Path) -> None:
     assert argv[-1] == "hello"
 
 
+def test_session_id_captured_and_persisted(tmp_path: Path) -> None:
+    """After run 1 emits SessionInfo, run 2 should inject it via resume_args."""
+    state_path = tmp_path / "sess.json"
+    cli = _write_fake_cli(tmp_path, lines=[
+        {"type": "system", "session_id": "sess-captured", "model": "claude-sonnet-4-6"},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}]}},
+    ])
+    plugin = _make_plugin(
+        str(cli),
+        resume_args=("--resume", "{sessionId}"),
+        session_mode="existing",
+    )
+    # Run #1: no prior session → no resume_args.
+    r1 = CliRunner(plugin=plugin, workspace_dir=str(tmp_path),
+                   session_state_path=str(state_path))
+    argv1 = r1._build_argv(prompt="hi", model_id="claude-sonnet-4-6",
+                           system_prompt=None, image_paths=(), resume=True)
+    assert "--resume" not in argv1
+    asyncio.run(_collect(r1, "hi"))
+    assert r1._session_id == "sess-captured"
+    # State file contains the id.
+    blob = json.loads(state_path.read_text())
+    assert blob["fake-cli"] == "sess-captured"
+
+    # Run #2: brand new runner instance reads the state file and resumes.
+    r2 = CliRunner(plugin=plugin, workspace_dir=str(tmp_path),
+                   session_state_path=str(state_path))
+    argv2 = r2._build_argv(prompt="hi", model_id="claude-sonnet-4-6",
+                           system_prompt=None, image_paths=(), resume=True)
+    assert "--resume" in argv2 and "sess-captured" in argv2
+
+
+def test_bump_auth_epoch_clears_session(tmp_path: Path) -> None:
+    state_path = tmp_path / "sess.json"
+    cli = _write_fake_cli(tmp_path, lines=[
+        {"type": "system", "session_id": "sess-A", "model": "claude-sonnet-4-6"},
+        {"type": "assistant", "message": {"content": [{"type": "text", "text": "x"}]}},
+    ])
+    plugin = _make_plugin(
+        str(cli),
+        resume_args=("--resume", "{sessionId}"),
+        session_mode="existing",
+    )
+    r = CliRunner(plugin=plugin, workspace_dir=str(tmp_path),
+                  session_state_path=str(state_path))
+    asyncio.run(_collect(r, "hi"))
+    assert r._session_id == "sess-A"
+    r.bump_auth_epoch()
+    assert r._session_id is None
+    # State file no longer carries the id under this plugin key.
+    blob = json.loads(state_path.read_text())
+    assert "fake-cli" not in blob
+
+
+def test_watchdog_kills_silent_cli(tmp_path: Path) -> None:
+    """CLI that prints nothing then sleeps forever must be killed and
+    produce an ``Error(kind="WatchdogStall", recoverable=True)``."""
+    script = tmp_path / "silent_cli"
+    # Sleep long enough to outrun the 200ms watchdog; we'll kill it.
+    script.write_text("#!/bin/sh\nsleep 30\n")
+    script.chmod(0o755)
+    plugin = _make_plugin(str(script))
+    runner = CliRunner(
+        plugin=plugin,
+        workspace_dir=str(tmp_path),
+        overall_timeout_ms=200,  # short overall → watchdog clamps to this
+    )
+    events = asyncio.run(_collect(runner, "hi"))
+    assert len(events) == 1 and isinstance(events[0], Error)
+    assert events[0].kind == "WatchdogStall"
+    assert events[0].recoverable is True
+
+
+def test_watchdog_does_not_fire_when_output_flows(tmp_path: Path) -> None:
+    """Output arriving before the budget expires must reset the timer."""
+    script = tmp_path / "dripping_cli"
+    # Two lines separated by 30ms; watchdog at ~200ms shouldn't fire.
+    script.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"a"}]}}\\n\'\n'
+        "sleep 0.03\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"b"}]}}\\n\'\n'
+    )
+    script.chmod(0o755)
+    plugin = _make_plugin(str(script))
+    runner = CliRunner(
+        plugin=plugin,
+        workspace_dir=str(tmp_path),
+        overall_timeout_ms=1_000,
+    )
+    events = asyncio.run(_collect(runner, "hi"))
+    texts = [e.text for e in events if isinstance(e, TextDelta)]
+    assert texts == ["a", "b"]
+    assert any(isinstance(e, Done) for e in events)
+
+
 def test_stdin_mode_feeds_prompt(tmp_path: Path) -> None:
     # Fake CLI that reads stdin and echoes it wrapped in a text block.
     script = tmp_path / "echo_stdin"
