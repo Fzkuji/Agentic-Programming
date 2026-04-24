@@ -116,10 +116,25 @@ def _have_questionary() -> bool:
 
 
 def _confirm(prompt: str, default: bool = True) -> bool:
+    """Arrow-key Yes/No select. No y/n keypress — arrow + Enter only.
+
+    Uses questionary.select with two options so every prompt in the
+    wizard has the same input shape, matching OpenClaw's clack-style
+    select. Falls back to input() only when questionary isn't installed.
+    """
     if _have_questionary():
         import questionary
-        ans = questionary.confirm(prompt, default=default).ask()
-        return bool(ans) if ans is not None else False
+        default_label = "Yes" if default else "No"
+        ans = questionary.select(
+            prompt,
+            choices=["Yes", "No"],
+            default=default_label,
+            use_shortcuts=False,
+            use_arrow_keys=True,
+            instruction="(↑/↓, enter)",
+        ).ask()
+        return ans == "Yes"
+    # Fallback: typed yes/no. Only reached when questionary is absent.
     hint = "Y/n" if default else "y/N"
     try:
         s = input(f"{prompt} [{hint}] ").strip().lower()
