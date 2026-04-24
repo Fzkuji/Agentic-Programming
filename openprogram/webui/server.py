@@ -2387,37 +2387,46 @@ def create_app():
                 bare_model = tail
         target_provider = explicit_provider or inferred_provider
 
-        def _apply_to_conv(conv):
-            old_rt = conv.get("runtime")
-            cur_prov = conv.get("provider_name", _runtime_management._default_provider)
-            prov = target_provider or cur_prov
-            need_new_rt = (target_provider and target_provider != cur_prov) or (old_rt is None)
-            if need_new_rt:
-                if old_rt and hasattr(old_rt, "close"):
-                    try: old_rt.close()
-                    except Exception: pass
-                new_rt = _create_runtime_for_visualizer(prov, model=bare_model)
-                conv["runtime"] = new_rt
-                conv["provider_name"] = prov
-            else:
-                old_rt.model = bare_model
-            return prov
+        # Runtime construction may call into sync credential acquisition
+        # paths (OpenAICodexRuntime.__init__ -> acquire_sync) that refuse
+        # to run inside a running event loop. Off-load to a thread so the
+        # first switch into codex / other async-hostile runtimes doesn't
+        # 500 half-way through and leave global state ahead of the
+        # actually-created runtime (which caused the "takes two clicks
+        # to switch to gpt codex" bug).
+        async def _build_rt(provider: str):
+            return await asyncio.to_thread(
+                _create_runtime_for_visualizer, provider, bare_model
+            )
 
         if conv_id:
             with _conversations_lock:
                 conv = _conversations.get(conv_id)
             if conv:
-                prov = _apply_to_conv(conv)
+                old_rt = conv.get("runtime")
+                cur_prov = conv.get("provider_name", _runtime_management._default_provider)
+                prov = target_provider or cur_prov
+                need_new_rt = (target_provider and target_provider != cur_prov) or (old_rt is None)
+                if need_new_rt:
+                    new_rt = await _build_rt(prov)
+                    if old_rt and hasattr(old_rt, "close"):
+                        try: old_rt.close()
+                        except Exception: pass
+                    conv["runtime"] = new_rt
+                    conv["provider_name"] = prov
+                else:
+                    old_rt.model = bare_model
                 info = _get_provider_info(conv_id)
                 _broadcast(json.dumps({"type": "provider_changed", "data": info}))
                 return JSONResponse(content={"switched": True, "provider": prov, "model": bare_model})
 
         # Default runtime path (no conv_id).
         if target_provider and target_provider != _runtime_management._default_provider:
+            new_rt = await _build_rt(target_provider)
             if _runtime_management._default_runtime and hasattr(_runtime_management._default_runtime, "close"):
                 try: _runtime_management._default_runtime.close()
                 except Exception: pass
-            _runtime_management._default_runtime = _create_runtime_for_visualizer(target_provider, model=bare_model)
+            _runtime_management._default_runtime = new_rt
             _runtime_management._default_provider = target_provider
         elif _runtime_management._default_runtime:
             _runtime_management._default_runtime.model = bare_model
@@ -2524,20 +2533,36 @@ def create_app():
             new_provider = chat.get("provider", _runtime_management._chat_provider)
             new_model = chat.get("model", _runtime_management._chat_model)
             if new_provider != _runtime_management._chat_provider or new_model != _runtime_management._chat_model:
+                # Build runtimes OFF-LOOP first. Some providers (codex)
+                # call sync credential-acquisition paths in __init__ that
+                # refuse to run inside an event loop; run_in_threadpool
+                # keeps them happy and — more importantly — guarantees we
+                # only touch globals / conv state AFTER the runtimes
+                # construct successfully. Previously a mid-loop exception
+                # left _chat_provider already flipped to the new value
+                # while the actual runtime was still the old one, so the
+                # retry click saw new==current and no-op'd, giving the
+                # "two clicks to switch" symptom.
+                with _conversations_lock:
+                    conv_ids = list(_conversations.keys())
+                new_rts = {}
+                for cid in conv_ids:
+                    new_rts[cid] = await asyncio.to_thread(
+                        _create_runtime_for_visualizer, new_provider, new_model
+                    )
                 _runtime_management._chat_provider = new_provider
                 _runtime_management._chat_model = new_model
-                # Update all existing conversation runtimes
                 with _conversations_lock:
-                    for conv in _conversations.values():
+                    for cid, new_rt in new_rts.items():
+                        conv = _conversations.get(cid)
+                        if not conv:
+                            continue
                         old_rt = conv.get("runtime")
-                        if old_rt and hasattr(old_rt, 'close'):
-                            old_rt.close()
-                        new_rt = _create_runtime_for_visualizer(
-                            _runtime_management._chat_provider,
-                            model=_runtime_management._chat_model,
-                        )
+                        if old_rt and hasattr(old_rt, "close"):
+                            try: old_rt.close()
+                            except Exception: pass
                         conv["runtime"] = new_rt
-                        conv["provider_name"] = _runtime_management._chat_provider
+                        conv["provider_name"] = new_provider
                 changed = True
 
         if body and "exec" in body:
