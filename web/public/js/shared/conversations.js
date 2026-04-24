@@ -214,11 +214,25 @@ function renderConversationMessages(conv) {
     if (msg.role === 'user' && msg.display === 'runtime') {
       var nextMsg = (mi + 1 < conv.messages.length) ? conv.messages[mi + 1] : null;
       if (nextMsg && nextMsg.role === 'assistant' && (nextMsg.display === 'runtime' || nextMsg.function)) {
-        container.appendChild(_buildRestoredRuntimeBlock(msg, nextMsg, mi));
+        var restoredEl = _buildRestoredRuntimeBlock(msg, nextMsg, mi);
+        // Stamp BOTH underlying message ids so the history-graph
+        // visibility sync can light up both runtime-display nodes
+        // (user-call + assistant-result) when this merged block is
+        // on screen. data-msg-id stays single for the action bar's
+        // retry/branch targeting — nextMsg.id is the assistant id
+        // which the retry endpoint walks back from correctly.
+        if (nextMsg.id) restoredEl.setAttribute('data-msg-id', nextMsg.id);
+        var ids = [];
+        if (msg.id) ids.push(msg.id);
+        if (nextMsg.id) ids.push(nextMsg.id);
+        if (ids.length) restoredEl.setAttribute('data-msg-ids', ids.join(' '));
+        container.appendChild(restoredEl);
         mi++;
         continue;
       }
-      container.appendChild(_buildInterruptedRuntimeBlock(msg));
+      var interruptedEl = _buildInterruptedRuntimeBlock(msg);
+      if (msg.id) interruptedEl.setAttribute('data-msg-id', msg.id);
+      container.appendChild(interruptedEl);
       continue;
     }
 

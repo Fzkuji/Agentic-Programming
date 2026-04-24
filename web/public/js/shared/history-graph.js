@@ -462,20 +462,33 @@
   }
 
   // Compute which chat bubbles intersect #chatArea's viewport and
-  // push that set to the graph.
+  // push that set to the graph. A bubble may carry data-msg-ids
+  // (space-separated list) when it represents more than one
+  // underlying message — e.g. a restored runtime block that merges
+  // the user-call + assistant-result pair. Every listed id lights
+  // up so both graph squares reflect the on-screen state.
   function _recomputeVisibility() {
     var area = document.getElementById('chatArea');
     if (!area) return;
     var container = document.getElementById('chatMessages');
     if (!container) return;
     var rect = area.getBoundingClientRect();
-    var bubbles = container.querySelectorAll(':scope > [data-msg-id]');
+    var bubbles = container.querySelectorAll(
+      ':scope > [data-msg-id], :scope > [data-msg-ids]'
+    );
     var newSet = Object.create(null);
     for (var i = 0; i < bubbles.length; i++) {
       var br = bubbles[i].getBoundingClientRect();
-      if (br.bottom > rect.top && br.top < rect.bottom) {
-        var id = bubbles[i].getAttribute('data-msg-id');
-        if (id) newSet[id] = true;
+      if (br.bottom <= rect.top || br.top >= rect.bottom) continue;
+      var multi = bubbles[i].getAttribute('data-msg-ids');
+      if (multi) {
+        var parts = multi.split(/\s+/);
+        for (var j = 0; j < parts.length; j++) {
+          if (parts[j]) newSet[parts[j]] = true;
+        }
+      } else {
+        var single = bubbles[i].getAttribute('data-msg-id');
+        if (single) newSet[single] = true;
       }
     }
     _setVisibleSet(newSet);
