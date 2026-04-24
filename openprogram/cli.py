@@ -1068,6 +1068,27 @@ def _dispatch_agents_verb(args, parser) -> None:
             print(f"No agent {args.id!r}")
             sys.exit(1)
         print(json.dumps(a.to_dict(), indent=2, sort_keys=True, default=str))
+        # Also show which channels route into this agent — that's
+        # how most users actually think about the record ("my main
+        # agent is hooked up to WeChat and Telegram").
+        try:
+            from openprogram.channels import bindings as _b
+            rows = _b.list_for_agent(a.id)
+        except Exception:
+            rows = []
+        print()
+        print("Channel bindings:")
+        if not rows:
+            print("  (none — inbound messages fall back to the default "
+                  "agent if that's this one, otherwise ignored)")
+            return
+        for r in rows:
+            m = r["match"]
+            peer = m.get("peer") or {}
+            peer_str = (f"  peer={peer.get('kind','?')}:{peer.get('id','?')}"
+                        if peer else "")
+            print(f"  · {r['id']}  channel={m.get('channel','*')}  "
+                  f"account={m.get('account_id','*')}{peer_str}")
         return
     if verb == "set-default":
         _A.set_default(args.id)

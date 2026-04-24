@@ -80,8 +80,11 @@ class AgentSpec:
     #   "per-account-channel-peer"  — one per (account, channel, sender)
     session_scope: str = "per-account-channel-peer"
     # Idle reset — start a fresh session after N minutes of silence
-    # (0 = never). Independent of daily reset (below).
-    session_idle_minutes: int = 0
+    # (0 = never). Default 4320 (3 days) so a long-lost contact like
+    # "alice who hasn't written in a month" shows up as a new session
+    # thread rather than reviving the old context. Independent of
+    # daily reset (below).
+    session_idle_minutes: int = 4320
     # Daily reset — if non-empty, hour-of-day in local time at which
     # stale sessions get cut (e.g. "04:00"). Empty = no daily reset.
     session_daily_reset: str = ""
@@ -115,7 +118,11 @@ class AgentSpec:
             session_scope=str(
                 raw.get("session_scope") or "per-account-channel-peer"
             ),
-            session_idle_minutes=int(raw.get("session_idle_minutes") or 0),
+            session_idle_minutes=int(
+                raw.get("session_idle_minutes")
+                if raw.get("session_idle_minutes") is not None
+                else 4320
+            ),
             session_daily_reset=str(raw.get("session_daily_reset") or ""),
             created_at=float(raw.get("created_at") or 0.0),
             updated_at=float(raw.get("updated_at") or 0.0),

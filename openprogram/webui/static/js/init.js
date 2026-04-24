@@ -94,6 +94,18 @@ function handleMessage(msg) {
     case 'agent_changed':
       if (typeof _handleAgentChanged === 'function') _handleAgentChanged(msg.data);
       break;
+    case 'channel_bindings':
+    case 'channel_accounts':
+      if (typeof window._agentsBindingsTemp === 'function') {
+        window._agentsBindingsTemp(msg);
+      }
+      break;
+    case 'binding_changed':
+      if (typeof window._agentsBindingsTemp === 'function' &&
+          ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action: 'list_channel_bindings' }));
+      }
+      break;
     case 'agent_session_updated':
       // A channel handler wrote a new turn into an agent session — if
       // the user is viewing that session, re-fetch; always refresh
@@ -107,10 +119,6 @@ function handleMessage(msg) {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ action: 'list_conversations' }));
       }
-      break;
-    case 'binding_changed':
-      // bindings live outside conversation state — no UI refresh
-      // needed here, but any open admin page can listen separately.
       break;
     case 'status':
       isPaused = msg.paused;

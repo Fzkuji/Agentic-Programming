@@ -86,16 +86,23 @@ function openAgentSwitcher() {
       ? a.model.provider + '/' + a.model.id
       : 'no model';
     rowsHtml +=
-      '<button class="agent-row' + active + '" data-aid="' + escAttr(a.id) + '">' +
-        '<div class="agent-row-title">' + escHtml(a.name || a.id) + tag + '</div>' +
-        '<div class="agent-row-sub">' + escHtml(pm) + ' · ' +
-          escHtml(a.thinking_effort || 'medium') + ' effort</div>' +
-      '</button>';
+      '<div class="agent-row-wrap' + active + '">' +
+        '<button class="agent-row" data-aid="' + escAttr(a.id) + '" title="Switch to this agent">' +
+          '<div class="agent-row-title">' + escHtml(a.name || a.id) + tag + '</div>' +
+          '<div class="agent-row-sub">' + escHtml(pm) + ' · ' +
+            escHtml(a.thinking_effort || 'medium') + ' effort</div>' +
+        '</button>' +
+        '<button class="agent-row-bindings" data-aid="' + escAttr(a.id) +
+            '" title="Channel connections for this agent">⇄</button>' +
+      '</div>';
   }
 
   overlay.innerHTML =
     '<div class="confirm-dialog">' +
-      '<div class="confirm-title">Switch agent</div>' +
+      '<div class="confirm-title">Agents</div>' +
+      '<div class="confirm-message" style="text-align:left;font-size:12px;color:var(--text-muted);margin:0 0 4px">' +
+        'Click an agent to switch. ⇄ opens channel connections.' +
+      '</div>' +
       '<div class="agent-list">' + rowsHtml + '</div>' +
       '<div class="confirm-actions">' +
         '<button class="confirm-btn" id="_agCancel">Close</button>' +
@@ -117,6 +124,147 @@ function openAgentSwitcher() {
       close();
       switchAgent(id);
     });
+  });
+  overlay.querySelectorAll('.agent-row-bindings').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var id = btn.getAttribute('data-aid');
+      close();
+      openAgentBindingsDialog(id);
+    });
+  });
+}
+
+function openAgentBindingsDialog(agentId) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  // Request fresh data — we re-render after both land.
+  var state = { bindings: null, accounts: null };
+
+  function tryRender() {
+    if (state.bindings === null || state.accounts === null) return;
+    render();
+  }
+
+  var origHandler = window._agentsBindingsTemp;
+  window._agentsBindingsTemp = function(msg) {
+    if (msg.type === 'channel_bindings') {
+      state.bindings = msg.data || [];
+      tryRender();
+    } else if (msg.type === 'channel_accounts') {
+      state.accounts = msg.data || [];
+      tryRender();
+    }
+  };
+
+  ws.send(JSON.stringify({ action: 'list_channel_bindings' }));
+  ws.send(JSON.stringify({ action: 'list_channel_accounts' }));
+
+  var overlay = document.createElement('div');
+  overlay.className = 'confirm-overlay visible';
+  overlay.innerHTML =
+    '<div class="confirm-dialog">' +
+      '<div class="confirm-title">Loading ' + escHtml(agentId) + '...</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  function close() {
+    window._agentsBindingsTemp = origHandler;
+    overlay.classList.remove('visible');
+    overlay.addEventListener('transitionend', function() { overlay.remove(); });
+  }
+
+  function render() {
+    var mine = state.bindings.filter(function(b) { return b.agent_id === agentId; });
+    var agent = agentById(agentId) || { id: agentId, name: agentId };
+    var bindingRowsHtml = '';
+    if (!mine.length) {
+      bindingRowsHtml = '<div class="bind-empty">No channels connected yet. Add one below.</div>';
+    } else {
+      for (var i = 0; i < mine.length; i++) {
+        var b = mine[i];
+        var m = b.match || {};
+        var peer = m.peer || null;
+        var summary = (m.channel || '*') + ' · account=' + (m.account_id || '*');
+        if (peer) summary += ' · peer=' + (peer.kind || '?') + ':' + (peer.id || '?');
+        bindingRowsHtml +=
+          '<div class="bind-row">' +
+            '<span class="bind-row-label">' + escHtml(summary) + '</span>' +
+            '<button class="bind-row-rm" data-bid="' + escAttr(b.id) + '" title="Remove">×</button>' +
+          '</div>';
+      }
+    }
+
+    var acctOptionsByChannel = {};
+    for (var j = 0; j < state.accounts.length; j++) {
+      var acc = state.accounts[j];
+      (acctOptionsByChannel[acc.channel] = acctOptionsByChannel[acc.channel] || []).push(acc);
+    }
+    var acctOptionsHtml = '';
+    var allChannels = ['wechat', 'telegram', 'discord', 'slack'];
+    for (var ci = 0; ci < allChannels.length; ci++) {
+      var ch = allChannels[ci];
+      var accs = acctOptionsByChannel[ch] || [];
+      for (var ai = 0; ai < accs.length; ai++) {
+        acctOptionsHtml += '<option value="' + escAttr(ch + '|' + accs[ai].account_id) + '">' +
+          escHtml(ch + ' · ' + accs[ai].account_id) + '</option>';
+      }
+    }
+    if (!acctOptionsHtml) {
+      acctOptionsHtml = '<option value="">(no channel accounts — run `openprogram channels accounts add`)</option>';
+    }
+
+    overlay.querySelector('.confirm-dialog').innerHTML =
+      '<div class="confirm-title">' + escHtml(agent.name || agent.id) + ' · Channels</div>' +
+      '<div class="confirm-message" style="text-align:left;font-size:12px;color:var(--text-muted);margin:0 0 8px">' +
+        'Inbound messages matching a rule below route to this agent.' +
+      '</div>' +
+      '<div class="bind-section">' + bindingRowsHtml + '</div>' +
+      '<div class="bind-add">' +
+        '<div class="bind-field"><label class="bind-label">Add connection</label>' +
+          '<select id="_bindAcct" class="bind-input">' + acctOptionsHtml + '</select></div>' +
+        '<div class="bind-field"><label class="bind-label">Specific peer id (optional, blank = whole account)</label>' +
+          '<input id="_bindPeer" class="bind-input" placeholder="e.g. WeChat openid, Telegram chat_id"></div>' +
+        '<button class="confirm-btn" id="_bindAdd">Attach</button>' +
+      '</div>' +
+      '<div class="confirm-actions">' +
+        '<button class="confirm-btn" id="_bindClose">Close</button>' +
+      '</div>';
+
+    overlay.querySelector('#_bindClose').onclick = close;
+    overlay.querySelectorAll('.bind-row-rm').forEach(function(btn) {
+      btn.onclick = function() {
+        ws.send(JSON.stringify({
+          action: 'remove_binding', binding_id: btn.getAttribute('data-bid'),
+        }));
+        state.bindings = state.bindings.filter(function(b) {
+          return b.id !== btn.getAttribute('data-bid');
+        });
+        render();
+      };
+    });
+    overlay.querySelector('#_bindAdd').onclick = function() {
+      var raw = overlay.querySelector('#_bindAcct').value;
+      if (!raw) return;
+      var parts = raw.split('|');
+      var peerId = overlay.querySelector('#_bindPeer').value.trim();
+      var body = {
+        action: 'add_binding',
+        agent_id: agentId,
+        channel: parts[0],
+        account_id: parts[1],
+      };
+      if (peerId) body.peer = { kind: 'direct', id: peerId };
+      ws.send(JSON.stringify(body));
+      // Optimistic refresh — the server will also broadcast
+      // binding_changed so state stays current.
+      setTimeout(function() {
+        ws.send(JSON.stringify({ action: 'list_channel_bindings' }));
+      }, 200);
+    };
+  }
+
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) close();
   });
 }
 
