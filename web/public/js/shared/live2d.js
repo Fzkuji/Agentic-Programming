@@ -20,11 +20,15 @@
       }
       loader({
         mobileDisplay: true,
+        // model.oml2d.com returned ERR_CONNECTION_CLOSED on the
+        // user's network. Switch to a jsDelivr-hosted mirror that
+        // shares reachability with the oh-my-live2d script itself —
+        // if jsDelivr works for the JS, it works for the model.
         models: [{
-          name: 'pio',
-          path: 'https://model.oml2d.com/Pio/model.json',
+          name: 'shizuku',
+          path: 'https://fastly.jsdelivr.net/gh/guansss/pixi-live2d-display/test/assets/shizuku/shizuku.model.json',
           position: [0, 40],
-          scale: 0.25,
+          scale: 0.18,
           stageStyle: { height: 300 },
         }],
         menus: { disable: true },
