@@ -136,11 +136,17 @@ def main():
     channels_sub = p_channels.add_subparsers(dest="channels_verb", metavar="verb")
     channels_sub.add_parser("list", help="Show per-platform enable + config status")
     p_chstart = channels_sub.add_parser("start",
-        help="Start every enabled channel. Foreground by default; "
-             "use --detach to fork a background worker and return.")
+        help="Start the channels worker in the background. Returns "
+             "immediately; use `channels stop` to kill it. Add "
+             "--foreground to keep it attached to your terminal instead "
+             "(useful for debugging).")
+    p_chstart.add_argument("--foreground", "--fg", action="store_true",
+        help="Stay in the foreground (blocking) instead of detaching. "
+             "Ctrl-C stops it.")
+    # Back-compat: older docs + the inline prompt_spawn_if_configured_but_dead
+    # path still pass --detach. Accept and ignore it.
     p_chstart.add_argument("--detach", action="store_true",
-        help="Fork a background worker and return. Logs to "
-             "<state>/channels.log. Use `openprogram channels stop` to kill.")
+        help=argparse.SUPPRESS)
     channels_sub.add_parser("stop",
         help="Stop the background channels worker (SIGTERM via PID file).")
     channels_sub.add_parser("status",
@@ -299,11 +305,14 @@ def main():
                       f"{str(r['implemented']):6}")
             return
         if verb == "start":
-            if getattr(args, "detach", False):
-                from openprogram.channels.worker import spawn_detached
-                sys.exit(spawn_detached())
-            from openprogram.channels.runner import run_all
-            sys.exit(run_all())
+            # Default is background (detached). --foreground keeps it
+            # blocking for debugging; --detach stays accepted but is
+            # redundant now.
+            if getattr(args, "foreground", False):
+                from openprogram.channels.runner import run_all
+                sys.exit(run_all())
+            from openprogram.channels.worker import spawn_detached
+            sys.exit(spawn_detached())
         if verb == "stop":
             from openprogram.channels.worker import stop_worker
             sys.exit(stop_worker())
