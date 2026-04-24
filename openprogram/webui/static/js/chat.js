@@ -79,6 +79,9 @@ function sendMessage(textOverride) {
       action: 'chat',
       text: text,
       conv_id: currentConvId,
+      // New conversations land in the UI's current agent so the new
+      // session file is created under that agent's sessions/ dir.
+      agent_id: (typeof currentAgentId !== 'undefined' ? currentAgentId : null),
       thinking_effort: _thinkingEffort,
       exec_thinking_effort: _execThinkingEffort
     }));

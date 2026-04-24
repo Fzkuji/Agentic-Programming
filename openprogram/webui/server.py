@@ -150,10 +150,10 @@ from openprogram.webui import persistence as _persist
 
 
 def _save_conversation(conv_id: str):
-    """Persist one conversation's meta + messages.
+    """Persist one conversation's meta + messages under its agent.
 
     Per-function execution trees are written incrementally by
-    ``append_tree_event`` in the tree event callback — we do not rewrite
+    append_tree_event in the tree event callback — we do not rewrite
     them here.
     """
     if not conv_id:
@@ -164,8 +164,10 @@ def _save_conversation(conv_id: str):
             return
         root_ctx = conv.get("root_context")
         runtime = conv.get("runtime")
+        agent_id = conv.get("agent_id") or _default_agent_id()
         meta = {
             "id": conv_id,
+            "agent_id": agent_id,
             "title": conv.get("title", "Untitled"),
             "provider_name": conv.get("provider_name"),
             "session_id": getattr(runtime, "_session_id", None),
@@ -177,41 +179,54 @@ def _save_conversation(conv_id: str):
             "_titled": conv.get("_titled", False),
             "_last_exec_session": conv.get("_last_exec_session"),
             "_last_exec_cumulative_usage": conv.get("_last_exec_cumulative_usage"),
-            # ContextGit head pointer — the commit the UI should show on
-            # reload. Old metadata without this field falls back to
-            # "last message" at load time.
             "head_id": conv.get("head_id"),
+            # Channel-bound sessions carry these from dispatch_inbound;
+            # persist them so outbound routing still works after reload.
+            "channel": conv.get("channel"),
+            "account_id": conv.get("account_id"),
+            "peer": conv.get("peer"),
+            "peer_display": conv.get("peer_display"),
         }
         messages = list(conv.get("messages", []))
     try:
-        _persist.save_meta(conv_id, meta)
-        _persist.save_messages(conv_id, messages)
+        _persist.save_meta(agent_id, conv_id, meta)
+        _persist.save_messages(agent_id, conv_id, messages)
     except Exception as e:
         _log(f"[save_conversation] {conv_id} error: {e}")
 
 
-def _delete_conversation_files(conv_id: str):
+def _default_agent_id() -> str:
+    """Which agent does a new conversation land in when the client
+    didn't specify one? Falls back to the registry default."""
     try:
-        _persist.delete_conversation(conv_id)
+        from openprogram.agents import manager as _A
+        spec = _A.get_default()
+        if spec is not None:
+            return spec.id
+    except Exception:
+        pass
+    return "main"
+
+
+def _delete_conversation_files(conv_id: str):
+    """Look up which agent owns this conv then delete its dir."""
+    try:
+        with _conversations_lock:
+            conv = _conversations.get(conv_id)
+            agent_id = (conv or {}).get("agent_id") if conv else None
+        if not agent_id:
+            agent_id = _persist.resolve_agent_for_conv(conv_id)
+        if agent_id:
+            _persist.delete_conversation(agent_id, conv_id)
     except Exception as e:
         _log(f"[delete_conversation_files] {conv_id} error: {e}")
 
 
 def _restore_sessions():
-    """Restore conversations from ~/.agentic/sessions/ on startup.
-
-    First migrates the legacy monolithic file if present.
-    """
-    try:
-        migrated = _persist.migrate_legacy_file()
-        if migrated:
-            _log(f"[restore] migrated {migrated} legacy conversation(s)")
-    except Exception as e:
-        _log(f"[restore] migration failed: {e}")
-
-    for conv_id in _persist.list_conversations():
+    """Walk every agent's sessions dir and hydrate _conversations."""
+    for agent_id, conv_id in _persist.list_conversations():
         try:
-            data = _persist.load_conversation(conv_id)
+            data = _persist.load_conversation(agent_id, conv_id)
             if data is None:
                 continue
 
@@ -252,6 +267,7 @@ def _restore_sessions():
             with _conversations_lock:
                 _conversations[conv_id] = {
                     "id": conv_id,
+                    "agent_id": agent_id,
                     "title": data.get("title", "Untitled"),
                     "root_context": root_ctx,
                     "runtime": runtime,
@@ -266,8 +282,13 @@ def _restore_sessions():
                     "_last_exec_cumulative_usage": data.get("_last_exec_cumulative_usage"),
                     "head_id": head_id,
                     "run_active": False,
+                    "channel": data.get("channel"),
+                    "account_id": data.get("account_id"),
+                    "peer": data.get("peer"),
+                    "peer_display": data.get("peer_display"),
                 }
-            _log(f"[restore] conv {conv_id}: {data.get('title')} (session={session_id})")
+            _log(f"[restore] agent={agent_id} conv={conv_id}: "
+                 f"{data.get('title')} (session={session_id})")
         except Exception as e:
             _log(f"[restore] failed for {conv_id}: {e}")
 
@@ -485,14 +506,23 @@ from openprogram.webui._functions import (
 # Conversation management — each conversation has a Context tree
 # ---------------------------------------------------------------------------
 
-def _get_or_create_conversation(conv_id: str = None) -> dict:
-    """Get or create a conversation with its own Context tree and Runtime."""
+def _get_or_create_conversation(conv_id: str = None,
+                                agent_id: str = None) -> dict:
+    """Get or create a conversation with its own Context tree + Runtime.
+
+    If ``agent_id`` is provided the new conversation is bound to that
+    agent; otherwise it lands in the registry's default agent. Existing
+    conversations keep whatever agent they were created under — we
+    never rebind on lookup.
+    """
     if conv_id is None:
-        conv_id = str(uuid.uuid4())[:8]
+        conv_id = "local_" + uuid.uuid4().hex[:10]
     with _conversations_lock:
         if conv_id not in _conversations:
+            resolved_agent = agent_id or _default_agent_id()
             _conversations[conv_id] = {
                 "id": conv_id,
+                "agent_id": resolved_agent,
                 "title": "New conversation",
                 "root_context": Context(name="chat_session", status="idle", start_time=time.time()),
                 "runtime": None,          # created lazily on first message
@@ -500,10 +530,6 @@ def _get_or_create_conversation(conv_id: str = None) -> dict:
                 "messages": [],
                 "function_trees": [],
                 "created_at": time.time(),
-                # ContextGit — see docs/design/contextgit.md. head_id is
-                # the tip of the DAG (what the UI shows). Every append
-                # extends HEAD; retry/edit create siblings and move HEAD
-                # to the new one; checkout just reassigns HEAD.
                 "head_id": None,
                 "run_active": False,
             }
@@ -555,6 +581,10 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
     _conv_token = _set_current_conv_id(conv_id)
     try:
         conv = _get_or_create_conversation(conv_id)
+        # Resolve the owning agent once so every persist call in this
+        # function uses a stable id even if the caller later rebinds
+        # the conv dict.
+        _agent_id = conv.get("agent_id") or _default_agent_id()
         runtime = _get_conv_runtime(conv_id, msg_id=msg_id)
 
         # Apply thinking effort to chat runtime
@@ -831,7 +861,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     "_in_progress": True,
                 }
                 conv["function_trees"].append(_run_placeholder_tree)
-                _persist.init_tree(conv_id, _run_func_idx, _run_attempt_idx)
+                _persist.init_tree(_agent_id, conv_id, _run_func_idx, _run_attempt_idx)
                 _save_conversation(conv_id)
 
                 # Register event-driven tree updates: append each node event
@@ -840,7 +870,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                     try:
                         if event_type == "node_created":
                             _persist.append_tree_event(
-                                conv_id, _run_func_idx, _run_attempt_idx,
+                                _agent_id, conv_id, _run_func_idx, _run_attempt_idx,
                                 {
                                     "event": "enter",
                                     "path": data.get("path"),
@@ -855,7 +885,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                             )
                         elif event_type == "node_completed":
                             _persist.append_tree_event(
-                                conv_id, _run_func_idx, _run_attempt_idx,
+                                _agent_id, conv_id, _run_func_idx, _run_attempt_idx,
                                 {
                                     "event": "exit",
                                     "path": data.get("path"),
@@ -1033,7 +1063,7 @@ def _execute_in_context(conv_id: str, msg_id: str, action: str,
                             if (getattr(n, "status", "") == "error"
                                     and getattr(n, "error", "") == "Cancelled by user"):
                                 _persist.append_tree_event(
-                                    conv_id, _fidx, _aidx,
+                                    _agent_id, conv_id, _fidx, _aidx,
                                     {
                                         "event": "exit",
                                         "path": n.path,
@@ -1402,18 +1432,14 @@ async def _handle_ws_command(ws, cmd: dict):
     if action == "chat":
         text = cmd.get("text", "").strip()
         conv_id = cmd.get("conv_id")
-        # None -> resolved per-provider inside _apply_thinking_effort
+        agent_id = cmd.get("agent_id") or None
         thinking_effort = cmd.get("thinking_effort") or None
         exec_thinking_effort = cmd.get("exec_thinking_effort") or None
-        # Opt-in tool use. `tools` payload:
-        #   true  -> inject DEFAULT_TOOLS (bash/read/write/edit/patch/grep/glob/list/todo)
-        #   false / missing -> no tools (light chat mode)
-        #   list  -> explicit tool-name subset
         tools_flag = cmd.get("tools")
         if not text:
             return
 
-        conv = _get_or_create_conversation(conv_id)
+        conv = _get_or_create_conversation(conv_id, agent_id=agent_id)
         conv_id = conv["id"]
         msg_id = str(uuid.uuid4())[:8]
 

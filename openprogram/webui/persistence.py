@@ -1,23 +1,20 @@
 """
-Per-conversation persistence for the web UI.
+Per-session persistence.
 
-Layout (on disk):
+Sessions belong to agents. On disk:
 
-    ~/.agentic/sessions/
-      {conv_id}/
-        meta.json            ← provider/model/session_id/title/usage
-        messages.json        ← user + assistant messages (tree-of-branches via
-                               attempts[].subsequent_messages)
+    ~/.agentic/agents/<agent_id>/sessions/<session_key>/
+        meta.json       — provider/model/title/usage/channel metadata
+        messages.json   — user + assistant messages (DAG-of-branches via
+                          attempts[].subsequent_messages)
         trees/
-          {func_idx}/        ← Nth function call in this conversation
-            {attempt_idx}.jsonl   ← one JSONL per attempt (branch).
-                                    Each line is an enter/exit event for
-                                    a Context node; Context.from_jsonl()
-                                    replays them back into a full tree.
+          <func_idx>/
+            <attempt_idx>.jsonl — append-only Context events
 
-Writes are scoped: saving one conversation never touches another.
-Tree files are append-only during execution; on `retry` a new attempt file
-is opened and the old one is kept (for branch navigation).
+Every function here takes ``agent_id`` as the first argument so the
+caller is always explicit about which agent's store it's touching.
+``resolve_agent_for_conv`` scans every agent's dir to find the owner
+of an existing session key when the caller didn't stash it.
 """
 
 from __future__ import annotations
@@ -29,28 +26,42 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Paths
-# ---------------------------------------------------------------------------
 
-_ROOT = Path.home() / ".agentic" / "sessions"
-_LEGACY_FILE = Path.home() / ".agentic" / "visualizer_sessions.json"
+def _sessions_root(agent_id: str) -> Path:
+    from openprogram.agents.manager import sessions_dir
+    return sessions_dir(agent_id)
 
 
-def sessions_root() -> Path:
-    return _ROOT
+def sessions_root(agent_id: str) -> Path:
+    """Public alias."""
+    return _sessions_root(agent_id)
 
 
-def conv_dir(conv_id: str) -> Path:
-    return _ROOT / conv_id
+def conv_dir(agent_id: str, conv_id: str) -> Path:
+    return _sessions_root(agent_id) / conv_id
 
 
-def trees_dir(conv_id: str) -> Path:
-    return conv_dir(conv_id) / "trees"
+def trees_dir(agent_id: str, conv_id: str) -> Path:
+    return conv_dir(agent_id, conv_id) / "trees"
 
 
-def tree_path(conv_id: str, func_idx: int, attempt_idx: int) -> Path:
-    return trees_dir(conv_id) / str(func_idx) / f"{attempt_idx}.jsonl"
+def tree_path(agent_id: str, conv_id: str,
+              func_idx: int, attempt_idx: int) -> Path:
+    return trees_dir(agent_id, conv_id) / str(func_idx) / f"{attempt_idx}.jsonl"
+
+
+def resolve_agent_for_conv(conv_id: str) -> Optional[str]:
+    """Which agent's sessions dir contains ``conv_id``? None if
+    nobody. Small O(agent_count) scan — fine for UI lookups.
+    """
+    try:
+        from openprogram.agents.manager import list_all
+        for spec in list_all():
+            if (_sessions_root(spec.id) / conv_id).is_dir():
+                return spec.id
+    except Exception:
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -61,12 +72,17 @@ _locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
 
 
-def _lock_for(conv_id: str) -> threading.Lock:
+def _lock_key(agent_id: str, conv_id: str) -> str:
+    return f"{agent_id}/{conv_id}"
+
+
+def _lock_for(agent_id: str, conv_id: str) -> threading.Lock:
+    key = _lock_key(agent_id, conv_id)
     with _locks_guard:
-        lk = _locks.get(conv_id)
+        lk = _locks.get(key)
         if lk is None:
             lk = threading.Lock()
-            _locks[conv_id] = lk
+            _locks[key] = lk
         return lk
 
 
@@ -74,8 +90,8 @@ def _lock_for(conv_id: str) -> threading.Lock:
 # Low-level helpers
 # ---------------------------------------------------------------------------
 
-def _ensure_conv_dir(conv_id: str) -> Path:
-    d = conv_dir(conv_id)
+def _ensure_conv_dir(agent_id: str, conv_id: str) -> Path:
+    d = conv_dir(agent_id, conv_id)
     (d / "trees").mkdir(parents=True, exist_ok=True)
     return d
 
@@ -95,60 +111,67 @@ def _json_dumps(obj) -> str:
 # Meta + messages (low-frequency, whole-file overwrite)
 # ---------------------------------------------------------------------------
 
-def save_meta(conv_id: str, meta: dict) -> None:
-    _ensure_conv_dir(conv_id)
-    with _lock_for(conv_id):
-        _atomic_write_text(conv_dir(conv_id) / "meta.json", _json_dumps(meta))
+def save_meta(agent_id: str, conv_id: str, meta: dict) -> None:
+    _ensure_conv_dir(agent_id, conv_id)
+    with _lock_for(agent_id, conv_id):
+        _atomic_write_text(
+            conv_dir(agent_id, conv_id) / "meta.json", _json_dumps(meta),
+        )
 
 
-def save_messages(conv_id: str, messages: list) -> None:
-    _ensure_conv_dir(conv_id)
-    with _lock_for(conv_id):
-        _atomic_write_text(conv_dir(conv_id) / "messages.json", _json_dumps(messages))
+def save_messages(agent_id: str, conv_id: str, messages: list) -> None:
+    _ensure_conv_dir(agent_id, conv_id)
+    with _lock_for(agent_id, conv_id):
+        _atomic_write_text(
+            conv_dir(agent_id, conv_id) / "messages.json",
+            _json_dumps(messages),
+        )
 
 
-def save_conversation(conv_id: str, meta: dict, messages: list) -> None:
+def save_conversation(agent_id: str, conv_id: str,
+                      meta: dict, messages: list) -> None:
     """Save both meta and messages in one call — still atomic per file."""
-    save_meta(conv_id, meta)
-    save_messages(conv_id, messages)
+    save_meta(agent_id, conv_id, meta)
+    save_messages(agent_id, conv_id, messages)
 
 
 # ---------------------------------------------------------------------------
 # Tree JSONL (high-frequency, append-only)
 # ---------------------------------------------------------------------------
 
-def init_tree(conv_id: str, func_idx: int, attempt_idx: int) -> Path:
-    """Create (or truncate) an empty tree jsonl file. Use when starting a
-    new function call or a retry attempt."""
-    _ensure_conv_dir(conv_id)
-    p = tree_path(conv_id, func_idx, attempt_idx)
+def init_tree(agent_id: str, conv_id: str,
+              func_idx: int, attempt_idx: int) -> Path:
+    """Create (or truncate) an empty tree jsonl file."""
+    _ensure_conv_dir(agent_id, conv_id)
+    p = tree_path(agent_id, conv_id, func_idx, attempt_idx)
     p.parent.mkdir(parents=True, exist_ok=True)
-    with _lock_for(conv_id):
+    with _lock_for(agent_id, conv_id):
         p.write_text("", encoding="utf-8")
     return p
 
 
-def append_tree_event(conv_id: str, func_idx: int, attempt_idx: int,
+def append_tree_event(agent_id: str, conv_id: str,
+                      func_idx: int, attempt_idx: int,
                       record: dict) -> None:
-    p = tree_path(conv_id, func_idx, attempt_idx)
+    p = tree_path(agent_id, conv_id, func_idx, attempt_idx)
     p.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(record, ensure_ascii=False, default=str) + "\n"
-    with _lock_for(conv_id):
+    with _lock_for(agent_id, conv_id):
         with open(p, "a", encoding="utf-8") as f:
             f.write(line)
 
 
-def write_tree_from_dict(conv_id: str, func_idx: int, attempt_idx: int,
+def write_tree_from_dict(agent_id: str, conv_id: str,
+                         func_idx: int, attempt_idx: int,
                          tree_dict: dict) -> None:
-    """One-shot write of a completed tree (used for migration)."""
-    init_tree(conv_id, func_idx, attempt_idx)
+    init_tree(agent_id, conv_id, func_idx, attempt_idx)
     for rec in _tree_dict_to_records(tree_dict):
-        append_tree_event(conv_id, func_idx, attempt_idx, rec)
+        append_tree_event(agent_id, conv_id, func_idx, attempt_idx, rec)
 
 
-def load_tree(conv_id: str, func_idx: int, attempt_idx: int) -> Optional[dict]:
-    """Replay a tree jsonl back into the tree dict format consumed by the UI."""
-    p = tree_path(conv_id, func_idx, attempt_idx)
+def load_tree(agent_id: str, conv_id: str,
+              func_idx: int, attempt_idx: int) -> Optional[dict]:
+    p = tree_path(agent_id, conv_id, func_idx, attempt_idx)
     if not p.exists() or p.stat().st_size == 0:
         return None
     from openprogram.agentic_programming.context import Context
@@ -158,8 +181,8 @@ def load_tree(conv_id: str, func_idx: int, attempt_idx: int) -> Optional[dict]:
         return None
 
 
-def list_func_indexes(conv_id: str) -> list[int]:
-    d = trees_dir(conv_id)
+def list_func_indexes(agent_id: str, conv_id: str) -> list[int]:
+    d = trees_dir(agent_id, conv_id)
     if not d.is_dir():
         return []
     out = []
@@ -169,8 +192,9 @@ def list_func_indexes(conv_id: str) -> list[int]:
     return sorted(out)
 
 
-def list_attempt_indexes(conv_id: str, func_idx: int) -> list[int]:
-    d = trees_dir(conv_id) / str(func_idx)
+def list_attempt_indexes(agent_id: str, conv_id: str,
+                         func_idx: int) -> list[int]:
+    d = trees_dir(agent_id, conv_id) / str(func_idx)
     if not d.is_dir():
         return []
     out = []
@@ -255,20 +279,28 @@ def _tree_dict_to_records(node: dict) -> list[dict]:
 # Whole-conversation I/O
 # ---------------------------------------------------------------------------
 
-def list_conversations() -> list[str]:
-    if not _ROOT.is_dir():
-        return []
-    return sorted(d.name for d in _ROOT.iterdir() if d.is_dir())
+def list_conversations(agent_id: str = "") -> list[tuple[str, str]]:
+    """Return ``[(agent_id, conv_id), ...]`` across the entire store.
 
-
-def load_conversation(conv_id: str) -> Optional[dict]:
-    """Return the conversation state dict (meta + messages + function_trees).
-
-    Reconstructs function_trees by replaying the current attempt of each
-    func_idx from disk. Messages keep their attempts[].subsequent_messages
-    for branch navigation; attempts[].tree is filled in from disk if present.
+    When an ``agent_id`` filter is supplied, only that agent's sessions
+    are listed. Otherwise we walk every agent.
     """
-    d = conv_dir(conv_id)
+    from openprogram.agents.manager import list_all
+    out: list[tuple[str, str]] = []
+    agents = [a for a in list_all() if (not agent_id or a.id == agent_id)]
+    for spec in agents:
+        root = _sessions_root(spec.id)
+        if not root.is_dir():
+            continue
+        for d in sorted(root.iterdir()):
+            if d.is_dir():
+                out.append((spec.id, d.name))
+    return out
+
+
+def load_conversation(agent_id: str, conv_id: str) -> Optional[dict]:
+    """Return the conversation state dict (meta + messages + function_trees)."""
+    d = conv_dir(agent_id, conv_id)
     if not d.is_dir():
         return None
 
@@ -288,69 +320,34 @@ def load_conversation(conv_id: str) -> Optional[dict]:
             messages = []
 
     function_trees: list = []
-    for func_idx in list_func_indexes(conv_id):
-        attempts = list_attempt_indexes(conv_id, func_idx)
+    for func_idx in list_func_indexes(agent_id, conv_id):
+        attempts = list_attempt_indexes(agent_id, conv_id, func_idx)
         if not attempts:
             continue
-        # Default view: the highest-numbered attempt (newest branch).
-        # UI can override via switch_attempt.
         latest = attempts[-1]
-        tree = load_tree(conv_id, func_idx, latest)
+        tree = load_tree(agent_id, conv_id, func_idx, latest)
         if tree is not None:
             function_trees.append(tree)
 
     result = dict(meta)
     result["id"] = conv_id
+    result["agent_id"] = agent_id
     result["messages"] = messages
     result["function_trees"] = function_trees
     return result
 
 
-def delete_conversation(conv_id: str) -> None:
-    d = conv_dir(conv_id)
+def delete_conversation(agent_id: str, conv_id: str) -> None:
+    d = conv_dir(agent_id, conv_id)
     if d.is_dir():
         shutil.rmtree(d)
     with _locks_guard:
-        _locks.pop(conv_id, None)
+        _locks.pop(_lock_key(agent_id, conv_id), None)
 
 
-# ---------------------------------------------------------------------------
-# One-time migration from the legacy monolithic file.
-# ---------------------------------------------------------------------------
+# The legacy-file migration shim is retired — fresh installs never had
+# a visualizer_sessions.json, and users who used to have one were
+# already migrated before this refactor.
 
 def migrate_legacy_file() -> int:
-    """If ~/.agentic/visualizer_sessions.json exists, split it into the new
-    per-conversation folder structure. Returns the number of conversations
-    migrated. Renames the old file to .migrated to prevent re-running."""
-    if not _LEGACY_FILE.exists():
-        return 0
-    try:
-        data = json.loads(_LEGACY_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return 0
-    if not isinstance(data, dict):
-        return 0
-
-    migrated = 0
-    for conv_id, cdata in data.items():
-        if not isinstance(cdata, dict):
-            continue
-        try:
-            meta = {
-                k: v for k, v in cdata.items()
-                if k not in ("messages", "function_trees")
-            }
-            save_meta(conv_id, meta)
-            save_messages(conv_id, cdata.get("messages", []))
-            for i, tree_dict in enumerate(cdata.get("function_trees", []) or []):
-                if isinstance(tree_dict, dict) and tree_dict.get("path"):
-                    write_tree_from_dict(conv_id, i, 0, tree_dict)
-            migrated += 1
-        except Exception:
-            continue
-
-    try:
-        _LEGACY_FILE.rename(_LEGACY_FILE.with_suffix(".json.migrated"))
-    except Exception:
-        pass
-    return migrated
+    return 0

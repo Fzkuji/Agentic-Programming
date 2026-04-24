@@ -66,6 +66,9 @@ def main():
         help="State-dir profile name. Reroutes config/sessions/logs to "
              "~/.agentic-<name>/ so parallel workspaces don't share state. "
              "Env: OPENPROGRAM_PROFILE.")
+    parser.add_argument("--resume", default=None, metavar="SESSION_ID",
+        help="Resume a prior CLI chat session. Find ids via "
+             "`openprogram sessions list` or the Web UI sidebar.")
 
     sub = parser.add_subparsers(dest="command", help="Subcommand")
 
@@ -291,12 +294,12 @@ def main():
     # experience. --web routes to the browser UI; --print runs one-shot.
     if args.command is None:
         if args.print_prompt:
-            _cmd_cli_chat(oneshot=args.print_prompt)
+            _cmd_cli_chat(oneshot=args.print_prompt, resume=args.resume)
             return
         if args.web:
             _cmd_web(args.port, False if args.no_browser else None)
             return
-        _cmd_cli_chat(oneshot=None)
+        _cmd_cli_chat(oneshot=None, resume=args.resume)
         return
 
     # -------- Subcommand dispatch --------
@@ -439,14 +442,15 @@ def main():
         return
 
 
-def _cmd_cli_chat(oneshot: str | None = None) -> None:
+def _cmd_cli_chat(oneshot: str | None = None,
+                  resume: str | None = None) -> None:
     """Terminal chat entry point.
 
     Implementation lives in :mod:`openprogram.cli_chat` so cli.py stays
     focused on argparse + dispatch.
     """
     from openprogram.cli_chat import run_cli_chat
-    run_cli_chat(oneshot=oneshot)
+    run_cli_chat(oneshot=oneshot, resume=resume)
 
 
 def _cmd_resume(session_id, answer):

@@ -370,32 +370,94 @@ def _handle_slash(cmd: str, console, rt) -> bool:
 
 # --- Chat turn -------------------------------------------------------------
 
-def _run_turn(rt, message: str) -> str:
-    """Send one user message to the runtime; return the assistant reply."""
+def _run_turn_with_history(agent, conv_id: str, message: str) -> str:
+    """Run one CLI chat turn, persisted to
+    ``<state>/agents/<agent_id>/sessions/<conv_id>/``.
+
+    Loads the session's prior messages, renders them as a
+    [User]/[Assistant] prefix, calls rt.exec through the per-agent
+    runtime registry, and appends + saves both sides.
+    """
+    import time as _time
+    import uuid as _uuid
+    from openprogram.agents import runtime_registry as _runtimes
+    from openprogram.agents.context_engine import default_engine as _engine
+    from openprogram.webui import persistence as _persist
+
+    data = _persist.load_conversation(agent.id, conv_id) or {}
+    meta = {k: v for k, v in data.items()
+            if k not in ("messages", "function_trees")}
+    messages: list = list(data.get("messages") or [])
+    if not meta:
+        meta = {
+            "id": conv_id,
+            "agent_id": agent.id,
+            "title": message[:50] + ("..." if len(message) > 50 else ""),
+            "created_at": _time.time(),
+            "source": "cli",
+            "_titled": True,
+        }
+
+    user_id = _uuid.uuid4().hex[:12]
+    user_msg = {
+        "role": "user", "id": user_id,
+        "parent_id": messages[-1]["id"] if messages else None,
+        "content": message, "timestamp": _time.time(), "source": "cli",
+    }
+    _engine.ingest(messages, user_msg)
+
+    assembled = _engine.assemble(agent, meta, messages[:-1])
+    exec_content: list[dict] = []
+    if assembled.system_prompt_addition:
+        exec_content.append({
+            "type": "text", "text": assembled.system_prompt_addition,
+        })
+    exec_content.extend(assembled.messages)
+    exec_content.append({"type": "text", "text": message})
+
     try:
-        reply = rt.exec(content=[{"type": "text", "text": message}])
+        rt = _runtimes.get_runtime_for(agent)
+        reply = rt.exec(content=exec_content)
+        reply_text = str(reply or "").strip() or ""
     except Exception as e:  # noqa: BLE001
-        return f"[error] {type(e).__name__}: {e}"
-    if reply is None:
-        return ""
-    if isinstance(reply, str):
-        return reply
-    return str(reply)
+        reply_text = f"[error] {type(e).__name__}: {e}"
+
+    reply_msg = {
+        "role": "assistant", "id": user_id + "_reply",
+        "parent_id": user_id,
+        "content": reply_text, "timestamp": _time.time(), "source": "cli",
+    }
+    _engine.ingest(messages, reply_msg)
+    _engine.after_turn(agent, meta, messages)
+    meta["head_id"] = reply_msg["id"]
+    meta["_last_touched"] = _time.time()
+
+    _persist.save_meta(agent.id, conv_id, meta)
+    _persist.save_messages(agent.id, conv_id, messages)
+    return reply_text
 
 
 # --- Entry point -----------------------------------------------------------
 
-def run_cli_chat(oneshot: str | None = None) -> None:
-    """Launch the terminal chat. ``oneshot`` runs one turn and exits."""
+def run_cli_chat(oneshot: str | None = None,
+                 resume: str | None = None) -> None:
+    """Launch the terminal chat.
+
+    ``oneshot`` runs one turn and exits (still persisted so it shows
+    up in the sidebar of a later Web UI session).
+
+    ``resume`` picks up a prior session id under the current default
+    agent instead of starting a fresh one. The sidebar shows every
+    past session via the Web UI's ``list_conversations``; ``openprogram
+    sessions list`` is the CLI way to discover ids.
+    """
+    import uuid as _uuid
     from rich.console import Console
+    from openprogram.agents import manager as _A
     console = Console()
 
     provider, rt = _get_chat_runtime()
     if rt is None:
-        # Hermes-style first-run: offer the setup inline so the
-        # user doesn't have to exit and re-invoke. If they accept and
-        # the wizard imports at least one credential, we continue into
-        # the chat; otherwise we exit cleanly.
         if not _prompt_first_run_setup(console):
             sys.exit(1)
         provider, rt = _get_chat_runtime()
@@ -403,8 +465,22 @@ def run_cli_chat(oneshot: str | None = None) -> None:
             sys.exit(1)
     model = getattr(rt, "model", "?")
 
+    agent = _A.get_default()
+    if agent is None:
+        # setup should have created one; defensive fallback.
+        agent = _A.create("main", make_default=True)
+
+    if resume:
+        conv_id = resume
+        console.print(f"[dim]Resuming session {conv_id} under "
+                      f"agent {agent.id}[/]")
+    else:
+        conv_id = "local_" + _uuid.uuid4().hex[:10]
+        console.print(f"[dim]New session {conv_id} under "
+                      f"agent {agent.id}[/]")
+
     if oneshot:
-        reply = _run_turn(rt, oneshot)
+        reply = _run_turn_with_history(agent, conv_id, oneshot)
         print(reply)
         return
 
@@ -439,7 +515,7 @@ def run_cli_chat(oneshot: str | None = None) -> None:
             if _handle_slash(user_input, console, rt):
                 return
             continue
-        reply = _run_turn(rt, user_input)
+        reply = _run_turn_with_history(agent, conv_id, user_input)
         console.print()
         console.print(reply)
         # Fire-and-forget TTS; no-ops unless tts.provider is set.
