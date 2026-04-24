@@ -467,90 +467,156 @@ def run_tts_section() -> int:
     return 0
 
 
-def run_channels_section() -> int:
-    """Chat-channel bot integrations (Telegram / Discord / Slack).
+_CHANNEL_LABELS = {
+    "telegram": "Telegram",
+    "discord":  "Discord",
+    "slack":    "Slack (Socket Mode)",
+    "wechat":   "WeChat (personal, QR login)",
+}
 
-    Each platform has an 'enabled' flag + minimal credential slot. The
-    actual gateway / bot loop is separate infrastructure work — this
-    section just captures intent + credentials.
-    """
-    cfg = _read_config()
-    ch = cfg.get("channels", {}) or {}
 
-    # Platform → list of (env_var, label) pairs for token auth, or
-    # special value "qr" for QR-scan login (WeChat).
-    PLATFORMS: list[tuple[str, Any]] = [
-        ("telegram", [("TELEGRAM_BOT_TOKEN", "Telegram bot token")]),
-        ("discord",  [("DISCORD_BOT_TOKEN",  "Discord bot token")]),
-        ("slack",    [("SLACK_BOT_TOKEN",    "Slack bot (xoxb-)"),
-                      ("SLACK_APP_TOKEN",    "Slack app-level (xapp-, Socket Mode)")]),
-        ("wechat",   "qr"),
-    ]
-    items = [
-        (p[0], bool((ch.get(p[0]) or {}).get("enabled", False)))
-        for p in PLATFORMS
-    ]
-    picked = _checkbox("Enable channels:", items)
-    if picked is None:
-        print("Cancelled.")
-        return 1
+def _channel_configured(pid: str, cfg: dict[str, Any]) -> bool:
+    from openprogram.channels import _is_channel_configured
+    entry = (cfg.get("channels", {}) or {}).get(pid, {}) or {}
+    return _is_channel_configured(pid, entry, cfg)
 
-    new_ch: dict[str, Any] = {}
-    for pid, cfg_info in PLATFORMS:
-        prev = ch.get(pid, {}) or {}
-        enabled = pid in picked
-        entry: dict[str, Any]
-        if cfg_info == "qr":
-            # WeChat: no env-var token. Credentials come from a QR scan
-            # during `channels start`. We capture intent here + optionally
-            # drive the login right now for a fully-configured install.
-            entry = {"enabled": enabled, "auth": "qr"}
-            if enabled:
-                try:
-                    from openprogram.channels.wechat import _find_saved_creds
-                    already = _find_saved_creds() is not None
-                except Exception:
-                    already = False
-                if already:
-                    print("[wechat] already logged in — skipping QR scan.")
-                elif _confirm("Scan WeChat QR now? (needs your phone)",
-                              default=True):
-                    from openprogram.channels.wechat import _qr_login
-                    _qr_login()
-                else:
-                    print("[wechat] skipped. You'll be prompted on "
-                          "`openprogram channels start`.")
-            new_ch[pid] = entry
-            continue
 
-        envs: list[tuple[str, str]] = cfg_info  # type: ignore[assignment]
-        first_env = envs[0][0]
-        entry = {"enabled": enabled, "api_key_env": first_env}
-        if pid == "slack":
-            entry["app_token_env"] = envs[1][0]
-        if enabled:
-            for env_var, label in envs:
-                have = (
-                    prev.get("token")
-                    or cfg.get("api_keys", {}).get(env_var)
-                    or os.environ.get(env_var)
-                )
-                if not have:
-                    tok = _password(f"{label} (${env_var}), "
-                                    f"leave blank to set later:")
-                    if tok:
-                        cfg.setdefault("api_keys", {})[env_var] = tok
-        new_ch[pid] = entry
-    cfg["channels"] = new_ch
-    _write_config(cfg)
-    enabled_names = [p for p in picked]
-    if enabled_names:
-        print(f"Channels enabled: {', '.join(enabled_names)}")
+def _channel_enabled(pid: str, cfg: dict[str, Any]) -> bool:
+    return bool((cfg.get("channels", {}) or {}).get(pid, {}).get("enabled"))
+
+
+def _configure_telegram(cfg: dict[str, Any]) -> None:
+    env = "TELEGRAM_BOT_TOKEN"
+    have = cfg.get("api_keys", {}).get(env) or os.environ.get(env)
+    if not have:
+        tok = _password(f"Telegram bot token (${env}):")
+        if tok:
+            cfg.setdefault("api_keys", {})[env] = tok
+    cfg.setdefault("channels", {})["telegram"] = {
+        "enabled": True, "api_key_env": env,
+    }
+
+
+def _configure_discord(cfg: dict[str, Any]) -> None:
+    env = "DISCORD_BOT_TOKEN"
+    have = cfg.get("api_keys", {}).get(env) or os.environ.get(env)
+    if not have:
+        tok = _password(f"Discord bot token (${env}):")
+        if tok:
+            cfg.setdefault("api_keys", {})[env] = tok
+    cfg.setdefault("channels", {})["discord"] = {
+        "enabled": True, "api_key_env": env,
+    }
+
+
+def _configure_slack(cfg: dict[str, Any]) -> None:
+    bot_env, app_env = "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"
+    for env_var, label in [(bot_env, "Slack bot (xoxb-)"),
+                           (app_env, "Slack app-level (xapp-, Socket Mode)")]:
+        have = cfg.get("api_keys", {}).get(env_var) or os.environ.get(env_var)
+        if not have:
+            tok = _password(f"{label} (${env_var}):")
+            if tok:
+                cfg.setdefault("api_keys", {})[env_var] = tok
+    cfg.setdefault("channels", {})["slack"] = {
+        "enabled": True,
+        "api_key_env": bot_env,
+        "app_token_env": app_env,
+    }
+
+
+def _configure_wechat(cfg: dict[str, Any]) -> None:
+    # WeChat doesn't use an env var token — it's QR login.
+    cfg.setdefault("channels", {})["wechat"] = {
+        "enabled": True, "auth": "qr",
+    }
+    try:
+        from openprogram.channels.wechat import _find_saved_creds, _qr_login
+    except Exception as e:  # noqa: BLE001
+        print(f"[wechat] module load failed: {e}")
+        return
+    if _find_saved_creds() is not None:
+        print("WeChat is already logged in — nothing more to do.")
+        return
+    if _confirm("Scan the QR code now? (you'll need WeChat on your phone)",
+                default=True):
+        _qr_login()
     else:
-        print("No channels enabled.")
-    print("[info] Channel runtime (bot loops, gateway) is not wired yet; "
-          "config is stored so future runtime can read it.")
-    return 0
+        print("WeChat will prompt for the QR scan on "
+              "`openprogram channels start`.")
+
+
+_CHANNEL_HANDLERS = {
+    "telegram": _configure_telegram,
+    "discord":  _configure_discord,
+    "slack":    _configure_slack,
+    "wechat":   _configure_wechat,
+}
+
+
+def run_channels_section() -> int:
+    """Single-select channel menu loop (OpenClaw-style).
+
+    Replaces the earlier multi-checkbox UI that left users stranded on
+    an empty "done" state. One channel at a time: pick → configure →
+    come back to the menu → pick another or "Finished".
+    """
+    while True:
+        cfg = _read_config()
+        options: list[str] = []
+        mapping: list[str] = []
+        for pid, label in _CHANNEL_LABELS.items():
+            enabled = _channel_enabled(pid, cfg)
+            configured = _channel_configured(pid, cfg)
+            tag_parts = []
+            if enabled:
+                tag_parts.append("enabled")
+            if configured:
+                tag_parts.append("configured")
+            tag = f"  ({', '.join(tag_parts)})" if tag_parts else ""
+            options.append(f"{label}{tag}")
+            mapping.append(pid)
+        options.append("Finished")
+        mapping.append("__done__")
+
+        picked = _choose_one("Configure a channel:", options, options[-1])
+        if picked is None:
+            return 0
+        pid = mapping[options.index(picked)]
+        if pid == "__done__":
+            return 0
+
+        # Already configured → sub-menu: Modify / Disable / Delete / Skip
+        already = _channel_configured(pid, cfg) or _channel_enabled(pid, cfg)
+        if already:
+            sub = _choose_one(
+                f"{_CHANNEL_LABELS[pid]} already set up. What do you want to do?",
+                ["Modify settings", "Disable (keep config)",
+                 "Delete config", "Skip"],
+                "Skip",
+            )
+            if sub == "Disable (keep config)":
+                entry = cfg.setdefault("channels", {}).setdefault(pid, {})
+                entry["enabled"] = False
+                _write_config(cfg)
+                print(f"{pid}: disabled.")
+                continue
+            if sub == "Delete config":
+                cfg.get("channels", {}).pop(pid, None)
+                _write_config(cfg)
+                print(f"{pid}: removed.")
+                continue
+            if sub in (None, "Skip"):
+                continue
+            # fall through: Modify = re-run handler
+
+        handler = _CHANNEL_HANDLERS.get(pid)
+        if handler is None:
+            print(f"No handler for {pid!r}")
+            continue
+        handler(cfg)
+        _write_config(cfg)
+        print(f"{pid}: configured.")
 
 
 def run_backend_section() -> int:
@@ -743,29 +809,69 @@ def _print_summary() -> None:
         print(f"  thinking effort:  {(cfg.get('agent') or {}).get('thinking_effort', 'medium')}")
 
 
-def run_full_setup() -> int:
-    """Polished multi-step first-run wizard.
+_QUICKSTART_SECTIONS = ["providers", "model", "agent"]
 
-    Required sections default-yes; tailored/advanced sections default-no so
-    users can breeze through the minimal install. End-of-wizard shows a
-    config summary and offers to drop straight into CLI chat.
+
+def _mode_select() -> str | None:
+    """Match OpenClaw: select Quickstart (minimum path) vs Manual."""
+    options = [
+        "QuickStart   — just the essentials (provider + model + effort)",
+        "Advanced     — walk through everything, including channels/TTS/etc.",
+    ]
+    picked = _choose_one("Setup mode:", options, options[0])
+    if picked is None:
+        return None
+    return "quickstart" if picked.startswith("QuickStart") else "advanced"
+
+
+def _hatch_select() -> str:
+    """OpenClaw-style finale: where does the user go right after setup?"""
+    options = [
+        "Chat in terminal (recommended)",
+        "Open the Web UI",
+        "Do this later",
+    ]
+    picked = _choose_one("How do you want to start?", options, options[0])
+    if picked is None or picked == "Do this later":
+        return "later"
+    if picked == "Open the Web UI":
+        return "web"
+    return "chat"
+
+
+def run_full_setup() -> int:
+    """Linear onboarding. QuickStart does the 3 required sections then
+    hands off to chat; Advanced walks every section.
+
+    OpenClaw-shaped: intro → mode select → sections → note summary →
+    hatch select (chat / web / later).
     """
     _print_intro()
     if not _confirm("Start?", default=True):
         return 0
 
-    total = len(_CORE_SECTIONS)
-    for i, (name, title, desc, fn, default_run) in enumerate(_CORE_SECTIONS, 1):
+    mode = _mode_select()
+    if mode is None:
+        return 0
+
+    sections = _CORE_SECTIONS if mode == "advanced" else [
+        s for s in _CORE_SECTIONS if s[0] in _QUICKSTART_SECTIONS
+    ]
+    total = len(sections)
+
+    for i, (name, title, desc, fn, default_run) in enumerate(sections, 1):
         _section_header(i, total, title, desc)
-        if default_run:
+        # QuickStart: just run the required sections.
+        # Advanced: default_run controls whether we auto-run or ask first.
+        if mode == "quickstart" or default_run:
             rc = fn()
         else:
             rc = _run_section(name, fn, ask_default=False)
         if rc != 0:
             print(f"[warn] {name} exited with status {rc}; continuing.")
 
-    print()
-    if _confirm(
+    # Advanced-only: extras behind an explicit confirm.
+    if mode == "advanced" and _confirm(
         "Configure advanced sections (profile / backend)?",
         default=False,
     ):
@@ -778,15 +884,54 @@ def run_full_setup() -> int:
 
     _print_summary()
 
-    # Hand off straight to chat so "first install → first message" is one
-    # continuous flow, not two commands with a manual restart between.
-    if _confirm("Start chatting now?", default=True):
+    hatch = _hatch_select()
+    if hatch == "chat":
         try:
             from openprogram.cli_chat import run_cli_chat
             run_cli_chat()
         except Exception as e:  # noqa: BLE001
             print(f"[setup] couldn't launch chat: {type(e).__name__}: {e}")
             print("Run `openprogram` manually.")
+    elif hatch == "web":
+        try:
+            from openprogram.cli import _cmd_web
+            _cmd_web(None, None)
+        except Exception as e:  # noqa: BLE001
+            print(f"[setup] couldn't launch web UI: {type(e).__name__}: {e}")
+            print("Run `openprogram web` manually.")
     else:
         print("\nRun `openprogram` when ready.")
     return 0
+
+
+# --- Configure command (section-menu loop, distinct from linear setup) -----
+
+def run_configure_menu() -> int:
+    """OpenClaw-style configure loop: pick a section, come back, pick
+    again, until 'Continue'. Distinct from ``run_full_setup`` which is
+    a linear first-run walk.
+    """
+    section_map = {s[0]: s for s in _CORE_SECTIONS + _EXTRA_SECTIONS}
+
+    while True:
+        labels = []
+        values = []
+        for key, title, _desc, _fn, _dr in _CORE_SECTIONS + _EXTRA_SECTIONS:
+            labels.append(f"{title}")
+            values.append(key)
+        labels.append("Continue (done)")
+        values.append("__done__")
+
+        picked = _choose_one("Select a section to configure:", labels,
+                             labels[-1])
+        if picked is None:
+            return 0
+        key = values[labels.index(picked)]
+        if key == "__done__":
+            return 0
+        _, _, desc, fn, _ = section_map[key]
+        print()
+        print(desc)
+        rc = fn()
+        if rc != 0:
+            print(f"[warn] {key} exited with status {rc}.")

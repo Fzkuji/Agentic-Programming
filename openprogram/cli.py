@@ -154,7 +154,9 @@ def main():
 
     # ---- setup (top-level, full first-run wizard) -------------------------
     sub.add_parser("setup",
-        help="Full first-run setup wizard (providers + model + tools + agent)")
+        help="First-run setup wizard (QuickStart or Advanced)")
+    sub.add_parser("configure",
+        help="Re-edit any config section through a menu loop")
 
     # ---- config -----------------------------------------------------------
     p_config = sub.add_parser("config",
@@ -299,6 +301,10 @@ def main():
     if args.command == "setup":
         from openprogram.setup_wizard import run_full_setup
         sys.exit(run_full_setup())
+
+    if args.command == "configure":
+        from openprogram.setup_wizard import run_configure_menu
+        sys.exit(run_configure_menu())
 
     if args.command == "config":
         from openprogram import setup_wizard as _sw
