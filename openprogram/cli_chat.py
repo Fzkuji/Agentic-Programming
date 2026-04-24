@@ -264,13 +264,22 @@ SLASH_HELP = [
     ("/skills", "list discovered skills"),
     ("/functions", "list agentic functions (programs/functions/)"),
     ("/apps", "list applications (programs/applications/)"),
+    ("/session", "show the current session id + agent"),
+    ("/attach <channel> <peer> [--account X] [--kind direct|group]",
+                 "route a channel peer's messages into this session "
+                 "(auto-starts the channels worker)"),
+    ("/detach <channel> <peer> [--account X] [--kind ...]",
+                 "remove the alias for a channel peer"),
+    ("/connections", "list every channel peer currently aliased to "
+                     "this session"),
     ("/profile [name]", "show or switch active profile (restart required to switch)"),
     ("/clear", "clear the screen"),
     ("/quit", "exit"),
 ]
 
 
-def _handle_slash(cmd: str, console, rt) -> bool:
+def _handle_slash(cmd: str, console, rt,
+                  agent=None, conv_id: str = "") -> bool:
     """Handle a /slash command. Return True if the session should exit."""
     raw = cmd[1:].strip()
     parts = raw.split()
@@ -341,6 +350,20 @@ def _handle_slash(cmd: str, console, rt) -> bool:
         console.clear()
         return False
 
+    if verb == "session":
+        console.print(f"[bold]session:[/] {conv_id or '(none)'}")
+        console.print(f"[bold]agent:[/]   {agent.id if agent else '(none)'}")
+        return False
+
+    if verb == "attach":
+        return _handle_attach(args, console, agent, conv_id)
+
+    if verb == "detach":
+        return _handle_detach(args, console)
+
+    if verb in ("connections", "conns"):
+        return _handle_connections(console, conv_id)
+
     if verb == "profile":
         from openprogram.paths import get_active_profile, get_state_dir, set_active_profile
         if not args:
@@ -365,6 +388,134 @@ def _handle_slash(cmd: str, console, rt) -> bool:
         return True
 
     console.print(f"[yellow]Unknown command: /{verb}[/]  (try /help)")
+    return False
+
+
+# --- Slash: channel attach / detach / connections -------------------------
+
+_VALID_CHANNELS = ("wechat", "telegram", "discord", "slack")
+
+
+def _parse_kv_args(args: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Split [flag, value, positional, ...] into (positionals, flags).
+
+    Supports both ``--account=work`` and ``--account work``.
+    """
+    positionals: list[str] = []
+    flags: dict[str, str] = {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a.startswith("--"):
+            key, _, val = a.partition("=")
+            key = key[2:]
+            if val:
+                flags[key] = val
+            elif i + 1 < len(args):
+                flags[key] = args[i + 1]
+                i += 1
+            else:
+                flags[key] = ""
+        else:
+            positionals.append(a)
+        i += 1
+    return positionals, flags
+
+
+def _handle_attach(args: list[str], console, agent, conv_id: str) -> bool:
+    positional, flags = _parse_kv_args(args)
+    if not conv_id or agent is None:
+        console.print("[yellow]No active session — can't attach.[/]")
+        return False
+    if len(positional) < 2:
+        console.print(
+            "[yellow]Usage: /attach <channel> <peer_id> "
+            "[--account X] [--kind direct|group|channel][/]\n"
+            f"  channels: {', '.join(_VALID_CHANNELS)}"
+        )
+        return False
+    channel, peer = positional[0], positional[1]
+    if channel not in _VALID_CHANNELS:
+        console.print(f"[yellow]Unknown channel {channel!r}. "
+                      f"One of: {', '.join(_VALID_CHANNELS)}.[/]")
+        return False
+    account_id = flags.get("account", "default")
+    peer_kind = flags.get("kind", "direct")
+
+    try:
+        from openprogram.agents import session_aliases as _sa
+        from openprogram.channels.worker import (
+            current_worker_pid, spawn_detached,
+        )
+        _sa.attach(
+            channel=channel, account_id=account_id,
+            peer_kind=peer_kind, peer_id=peer,
+            agent_id=agent.id, session_id=conv_id,
+        )
+        console.print(
+            f"[green]Attached[/] {channel}:{account_id}:"
+            f"{peer_kind}:{peer} → session {conv_id}"
+        )
+        if current_worker_pid() is None:
+            console.print(
+                "[dim]Starting channels worker in the background so "
+                "inbound messages can arrive...[/]"
+            )
+            spawn_detached()
+        return False
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]Attach failed:[/] {type(e).__name__}: {e}")
+        return False
+
+
+def _handle_detach(args: list[str], console) -> bool:
+    positional, flags = _parse_kv_args(args)
+    if len(positional) < 2:
+        console.print(
+            "[yellow]Usage: /detach <channel> <peer_id> "
+            "[--account X] [--kind direct|group|channel][/]"
+        )
+        return False
+    channel, peer = positional[0], positional[1]
+    if channel not in _VALID_CHANNELS:
+        console.print(f"[yellow]Unknown channel {channel!r}.[/]")
+        return False
+    account_id = flags.get("account", "default")
+    peer_kind = flags.get("kind", "direct")
+    from openprogram.agents import session_aliases as _sa
+    removed = _sa.detach(
+        channel=channel, account_id=account_id,
+        peer_kind=peer_kind, peer_id=peer,
+    )
+    if removed:
+        console.print(f"[green]Detached[/] "
+                      f"{channel}:{account_id}:{peer_kind}:{peer}")
+    else:
+        console.print("[yellow]No matching alias.[/]")
+    return False
+
+
+def _handle_connections(console, conv_id: str) -> bool:
+    if not conv_id:
+        console.print("[yellow]No active session.[/]")
+        return False
+    from openprogram.agents import session_aliases as _sa
+    rows = _sa.list_for_session(conv_id)
+    if not rows:
+        console.print(
+            "[dim]No channel peers attached to this session yet. "
+            "Try: /attach wechat <openid>[/]"
+        )
+        return False
+    from rich.table import Table
+    tbl = Table(show_header=True, box=None, padding=(0, 2))
+    tbl.add_column("channel", style="cyan")
+    tbl.add_column("account", style="dim")
+    tbl.add_column("peer", style="bold")
+    for r in rows:
+        tbl.add_row(r["channel"], r["account_id"],
+                    f"{r['peer']['kind']}:{r['peer']['id']}")
+    console.print(tbl)
     return False
 
 
@@ -513,7 +664,8 @@ def run_cli_chat(oneshot: str | None = None,
         if not user_input:
             continue
         if user_input.startswith("/"):
-            if _handle_slash(user_input, console, rt):
+            if _handle_slash(user_input, console, rt,
+                             agent=agent, conv_id=conv_id):
                 return
             continue
         reply = _run_turn_with_history(agent, conv_id, user_input)
