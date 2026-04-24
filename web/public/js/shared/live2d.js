@@ -1,36 +1,42 @@
-// Live2D widget loader — drops a 2D anime mascot (看板娘) onto the
-// page. Uses stevenjoezhang/live2d-widget via jsDelivr; the autoload
-// script picks a random model from its bundled set (shizuku, hibiki,
-// etc.) on each page load and injects its own canvas + tips bubble.
-//
-// Loads once per window; subsequent navigations between chat routes
-// don't re-inject.
+// Live2D widget loader — uses oh-my-live2d, an actively-maintained
+// wrapper around pixi-live2d-display. Picks a default character on
+// first load; no hidden state in localStorage, no mobile auto-hide.
 
 (function () {
   if (window.__live2dLoaded) return;
   window.__live2dLoaded = true;
 
-  // Position override — the widget ships at bottom-left; move it to
-  // bottom-right above the chat input bar so it sits next to the
-  // textarea instead of overlapping the sidebar.
-  var style = document.createElement('style');
-  style.textContent =
-    '#waifu { ' +
-      'left: auto !important; ' +
-      'right: 12px !important; ' +
-      'bottom: 88px !important; ' +
-      'z-index: 20 !important; ' +
-    '} ' +
-    '#waifu-tips { ' +
-      'left: auto !important; ' +
-      'right: 0 !important; ' +
-    '}';
-  document.head.appendChild(style);
-
   var s = document.createElement('script');
-  s.src = 'https://fastly.jsdelivr.net/gh/stevenjoezhang/live2d-widget@latest/autoload.js';
+  s.src = 'https://cdn.jsdelivr.net/npm/oh-my-live2d@latest';
   s.async = true;
-  // Autoload.js computes its own base URL from its own <script> src,
-  // so jsDelivr is what it uses to fetch model / waifu-tips.json.
+  s.onload = function () {
+    try {
+      var OML2D = window.OML2D || window.oml2d;
+      if (!OML2D || typeof OML2D.loadOml2d !== 'function') {
+        console.error('[live2d] oh-my-live2d loaded but OML2D API missing');
+        return;
+      }
+      OML2D.loadOml2d({
+        mobileDisplay: true,
+        // Pin one model so we always see a character — the default
+        // model list sometimes 404s when the wrapper's CDN upstream
+        // is flaky.
+        models: [{
+          name: 'pio',
+          path: 'https://model.oml2d.com/Pio/model.json',
+          position: [0, 40],
+          scale: 0.25,
+          stageStyle: { height: 300 },
+        }],
+        menus: { disable: true },
+        tips: { idleTips: { interval: 20000 } },
+      });
+    } catch (err) {
+      console.error('[live2d] init failed:', err);
+    }
+  };
+  s.onerror = function (e) {
+    console.error('[live2d] failed to load oh-my-live2d from jsDelivr', e);
+  };
   document.head.appendChild(s);
 })();
