@@ -47,6 +47,67 @@ def _skill_inventory() -> tuple[int, list[tuple[str, str]]]:
     return len(skills), [(s.name, getattr(s, "description", "") or "") for s in skills]
 
 
+def _function_inventory() -> tuple[int, list[str]]:
+    """Return (count, [name, ...]) of agentic functions in programs/functions/.
+
+    Scans buildin / third_party / meta for .py files. Names are the file
+    stems (e.g. ``deep_work``, ``chat``, ``sentiment``). Private helpers
+    (leading underscore) and ``__init__`` are skipped.
+    """
+    import os
+    base = os.path.join(os.path.dirname(__file__), "programs", "functions")
+    names: list[str] = []
+    for sub in ("buildin", "third_party", "meta"):
+        d = os.path.join(base, sub)
+        if not os.path.isdir(d):
+            continue
+        for fname in sorted(os.listdir(d)):
+            if not fname.endswith(".py"):
+                continue
+            stem = fname[:-3]
+            if stem.startswith("_") or stem == "__init__":
+                continue
+            names.append(stem)
+    return len(names), names
+
+
+def _application_inventory() -> tuple[int, list[str]]:
+    """Return (count, [name, ...]) of applications in programs/applications/.
+
+    Subdirs are apps; bare .py files (besides __init__) count too.
+    """
+    import os
+    d = os.path.join(os.path.dirname(__file__), "programs", "applications")
+    if not os.path.isdir(d):
+        return 0, []
+    names: list[str] = []
+    for entry in sorted(os.listdir(d)):
+        full = os.path.join(d, entry)
+        if entry.startswith("_") or entry.startswith("."):
+            continue
+        if os.path.isdir(full) and not entry.startswith("__"):
+            names.append(entry)
+        elif entry.endswith(".py") and entry != "__init__.py":
+            names.append(entry[:-3])
+    return len(names), names
+
+
+def _section_text(label: str, items: list[str], count: int, accent: str,
+                  empty_msg: str = "none") -> "Text":
+    from rich.text import Text
+    t = Text()
+    t.append(f"{label} ", style="bold")
+    t.append(f"({count})\n", style="dim")
+    if count == 0:
+        t.append(empty_msg, style="dim italic")
+        return t
+    preview = items[:6]
+    t.append(", ".join(preview), style=accent)
+    if count > len(preview):
+        t.append(f" (+{count - len(preview)} more)", style="dim")
+    return t
+
+
 def _print_banner(console, provider: str, model: str) -> None:
     from rich.panel import Panel
     from rich.table import Table
@@ -55,44 +116,46 @@ def _print_banner(console, provider: str, model: str) -> None:
 
     tool_count, tool_names = _tool_inventory()
     skill_count, skill_items = _skill_inventory()
+    fn_count, fn_names = _function_inventory()
+    app_count, app_names = _application_inventory()
 
     logo = Text("OpenProgram", style="bold bright_blue")
     subtitle = Text(f"  ·  {provider}/{model}", style="dim")
     header = logo + subtitle
 
-    body = Table.grid(padding=(0, 2), expand=True)
-    body.add_column(ratio=1)
-    body.add_column(ratio=1)
+    # Two rows x two columns: tools/skills on top, functions/applications
+    # on bottom. Functions + applications together form "programs" — the
+    # user-callable code the harness runs. Tools + skills are the
+    # LLM-side surface (capabilities + instruction packs).
+    grid = Table.grid(padding=(0, 2), expand=True)
+    grid.add_column(ratio=1)
+    grid.add_column(ratio=1)
 
-    tools_txt = Text()
-    tools_txt.append("Tools ", style="bold")
-    tools_txt.append(f"({tool_count})\n", style="dim")
-    preview = tool_names[:8]
-    tools_txt.append(", ".join(preview), style="cyan")
-    if tool_count > len(preview):
-        tools_txt.append(f" (+{tool_count - len(preview)} more)", style="dim")
-
-    skills_txt = Text()
-    skills_txt.append("Skills ", style="bold")
-    skills_txt.append(f"({skill_count})\n", style="dim")
-    if skill_count == 0:
-        skills_txt.append("no skills loaded", style="dim italic")
-    else:
-        preview = [n for n, _ in skill_items[:8]]
-        skills_txt.append(", ".join(preview), style="magenta")
-        if skill_count > len(preview):
-            skills_txt.append(f" (+{skill_count - len(preview)} more)", style="dim")
-
-    body.add_row(tools_txt, skills_txt)
+    grid.add_row(
+        _section_text("Tools", tool_names, tool_count, "cyan"),
+        _section_text("Skills", [n for n, _ in skill_items], skill_count,
+                      "magenta", empty_msg="no skills loaded"),
+    )
+    grid.add_row(Text(""), Text(""))  # spacer row
+    grid.add_row(
+        _section_text("Functions", fn_names, fn_count, "green",
+                      empty_msg="no functions registered"),
+        _section_text("Applications", app_names, app_count, "yellow",
+                      empty_msg="no applications registered"),
+    )
 
     footer = Text()
     footer.append(f"{tool_count} tools", style="cyan")
     footer.append(" · ")
     footer.append(f"{skill_count} skills", style="magenta")
+    footer.append(" · ")
+    footer.append(f"{fn_count} functions", style="green")
+    footer.append(" · ")
+    footer.append(f"{app_count} apps", style="yellow")
     footer.append(" · /help for commands", style="dim")
 
     panel_body = Table.grid(padding=(1, 0))
-    panel_body.add_row(body)
+    panel_body.add_row(grid)
     panel_body.add_row(footer)
 
     console.print()
@@ -117,6 +180,8 @@ SLASH_HELP = [
     ("/model", "show current chat model"),
     ("/tools", "list available tools"),
     ("/skills", "list discovered skills"),
+    ("/functions", "list agentic functions (programs/functions/)"),
+    ("/apps", "list applications (programs/applications/)"),
     ("/clear", "clear the screen"),
     ("/quit", "exit"),
 ]
@@ -173,6 +238,20 @@ def _handle_slash(cmd: str, console, rt) -> bool:
         for name, desc in items:
             short = (desc[:80] + "...") if len(desc) > 80 else desc
             console.print(f"  [magenta]{name}[/]  [dim]{short}[/]")
+        return False
+
+    if verb in ("functions", "fns"):
+        count, names = _function_inventory()
+        console.print(f"[bold]{count} functions[/]")
+        for n in names:
+            console.print(f"  [green]{n}[/]")
+        return False
+
+    if verb in ("apps", "applications"):
+        count, names = _application_inventory()
+        console.print(f"[bold]{count} applications[/]")
+        for n in names:
+            console.print(f"  [yellow]{n}[/]")
         return False
 
     if verb == "clear":
