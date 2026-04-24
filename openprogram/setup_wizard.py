@@ -517,35 +517,33 @@ def run_channels_section() -> int:
 
 
 def run_backend_section() -> int:
-    """Where shell-style tools (bash, execute_code, ...) actually run.
+    """Where shell-style tools (bash, ...) actually execute.
 
-    Currently OpenProgram only has the 'local' in-process path. Wizard
-    surfaces the full set so users can record intent; docker / ssh
-    execution backends are separate runtime work.
+    Two options shipped: local (default, in-host subprocess) and ssh
+    (user@host via the system ssh client, key auth assumed).
     """
     cfg = _read_config()
     be = cfg.get("backend", {}) or {}
     cur_terminal = be.get("terminal") or "local"
+    if cur_terminal not in ("local", "ssh"):
+        cur_terminal = "local"
 
-    choices = ["local", "docker", "ssh"]
+    choices = ["local", "ssh"]
     picked = _choose_one("Terminal backend:", choices, cur_terminal)
     if picked is None:
         print("Cancelled.")
         return 1
 
     entry: dict[str, Any] = {"terminal": picked}
-    if picked == "docker":
-        image = _text("Container image:", default=be.get("docker_image", "ubuntu:24.04"))
-        entry["docker_image"] = image or "ubuntu:24.04"
-    elif picked == "ssh":
+    if picked == "ssh":
         host = _text("SSH host (user@host):", default=be.get("ssh_target", ""))
         entry["ssh_target"] = host or ""
+        if not entry["ssh_target"]:
+            print("[warn] SSH target empty — backend will fall back to local "
+                  "at runtime. Rerun `openprogram config backend` to fix.")
     cfg["backend"] = entry
     _write_config(cfg)
     print(f"Terminal backend: {picked}")
-    if picked != "local":
-        print("[info] Only the 'local' backend is currently implemented at "
-              "runtime. Your selection is stored for when other backends land.")
     return 0
 
 
