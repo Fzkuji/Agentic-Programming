@@ -575,13 +575,33 @@ def _channel_enabled(pid: str, cfg: dict[str, Any]) -> bool:
     return bool((cfg.get("channels", {}) or {}).get(pid, {}).get("enabled"))
 
 
+def _prompt_token(cfg: dict[str, Any], env_var: str, label: str) -> None:
+    """Prompt for one token. If a value is already stored (or present
+    in the environment), show a masked preview and ask whether to
+    keep it or replace it — so "Modify" actually lets the user swap
+    accounts / rotate tokens instead of being a silent no-op.
+    """
+    have_cfg = (cfg.get("api_keys", {}) or {}).get(env_var) or ""
+    have_env = os.environ.get(env_var, "")
+    current = have_cfg or have_env
+    if current:
+        source = "config" if have_cfg else f"env ${env_var}"
+        masked = f"{current[:6]}…{current[-4:]}" if len(current) > 12 else "set"
+        pick = _choose_one(
+            f"{label} is already set ({source}: {masked}).",
+            ["Keep current", "Replace with a new token"],
+            "Keep current",
+        )
+        if pick == "Keep current" or pick is None:
+            return
+    tok = _password(f"{label} (${env_var}):")
+    if tok:
+        cfg.setdefault("api_keys", {})[env_var] = tok
+
+
 def _configure_telegram(cfg: dict[str, Any]) -> None:
     env = "TELEGRAM_BOT_TOKEN"
-    have = cfg.get("api_keys", {}).get(env) or os.environ.get(env)
-    if not have:
-        tok = _password(f"Telegram bot token (${env}):")
-        if tok:
-            cfg.setdefault("api_keys", {})[env] = tok
+    _prompt_token(cfg, env, "Telegram bot token")
     cfg.setdefault("channels", {})["telegram"] = {
         "enabled": True, "api_key_env": env,
     }
@@ -589,11 +609,7 @@ def _configure_telegram(cfg: dict[str, Any]) -> None:
 
 def _configure_discord(cfg: dict[str, Any]) -> None:
     env = "DISCORD_BOT_TOKEN"
-    have = cfg.get("api_keys", {}).get(env) or os.environ.get(env)
-    if not have:
-        tok = _password(f"Discord bot token (${env}):")
-        if tok:
-            cfg.setdefault("api_keys", {})[env] = tok
+    _prompt_token(cfg, env, "Discord bot token")
     cfg.setdefault("channels", {})["discord"] = {
         "enabled": True, "api_key_env": env,
     }
@@ -601,13 +617,8 @@ def _configure_discord(cfg: dict[str, Any]) -> None:
 
 def _configure_slack(cfg: dict[str, Any]) -> None:
     bot_env, app_env = "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"
-    for env_var, label in [(bot_env, "Slack bot (xoxb-)"),
-                           (app_env, "Slack app-level (xapp-, Socket Mode)")]:
-        have = cfg.get("api_keys", {}).get(env_var) or os.environ.get(env_var)
-        if not have:
-            tok = _password(f"{label} (${env_var}):")
-            if tok:
-                cfg.setdefault("api_keys", {})[env_var] = tok
+    _prompt_token(cfg, bot_env, "Slack bot token (xoxb-)")
+    _prompt_token(cfg, app_env, "Slack app-level token (xapp-, Socket Mode)")
     cfg.setdefault("channels", {})["slack"] = {
         "enabled": True,
         "api_key_env": bot_env,
@@ -616,18 +627,44 @@ def _configure_slack(cfg: dict[str, Any]) -> None:
 
 
 def _configure_wechat(cfg: dict[str, Any]) -> None:
-    # WeChat doesn't use an env var token — it's QR login.
+    # WeChat doesn't use an env var token — it's QR login. Credentials
+    # live under ~/.agentic/wechat/<bot_id>.json, so "Modify" can mean
+    # either keep the current login or switch accounts (drop creds,
+    # scan a fresh QR).
     cfg.setdefault("channels", {})["wechat"] = {
         "enabled": True, "auth": "qr",
     }
     try:
-        from openprogram.channels.wechat import _find_saved_creds, _qr_login
+        from openprogram.channels.wechat import (
+            _find_saved_creds, _qr_login, _creds_path, _sync_path,
+        )
     except Exception as e:  # noqa: BLE001
         print(f"[wechat] module load failed: {e}")
         return
-    if _find_saved_creds() is not None:
-        print("WeChat is already logged in — nothing more to do.")
-        return
+
+    existing = _find_saved_creds()
+    if existing is not None:
+        bot_id = existing.get("ilink_bot_id", "?")
+        user = existing.get("ilink_user_id", "?")
+        pick = _choose_one(
+            f"WeChat is already logged in (bot_id={bot_id}, user={user}).",
+            ["Keep current account",
+             "Switch account — delete this login and scan a new QR",
+             "Keep current account (skip)"],
+            "Keep current account",
+        )
+        if pick in (None, "Keep current account", "Keep current account (skip)"):
+            return
+        # Switch: drop the saved credential + its cursor so the next
+        # QR login can't collide with the old bot's session.
+        try:
+            _creds_path(bot_id).unlink(missing_ok=True)
+            _sync_path(bot_id).unlink(missing_ok=True)
+        except OSError as e:  # noqa: BLE001
+            print(f"[wechat] failed to remove old credential: {e}")
+            return
+        print("[wechat] old login removed. Starting fresh QR login...")
+
     if _confirm("Scan the QR code now? (you'll need WeChat on your phone)",
                 default=True):
         _qr_login()
