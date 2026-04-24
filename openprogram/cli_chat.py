@@ -263,6 +263,7 @@ SLASH_HELP = [
     ("/skills", "list discovered skills"),
     ("/functions", "list agentic functions (programs/functions/)"),
     ("/apps", "list applications (programs/applications/)"),
+    ("/profile [name]", "show or switch active profile (restart required to switch)"),
     ("/clear", "clear the screen"),
     ("/quit", "exit"),
 ]
@@ -338,6 +339,29 @@ def _handle_slash(cmd: str, console, rt) -> bool:
     if verb == "clear":
         console.clear()
         return False
+
+    if verb == "profile":
+        from openprogram.paths import get_active_profile, get_state_dir, set_active_profile
+        if not args:
+            profile = get_active_profile() or "default"
+            console.print(f"[bold]profile:[/] {profile}")
+            console.print(f"[dim]state dir: {get_state_dir()}[/]")
+            return False
+        target = args[0]
+        set_active_profile(None if target == "default" else target)
+        console.print(
+            f"[yellow]Profile set to {target!r}.[/]  "
+            "Switching mid-session leaves your chat runtime bound to the "
+            "old profile's credentials. Re-launch to pick up the new "
+            "profile fully:"
+        )
+        restart_hint = (
+            f"  openprogram --profile {target}"
+            if target != "default" else "  openprogram"
+        )
+        console.print(f"[cyan]{restart_hint}[/]")
+        console.print("[dim]Exiting so you can restart cleanly.[/]")
+        return True
 
     console.print(f"[yellow]Unknown command: /{verb}[/]  (try /help)")
     return False

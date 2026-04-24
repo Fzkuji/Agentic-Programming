@@ -121,6 +121,99 @@ def _openai_tts(text: str, cfg: dict[str, Any]) -> str | None:
     return path
 
 
+def _elevenlabs_tts(text: str, cfg: dict[str, Any]) -> str | None:
+    """ElevenLabs TTS via their v1 text-to-speech endpoint.
+
+    Config slots honoured:
+        voice       ElevenLabs voice id (default: 'Rachel' common id)
+        model_id    ElevenLabs model id (default: 'eleven_turbo_v2')
+    """
+    key = _api_key(cfg.get("api_key_env") or "ELEVENLABS_API_KEY")
+    if not key:
+        print("[tts] ELEVENLABS_API_KEY missing — run `openprogram config tts`.")
+        return None
+    try:
+        import requests
+    except ImportError:
+        print("[tts] `requests` not installed; cannot reach ElevenLabs.")
+        return None
+
+    # "Rachel" is ElevenLabs' classic default voice; users override via
+    # config if they want a different one.
+    voice_id = cfg.get("voice") or "21m00Tcm4TlvDq8ikWAM"
+    model_id = cfg.get("model_id") or "eleven_turbo_v2"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    try:
+        r = requests.post(
+            url,
+            headers={
+                "xi-api-key": key,
+                "Content-Type": "application/json",
+                "Accept": "audio/mpeg",
+            },
+            json={
+                "text": text,
+                "model_id": model_id,
+                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+            },
+            timeout=30,
+        )
+    except Exception as e:
+        print(f"[tts] request failed: {e}")
+        return None
+    if r.status_code != 200:
+        print(f"[tts] ElevenLabs returned {r.status_code}: "
+              f"{r.text[:200]}")
+        return None
+    fd, path = tempfile.mkstemp(prefix="op-tts-", suffix=".mp3")
+    with os.fdopen(fd, "wb") as f:
+        f.write(r.content)
+    return path
+
+
+def _edge_tts(text: str, cfg: dict[str, Any]) -> str | None:
+    """Microsoft Edge online TTS via the ``edge-tts`` package.
+
+    Free, no API key, uses MS's public voice WebSocket. Voices like
+    ``en-US-AriaNeural`` / ``zh-CN-XiaoxiaoNeural``.
+    """
+    try:
+        import edge_tts  # type: ignore
+    except ImportError:
+        print("[tts] `edge-tts` not installed. Install with: "
+              "pip install edge-tts")
+        return None
+    import asyncio
+
+    voice = cfg.get("voice") or "en-US-AriaNeural"
+    fd, path = tempfile.mkstemp(prefix="op-tts-", suffix=".mp3")
+    os.close(fd)
+
+    async def _gen() -> None:
+        comm = edge_tts.Communicate(text, voice)
+        await comm.save(path)
+
+    try:
+        try:
+            asyncio.run(_gen())
+        except RuntimeError:
+            # Event loop already exists in this thread (rare — we're in
+            # the daemon thread, but be defensive). Use a fresh loop.
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_gen())
+            finally:
+                loop.close()
+    except Exception as e:
+        print(f"[tts] edge-tts failed: {type(e).__name__}: {e}")
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+    return path
+
+
 def speak(text: str) -> None:
     """Speak ``text`` if a TTS provider is configured; no-op otherwise.
 
@@ -138,15 +231,20 @@ def speak(text: str) -> None:
     def _worker() -> None:
         if provider == "openai":
             path = _openai_tts(text, cfg)
-            if path:
-                _play_file(path)
+        elif provider == "elevenlabs":
+            path = _elevenlabs_tts(text, cfg)
+        elif provider == "edge-tts":
+            path = _edge_tts(text, cfg)
+        else:
+            if provider in _WARNED_PROVIDERS:
+                return
+            _WARNED_PROVIDERS.add(provider)
+            print(f"[tts] provider {provider!r} is not yet implemented "
+                  f"(config is stored). Pick openai / elevenlabs / "
+                  f"edge-tts / none with `openprogram config tts`.")
             return
-        if provider in _WARNED_PROVIDERS:
-            return
-        _WARNED_PROVIDERS.add(provider)
-        print(f"[tts] provider {provider!r} is not yet implemented "
-              f"(config is stored). Switch to 'openai' or 'none' "
-              f"with `openprogram config tts`.")
+        if path:
+            _play_file(path)
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
