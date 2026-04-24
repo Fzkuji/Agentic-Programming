@@ -41,14 +41,16 @@ except ImportError:  # pragma: no cover — graceful degradation
 # ---------------------------------------------------------------------------
 
 def run_interactive_setup() -> int:
-    """Top-level interactive menu, looping until Quit.
+    """Top-level interactive menu, looping until the user picks
+    "Continue".
 
-    Shown by ``openprogram providers setup``. Each menu action returns
-    to this top menu on completion or on back-nav (Ctrl-C) so the user
-    can chain multiple actions in one session.
+    Shown by ``openprogram providers setup`` and by ``openprogram
+    setup``'s providers section. On every iteration we show what's
+    already imported so the user can judge whether to continue or add
+    more. Menu labels lead with what they DO ("Continue", "Add a
+    provider login") — never the ambiguous "Quit".
 
-    Returns 0 on clean exit (Quit or EOF), 130 if an inner action was
-    interrupted and the user chose not to continue.
+    Returns 0 on clean exit.
     """
     if not _HAS_QUESTIONARY or not sys.stdin.isatty():
         # Non-TTY stdin (test harness, CI, piped input) can't drive
@@ -60,24 +62,38 @@ def run_interactive_setup() -> int:
 
     _banner()
     while True:
+        has_any = _show_provider_status()
+
+        # Menu order + wording so the first-highlighted option is the
+        # expected default. If there's nothing imported yet, the most
+        # useful next action is importing — start there. Otherwise
+        # surface "Continue" first so users know they can move on.
+        choices: list[Any]
+        if has_any:
+            choices = [
+                Choice("Continue — use these credentials",    value="done"),
+                Choice("Scan & import discoverable",           value="scan"),
+                Choice("Add a provider login",                 value="login"),
+                Choice("Diagnose current pools",               value="doctor"),
+                Choice("Manage profiles",                      value="profiles"),
+            ]
+        else:
+            choices = [
+                Choice("Scan & import discoverable",           value="scan"),
+                Choice("Add a provider login",                 value="login"),
+                Choice("Skip (set up providers later)",        value="done"),
+                Choice("Manage profiles",                      value="profiles"),
+            ]
         try:
             pick = questionary.select(
-                "What do you want to do?",
-                choices=[
-                    Choice("Scan & import discoverable credentials", value="scan"),
-                    Choice("Log into a specific provider",           value="login"),
-                    Choice("Run diagnostic on current pools",        value="doctor"),
-                    Choice("Manage profiles",                        value="profiles"),
-                    Choice("Show current pools",                     value="list"),
-                    Choice("Quit",                                   value="quit"),
-                ],
+                "Providers — what now?",
+                choices=choices,
                 qmark="›",
             ).ask()
         except KeyboardInterrupt:
             return 0
 
-        if pick is None or pick == "quit":
-            _say("Bye.")
+        if pick is None or pick == "done":
             return 0
 
         # Each branch is wrapped so Ctrl-C bounces back to the top
@@ -91,11 +107,84 @@ def run_interactive_setup() -> int:
                 _action_run_doctor()
             elif pick == "profiles":
                 _action_profiles_menu()
-            elif pick == "list":
-                _action_list_pools()
         except KeyboardInterrupt:
             _say("  (back to menu)")
             continue
+
+
+def _show_provider_status() -> bool:
+    """Print imported + detected-unimported credentials. Returns True
+    iff at least one pool has at least one credential.
+
+    Imported list comes from the store (authoritative). "Detected"
+    list runs the scan sources and filters out anything already
+    imported — so it only shows what would actually be added by
+    picking "Scan".
+    """
+    from .store import get_store
+    try:
+        from .sources import (
+            ClaudeCodeSource, CodexCliSource, EnvApiKeySource,
+            GhCliSource, QwenCliSource,
+        )
+        from .profiles import DEFAULT_PROFILE_NAME, get_profile_manager
+        from openprogram.providers.env_api_keys import PROVIDER_ENV_VARS
+    except Exception:
+        return False
+
+    store = get_store()
+    pools = store.list_pools()
+    imported_rows: list[str] = []
+    for p in pools:
+        if not p.credentials:
+            continue
+        sources = sorted({c.source for c in p.credentials})
+        imported_rows.append(f"  ✓ {p.provider_id}  ({', '.join(sources)})")
+
+    # Scan for unimported credentials. Cheap — the sources only read
+    # files in well-known paths.
+    pm = get_profile_manager()
+    profile = DEFAULT_PROFILE_NAME
+    profile_obj = pm.get_profile(profile)
+    sources_list: list[Any] = [
+        CodexCliSource(profile_id=profile),
+        ClaudeCodeSource(profile_id=profile),
+        QwenCliSource(profile_id=profile),
+        GhCliSource(),
+    ]
+    for p_id, env_var in PROVIDER_ENV_VARS.items():
+        sources_list.append(EnvApiKeySource(
+            provider_id=p_id, env_var=env_var, profile_id=profile,
+        ))
+
+    available_rows: list[str] = []
+    for src in sources_list:
+        try:
+            for cred in src.try_import(profile_obj.root):
+                existing = store.find_pool(cred.provider_id, profile)
+                if existing and any(c.source == cred.source
+                                    for c in existing.credentials):
+                    continue
+                available_rows.append(
+                    f"  · {cred.provider_id}  (via {src.source_id})"
+                )
+        except Exception:
+            continue
+
+    if imported_rows:
+        _say("\nImported:")
+        for row in imported_rows:
+            _say(row)
+    if available_rows:
+        _say("\nAvailable to import:")
+        for row in available_rows:
+            _say(row)
+    if not imported_rows and not available_rows:
+        _say("\nNo providers imported yet, nothing auto-detected.\n"
+             "You can add one via `Scan` (re-tries detection) or "
+             "`Add a provider login`.")
+    _say("")
+    return bool(imported_rows)
 
 
 def pick_login_method_interactive(
