@@ -98,12 +98,19 @@ def _tool_inventory() -> tuple[int, list[str]]:
 
 
 def _skill_inventory() -> tuple[int, list[tuple[str, str]]]:
-    """Return (count, [(name, description), ...]) for discovered skills."""
+    """Return (count, [(name, description), ...]) for enabled skills.
+
+    Respects ``skills.disabled`` in ``~/.agentic/config.json`` so the
+    banner / /skills listing match what the runtime actually uses.
+    """
     try:
         from openprogram.agentic_programming import (
             default_skill_dirs, load_skills,
         )
+        from openprogram.setup_wizard import read_disabled_skills
         skills = load_skills(default_skill_dirs())
+        disabled = read_disabled_skills()
+        skills = [s for s in skills if s.name not in disabled]
     except Exception:
         return 0, []
     return len(skills), [(s.name, getattr(s, "description", "") or "") for s in skills]

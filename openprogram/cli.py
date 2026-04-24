@@ -58,8 +58,8 @@ def main():
         help="Launch the terminal chat")
     parser.add_argument("--print", dest="print_prompt", metavar="PROMPT",
         help="One-shot prompt; send, print reply, exit")
-    parser.add_argument("--port", type=int, default=8765,
-        help="Port for --web / `web` (default: 8765)")
+    parser.add_argument("--port", type=int, default=None,
+        help="Port for --web / `web` (default: stored UI pref, then 8765)")
     parser.add_argument("--no-browser", action="store_true",
         help="Don't auto-open browser with --web")
 
@@ -122,7 +122,8 @@ def main():
 
     # ---- web --------------------------------------------------------------
     p_web = sub.add_parser("web", help="Start the Web UI")
-    p_web.add_argument("--port", type=int, default=8765, help="Port (default: 8765)")
+    p_web.add_argument("--port", type=int, default=None,
+        help="Port (default: stored UI pref, then 8765)")
     p_web.add_argument("--no-browser", action="store_true", help="Don't open browser")
 
     # ---- cron-worker ------------------------------------------------------
@@ -158,6 +159,20 @@ def main():
         help="Enable / disable individual tools")
     p_config_sub.add_parser("agent",
         help="Set agent defaults (thinking effort, ...)")
+    p_config_sub.add_parser("skills",
+        help="Enable / disable individual skills (SKILL.md entries)")
+    p_config_sub.add_parser("ui",
+        help="Web UI preferences (port, auto-open browser)")
+    p_config_sub.add_parser("memory",
+        help="Pick the memory backend for the `memory` tool")
+    p_config_sub.add_parser("profile",
+        help="Active profile name (config-path isolation pending)")
+    p_config_sub.add_parser("tts",
+        help="Text-to-speech provider (runtime hookup pending)")
+    p_config_sub.add_parser("channels",
+        help="Chat-channel bots (Telegram/Discord/Slack — runtime pending)")
+    p_config_sub.add_parser("backend",
+        help="Terminal exec backend (local/docker/ssh — runtime pending)")
 
     args = parser.parse_args()
 
@@ -169,7 +184,7 @@ def main():
             _cmd_cli_chat(oneshot=args.print_prompt)
             return
         if args.web:
-            _cmd_web(args.port, not args.no_browser)
+            _cmd_web(args.port, False if args.no_browser else None)
             return
         _cmd_cli_chat(oneshot=None)
         return
@@ -217,7 +232,7 @@ def main():
         return
 
     if args.command == "web":
-        _cmd_web(args.port, not args.no_browser)
+        _cmd_web(args.port, False if args.no_browser else None)
         return
 
     if args.command == "cron-worker":
@@ -246,18 +261,24 @@ def main():
         sys.exit(run_full_setup())
 
     if args.command == "config":
-        from openprogram.setup_wizard import (
-            run_model_section, run_tools_section, run_agent_section,
-        )
+        from openprogram import setup_wizard as _sw
         target = args.config_target
+        handlers = {
+            "model":    _sw.run_model_section,
+            "tools":    _sw.run_tools_section,
+            "agent":    _sw.run_agent_section,
+            "skills":   _sw.run_skills_section,
+            "ui":       _sw.run_ui_section,
+            "memory":   _sw.run_memory_section,
+            "profile":  _sw.run_profile_section,
+            "tts":      _sw.run_tts_section,
+            "channels": _sw.run_channels_section,
+            "backend":  _sw.run_backend_section,
+        }
         if target == "provider":
             _cmd_configure(args.name)
-        elif target == "model":
-            sys.exit(run_model_section())
-        elif target == "tools":
-            sys.exit(run_tools_section())
-        elif target == "agent":
-            sys.exit(run_agent_section())
+        elif target in handlers:
+            sys.exit(handlers[target]())
         else:
             p_config.print_help()
         return
@@ -737,13 +758,33 @@ def _cmd_cron_worker(once: bool, show_list: bool) -> None:
 
 
 def _cmd_web(port, open_browser):
-    """Start the web UI."""
+    """Start the web UI.
+
+    ``port=None`` / ``open_browser=None`` means "use the user's stored
+    UI pref" (written by ``openprogram config ui``), falling back to
+    the legacy defaults if none set.
+    """
     try:
         from openprogram.webui import start_web
     except ImportError:
         print("Web UI dependencies not installed.")
         print("Install with: pip install openprogram[web]")
         sys.exit(1)
+
+    if port is None or open_browser is None:
+        try:
+            from openprogram.setup_wizard import read_ui_prefs
+            prefs = read_ui_prefs()
+            if port is None:
+                port = prefs["port"]
+            if open_browser is None:
+                open_browser = prefs["open_browser"]
+        except Exception:
+            pass
+    if port is None:
+        port = 8765
+    if open_browser is None:
+        open_browser = True
 
     thread = start_web(port=port, open_browser=open_browser)
     print("Press Ctrl+C to stop.")
