@@ -84,32 +84,30 @@ def run_interactive_setup() -> int:
                 Choice("Skip (set up providers later)",        value="done"),
                 Choice("Manage profiles",                      value="profiles"),
             ]
-        try:
-            pick = questionary.select(
-                "Providers — what now?",
-                choices=choices,
-                qmark="›",
-            ).ask()
-        except KeyboardInterrupt:
-            return 0
+        # unsafe_ask lets KeyboardInterrupt propagate. When called from
+        # `openprogram setup`'s providers section, the outer
+        # run_full_setup catches it and cancels the whole wizard —
+        # which is what users expect from Ctrl-C. When called standalone
+        # via `openprogram providers setup`, _cmd_setup catches it and
+        # prints the "Setup interrupted" message. Either way we never
+        # swallow Ctrl-C and silently bounce back to a menu.
+        pick = questionary.select(
+            "Providers — what now?",
+            choices=choices,
+            qmark="›",
+        ).unsafe_ask()
 
         if pick is None or pick == "done":
             return 0
 
-        # Each branch is wrapped so Ctrl-C bounces back to the top
-        # menu instead of aborting the whole session.
-        try:
-            if pick == "scan":
-                _action_scan_and_import()
-            elif pick == "login":
-                _action_pick_provider_and_login()
-            elif pick == "doctor":
-                _action_run_doctor()
-            elif pick == "profiles":
-                _action_profiles_menu()
-        except KeyboardInterrupt:
-            _say("  (back to menu)")
-            continue
+        if pick == "scan":
+            _action_scan_and_import()
+        elif pick == "login":
+            _action_pick_provider_and_login()
+        elif pick == "doctor":
+            _action_run_doctor()
+        elif pick == "profiles":
+            _action_profiles_menu()
 
 
 def _show_provider_status() -> bool:
@@ -201,14 +199,11 @@ def pick_login_method_interactive(
     if not _HAS_QUESTIONARY or not sys.stdin.isatty():
         return None  # signal to caller: fall through to numeric prompt
 
-    try:
-        return questionary.select(
-            f"How do you want to log into {provider}?",
-            choices=[Choice(f"{mid:24s} — {label}", value=mid) for mid, label in choices],
-            qmark="›",
-        ).ask()
-    except KeyboardInterrupt:
-        return None
+    return questionary.select(
+        f"How do you want to log into {provider}?",
+        choices=[Choice(f"{mid:24s} — {label}", value=mid) for mid, label in choices],
+        qmark="›",
+    ).unsafe_ask()
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +271,7 @@ def _action_scan_and_import() -> None:
         "Select credentials to import (space to toggle):",
         choices=choices,
         qmark="›",
-    ).ask()
+    ).unsafe_ask()
     if not picks:
         _say("  No selection.")
         return
@@ -329,7 +324,7 @@ def _action_pick_provider_and_login() -> None:
         f"Pick a provider to log into  (profile: {profile})",
         choices=choices,
         qmark="›",
-    ).ask()
+    ).unsafe_ask()
     # questionary.Choice replaces `value=None` with the title, so our
     # "← Back" entries come back as the literal string, never None.
     # Use a sentinel value and match on it here.
@@ -375,17 +370,17 @@ def _action_profiles_menu() -> None:
 
         pick = questionary.select(
             "Profiles", choices=labels, qmark="›",
-        ).ask()
+        ).unsafe_ask()
         if pick is None or pick == "__back__":
             return
 
         if pick == "__create__":
-            name = questionary.text("Profile name:").ask()
+            name = questionary.text("Profile name:").unsafe_ask()
             if not name:
                 continue
             display = questionary.text(
                 "Display name (optional):", default="",
-            ).ask() or ""
+            ).unsafe_ask() or ""
             try:
                 pm.create_profile(name.strip(), display_name=display)
                 _say(f"  Created profile {name}.")
@@ -401,12 +396,12 @@ def _action_profiles_menu() -> None:
                 Choice("← Back",  value="__back__"),
             ],
             qmark="›",
-        ).ask()
+        ).unsafe_ask()
         if sub == "delete":
             ok = questionary.confirm(
                 f"Delete profile {pick!r} and all its credentials?",
                 default=False,
-            ).ask()
+            ).unsafe_ask()
             if ok:
                 try:
                     pm.delete_profile(pick)
@@ -438,7 +433,7 @@ def _pick_profile(pm, *, default: str) -> Optional[str]:
         "Which profile?",
         choices=choices,
         qmark="›",
-    ).ask()
+    ).unsafe_ask()
 
 
 def _banner() -> None:

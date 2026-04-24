@@ -162,6 +162,10 @@ def _confirm(prompt: str, default: bool = True) -> bool:
     if _have_questionary():
         import questionary
         choices = ["Yes", "No"] if default else ["No", "Yes"]
+        # unsafe_ask raises KeyboardInterrupt on Ctrl-C instead of
+        # returning None — so Ctrl-C in ANY prompt aborts the whole
+        # wizard (caught once at run_full_setup's top-level try/except)
+        # instead of silently bouncing to the next section.
         ans = questionary.select(
             prompt,
             choices=choices,
@@ -170,7 +174,7 @@ def _confirm(prompt: str, default: bool = True) -> bool:
             instruction="(↑/↓ enter)",
             pointer=_POINTER,
             style=_qstyle(),
-        ).ask()
+        ).unsafe_ask()
         return ans == "Yes"
     hint = "Y/n" if default else "y/N"
     try:
@@ -201,7 +205,7 @@ def _choose_one(prompt: str, choices: list[str],
             instruction="(↑/↓ enter)",
             pointer=_POINTER,
             style=_qstyle(),
-        ).ask()
+        ).unsafe_ask()
         return ans
     print(prompt)
     for i, c in enumerate(choices, 1):
@@ -239,7 +243,7 @@ def _checkbox(prompt: str, items: list[tuple[str, bool]]) -> list[str] | None:
             instruction="(space to toggle, enter to confirm, a = all, i = invert)",
             pointer=_POINTER,
             style=_qstyle(),
-        ).ask()
+        ).unsafe_ask()
         return ans
     names = [n for n, _ in items]
     selected: set[str] = {n for n, e in items if e}
@@ -282,7 +286,7 @@ def _text(prompt: str, default: str = "") -> str | None:
             default=default,
             instruction="(enter to accept)" if default else "",
             style=_qstyle(),
-        ).ask()
+        ).unsafe_ask()
         return ans
     hint = f" [{default}]" if default else ""
     try:
@@ -298,7 +302,7 @@ def _password(prompt: str) -> str | None:
         ans = questionary.password(
             prompt,
             style=_qstyle(),
-        ).ask()
+        ).unsafe_ask()
         return ans
     try:
         import getpass
@@ -314,9 +318,14 @@ def run_providers_section() -> int:
     Codex / Gemini / GH CLI logins, adds API-key pasted entries, or
     launches OAuth flows. Same flow in both modes — QuickStart doesn't
     skip this because at least one provider is required.
+
+    We call ``run_interactive_setup`` directly (not _cmd_setup) so
+    KeyboardInterrupt propagates up to ``run_full_setup``'s
+    top-level try/except and cancels the whole wizard instead of
+    being converted to return-code 130 by _cmd_setup's wrapper.
     """
-    from openprogram.auth.cli import _cmd_setup
-    return _cmd_setup()
+    from openprogram.auth.wizard import run_interactive_setup
+    return run_interactive_setup()
 
 
 def run_model_section() -> int:
@@ -1007,29 +1016,36 @@ def run_configure_menu() -> int:
     """OpenClaw-style configure loop: pick a section, come back, pick
     again, until 'Continue'. Distinct from ``run_full_setup`` which is
     a linear first-run walk.
+
+    Ctrl-C at any point exits the whole menu cleanly — no traceback,
+    no bouncing back to the section picker.
     """
     all_sections = list(_QUICKSTART_SECTIONS) + list(_ADVANCED_EXTRA_SECTIONS)
     section_map = {s[0]: s for s in all_sections}
 
-    while True:
-        labels = []
-        values = []
-        for key, title, _desc, _fn in all_sections:
-            labels.append(f"{title}")
-            values.append(key)
-        labels.append("Continue (done)")
-        values.append("__done__")
+    try:
+        while True:
+            labels = []
+            values = []
+            for key, title, _desc, _fn in all_sections:
+                labels.append(f"{title}")
+                values.append(key)
+            labels.append("Continue (done)")
+            values.append("__done__")
 
-        picked = _choose_one("Select a section to configure:", labels,
-                             labels[-1])
-        if picked is None:
-            return 0
-        key = values[labels.index(picked)]
-        if key == "__done__":
-            return 0
-        _, _, desc, fn = section_map[key]
-        print()
-        print(desc)
-        rc = fn()
-        if rc != 0:
-            print(f"[warn] {key} exited with status {rc}.")
+            picked = _choose_one("Select a section to configure:", labels,
+                                 labels[-1])
+            if picked is None:
+                return 0
+            key = values[labels.index(picked)]
+            if key == "__done__":
+                return 0
+            _, _, desc, fn = section_map[key]
+            print()
+            print(desc)
+            rc = fn()
+            if rc != 0:
+                print(f"[warn] {key} exited with status {rc}.")
+    except KeyboardInterrupt:
+        _print_cancelled()
+        return 130

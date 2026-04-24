@@ -292,15 +292,24 @@ def _qr_login() -> dict[str, str] | None:
         print("[wechat] QR response missing fields; aborting login")
         return None
 
-    qr_path = _save_qr_png(png_b64)
-    print(f"[wechat] QR image saved to {qr_path}")
-    opened = _open_file(qr_path)
-    if not opened:
-        print("[wechat] open the file above in any image viewer, "
-              "then scan it with WeChat on your phone.")
-    else:
-        print("[wechat] opened in your default image viewer. "
-              "Scan with WeChat on your phone.")
+    try:
+        qr_path = _save_qr_png(png_b64)
+    except RuntimeError as e:
+        print(f"[wechat] {e}")
+        print(f"[wechat] fallback — QR payload URL: {token}")
+        print("[wechat] render this URL as a QR code (e.g. "
+              "https://www.qr-code-generator.com) and scan with WeChat.")
+        qr_path = ""
+
+    if qr_path:
+        print(f"[wechat] QR image saved to {qr_path}")
+        opened = _open_file(qr_path)
+        if not opened:
+            print("[wechat] open the file above in any image viewer, "
+                  "then scan it with WeChat on your phone.")
+        else:
+            print("[wechat] opened in your default image viewer. "
+                  "Scan with WeChat on your phone.")
 
     print("[wechat] waiting for scan + confirm (up to a few minutes)...")
     while True:
@@ -345,9 +354,35 @@ def _qr_login() -> dict[str, str] | None:
 
 
 def _save_qr_png(b64_png: str) -> str:
+    """Decode iLink's qrcode_img_content to a PNG file.
+
+    The server sometimes returns a bare base64 payload, sometimes a
+    full data URI (``data:image/png;base64,iVBOR...``). Strip the
+    prefix if present. After decoding we check the PNG magic header —
+    if it doesn't match we raise so the caller can surface the raw
+    payload instead of silently writing a garbage file that breaks
+    Preview when ``open`` hands it over.
+    """
+    payload = b64_png.strip()
+    if payload.startswith("data:"):
+        # "data:image/png;base64,<b64>" or "data:image/jpeg;base64,<b64>"
+        _, _, payload = payload.partition(",")
+    raw = base64.b64decode(payload)
+    if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        # Not a PNG — could be JPEG or something else; still save but
+        # name it .bin so the user sees the mismatch rather than a
+        # broken .png file.
+        fd, path = tempfile.mkstemp(prefix="op-wechat-qr-", suffix=".bin")
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        raise RuntimeError(
+            f"server returned a non-PNG QR image ({len(raw)} bytes, "
+            f"first magic: {raw[:8]!r}). Dumped to {path}. "
+            "Please report this."
+        )
     fd, path = tempfile.mkstemp(prefix="op-wechat-qr-", suffix=".png")
     with os.fdopen(fd, "wb") as f:
-        f.write(base64.b64decode(b64_png))
+        f.write(raw)
     return path
 
 
