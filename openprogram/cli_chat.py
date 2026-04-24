@@ -17,12 +17,24 @@ from typing import Any
 
 
 def _get_chat_runtime():
-    """Return (provider_name, runtime) for the configured chat agent."""
+    """Return (provider_name, runtime) for the configured chat agent.
+
+    Also applies the user's stored default thinking effort so
+    ``rt.exec()`` picks it up without callers having to pass it.
+    """
     from openprogram.webui import _runtime_management as rm
     rm._init_providers()
-    if rm._chat_runtime is None:
+    rt = rm._chat_runtime
+    if rt is None:
         return None, None
-    return rm._chat_provider, rm._chat_runtime
+    try:
+        from openprogram.setup_wizard import read_agent_prefs
+        effort = read_agent_prefs().get("thinking_effort")
+        if effort:
+            rt.thinking_level = effort
+    except Exception:
+        pass
+    return rm._chat_provider, rt
 
 
 def _reset_provider_cache() -> None:

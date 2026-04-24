@@ -49,9 +49,15 @@ def read_disabled_tools() -> set[str]:
 
     Kept in this module so the tools package doesn't import config from
     deeper webui modules and drag in FastAPI at tool-registry import time.
+
+    Also honours ``memory.backend == "none"`` by hiding the ``memory``
+    tool, since it has no backing store in that mode.
     """
     cfg = _read_config()
-    return set(cfg.get("tools", {}).get("disabled", []) or [])
+    disabled = set(cfg.get("tools", {}).get("disabled", []) or [])
+    if (cfg.get("memory", {}) or {}).get("backend") == "none":
+        disabled.add("memory")
+    return disabled
 
 
 def read_disabled_skills() -> set[str]:
