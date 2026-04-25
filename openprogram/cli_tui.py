@@ -2,38 +2,45 @@
 
 Layout
 
-    ┌─────────────────────────────────────────────────────────────┐
-    │  status: agent=main · model=gpt-5.5-mini · session=local_…  │
-    ├─────────────────┬───────────────────────────────────────────┤
-    │ sessions        │  chat scrollback                          │
-    │  · main         │                                           │
-    │    …            │  you ▸ ...                                │
-    │  · work         │                                           │
-    │    …            │  assistant ▸ ...                          │
-    │                 │                                           │
-    ├─────────────────┴───────────────────────────────────────────┤
-    │ > _                                                         │
-    └─────────────────────────────────────────────────────────────┘
+    ┌─ agent: main  ▾    model: openai-codex/gpt-5.5-mini    session: local_ab… ─┐
+    ├──────────────┬───────────────────────────────────────────────────────────┤
+    │ ▶ Sessions   │  ┌─ you ────────────────────────────────────────────────┐ │
+    │ ▾ main       │  │ hello                                                │ │
+    │   📱 alice   │  └──────────────────────────────────────────────────────┘ │
+    │   • local…   │                                                           │
+    │              │  ┌─ main ───────────────────────────────────────────────┐ │
+    │ ▾ work       │  │ Hi! How can I help?                                  │ │
+    │   …          │  └──────────────────────────────────────────────────────┘ │
+    ├──────────────┴───────────────────────────────────────────────────────────┤
+    │ ❯ /login wechat                                            [thinking ⠦] │
+    └──────────────────────────────────────────────────────────────────────────┘
 
-Key bindings
-    Ctrl+N     new session (same agent)
-    Ctrl+B     toggle the sidebar
-    Ctrl+P     open the command palette (same as typing `/`)
-    Ctrl+Q    quit
-    Enter     send the current input
-    Shift+↑/↓ scroll history
+Key bindings (also visible in the Footer):
+    Tab         move focus between sidebar and input
+    Ctrl+N      new session in the active agent
+    Ctrl+A      switch agent (cycles through agents)
+    Ctrl+B      toggle the sidebar
+    Ctrl+L      clear scroll (disk history unchanged)
+    Ctrl+Q      quit
+    Up/Down     in input: scroll command history; in sidebar: pick session
 
-Slash commands behave exactly like in the Rich REPL (cli_chat._handle_slash)
-— the handler is reused so /login /attach /detach /connections /help
-keep the same semantics.
+Slash commands:
+    Type ``/`` to bring up a command palette right above the input.
+    Up/Down to highlight a candidate, Enter to accept (the rest of the
+    command line is keepable). Same handler as the Rich REPL.
 
-This module is the default chat surface. cli_chat.py's older Rich REPL
-is still the fallback when the terminal reports no TUI support
-(``openprogram --no-tui``).
+Cross-platform notes:
+    Textual uses standard ANSI control sequences. Tested on macOS
+    Terminal / iTerm2; works on every modern Linux terminal (GNOME
+    Terminal, Konsole, Alacritty, kitty, tmux+st, ...) and Windows
+    Terminal / WSL without changes. ``--no-tui`` opts back into the
+    Rich REPL on the rare terminal without alt-screen support.
 """
 from __future__ import annotations
 
-import threading
+import json
+import re
+import time
 import uuid
 from typing import Any, Optional
 
@@ -43,34 +50,60 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.reactive import reactive
 from textual.widgets import (
-    Footer, Header, Input, Label, ListItem, ListView, Markdown, Static,
+    Footer, Input, Label, ListItem, ListView, LoadingIndicator,
+    Markdown, Static,
 )
 
 
+_SLASH_COMMANDS: list[tuple[str, str]] = [
+    ("/help",        "show every slash command"),
+    ("/session",     "show current session id + agent"),
+    ("/login",       "log in to a channel (wechat: QR; others: token)"),
+    ("/attach",      "route a channel peer into THIS session"),
+    ("/detach",      "remove a channel peer alias"),
+    ("/connections", "list channel peers wired to this session"),
+    ("/web",         "open the Web UI"),
+    ("/model",       "show current chat model"),
+    ("/tools",       "list tools"),
+    ("/skills",      "list skills"),
+    ("/functions",   "list agentic functions"),
+    ("/apps",        "list applications"),
+    ("/clear",       "clear the scroll (disk history kept)"),
+    ("/profile",     "show or switch the active profile"),
+    ("/quit",        "exit"),
+]
+
+_PLATFORM_ICON = {
+    "wechat":   "💬",
+    "telegram": "✈",
+    "discord":  "🎮",
+    "slack":    "💼",
+}
+
+
 class _StatusBar(Static):
-    """One-line status: agent · model · session."""
+    """One-line status: agent · model · session · channels worker."""
 
     agent_id = reactive("")
     model = reactive("")
     session_id = reactive("")
+    worker_state = reactive("")
 
     def render(self) -> str:
         sess = self.session_id[:14] if self.session_id else "—"
+        worker = (f"  [bold bright_blue]channels[/]: {self.worker_state}"
+                  if self.worker_state else "")
         return (f"[bold bright_blue]agent[/]: {self.agent_id or '—'}    "
                 f"[bold bright_blue]model[/]: {self.model or '—'}    "
-                f"[bold bright_blue]session[/]: {sess}")
+                f"[bold bright_blue]session[/]: {sess}{worker}")
 
 
 class _ChatScroll(VerticalScroll):
-    """The main scrollback. Holds a growing list of Markdown widgets,
-    one per message."""
+    """Main scrollback. Each turn is a Markdown widget."""
     DEFAULT_CSS = """
-    _ChatScroll {
-        border: none;
-        padding: 1 2;
-    }
+    _ChatScroll { padding: 1 2; }
     _ChatScroll Markdown.user {
-        background: $boost 10%;
+        background: $boost 8%;
         border-left: tall $accent;
         padding: 1 2;
         margin: 0 0 1 0;
@@ -81,26 +114,63 @@ class _ChatScroll(VerticalScroll):
     }
     _ChatScroll Markdown.system {
         color: $text-muted;
+        padding: 0 2;
+        margin: 0 0 1 0;
+    }
+    _ChatScroll Markdown.error {
+        background: $error 12%;
+        border-left: tall $error;
+        color: $error;
         padding: 1 2;
+        margin: 0 0 1 0;
+    }
+    _ChatScroll Markdown.thinking {
+        color: $text-muted;
+        padding: 0 2 1 2;
         margin: 0 0 1 0;
     }
     """
 
 
 class _Sidebar(Vertical):
-    """Sessions list. Users click / arrow-select to switch."""
+    """Sessions grouped by agent. Header row per agent acts as the
+    active-agent toggle when clicked."""
     DEFAULT_CSS = """
     _Sidebar {
-        width: 30;
+        width: 32;
         border-right: tall $accent 30%;
     }
-    _Sidebar Label.header {
+    _Sidebar Label.brand {
         padding: 1 2 0 2;
         color: $accent;
+        text-style: bold;
     }
-    _Sidebar ListView {
-        height: 1fr;
+    _Sidebar ListView { height: 1fr; }
+    _Sidebar ListItem.agent_header { color: $accent; }
+    _Sidebar ListItem.agent_header.active {
+        background: $accent 15%;
     }
+    _Sidebar ListItem.session { padding-left: 2; }
+    _Sidebar ListItem.session.active {
+        background: $accent 25%;
+        text-style: bold;
+    }
+    """
+
+
+class _SlashPalette(ListView):
+    """Floating-ish palette that appears above the input when the
+    user starts a slash command. Filters by prefix as they type."""
+    DEFAULT_CSS = """
+    _SlashPalette {
+        height: auto;
+        max-height: 12;
+        border: tall $accent 30%;
+        background: $surface;
+    }
+    _SlashPalette ListItem { padding: 0 1; }
+    _SlashPalette ListItem Label.cmd { color: $accent; }
+    _SlashPalette ListItem Label.desc { color: $text-muted; padding-left: 1; }
     """
 
 
@@ -109,18 +179,27 @@ class OpenProgramTUI(App):
 
     CSS = """
     Screen { layout: vertical; }
-    #statusbar { height: 1; background: $boost 15%; padding: 0 2; }
+    #brand { height: 1; padding: 0 2; color: $accent; text-style: bold; }
+    #statusbar { height: 1; background: $boost 12%; padding: 0 2; }
     #main { height: 1fr; }
-    #input_box { height: 3; border-top: tall $accent 30%; }
-    Input { border: none; padding: 1 2; }
+    #input_box { height: 3; border: round $accent 30%; }
+    Input { padding: 0 1; }
+    #thinking { height: auto; padding: 0 2; color: $text-muted; }
+    #thinking_row { height: auto; padding: 0 2; }
     """
 
     BINDINGS = [
         Binding("ctrl+q", "quit_chat", "Quit", priority=True),
         Binding("ctrl+n", "new_session", "New session"),
+        Binding("ctrl+a", "next_agent", "Next agent"),
         Binding("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
         Binding("ctrl+l", "clear_scroll", "Clear"),
+        Binding("tab", "switch_focus", "Switch focus"),
+        Binding("escape", "close_palette", show=False),
     ]
+
+    show_palette = reactive(False)
+    busy = reactive(False)
 
     def __init__(self, agent, conv_id: str, rt) -> None:
         super().__init__()
@@ -132,34 +211,56 @@ class OpenProgramTUI(App):
         self._sidebar: Optional[_Sidebar] = None
         self._sidebar_list: Optional[ListView] = None
         self._input: Optional[Input] = None
-        self._busy = False
+        self._palette: Optional[_SlashPalette] = None
+        self._thinking_row: Optional[Static] = None
+        self._thinking_indicator: Optional[LoadingIndicator] = None
+        self._sidebar_index: list[dict] = []  # parsed entries for nav
+        self._input_history: list[str] = []
+        self._history_idx = 0
 
     # ------------------------------------------------------------------
     # Layout
     # ------------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
+        yield Static("  OpenProgram", id="brand")
         self._status = _StatusBar(id="statusbar")
+        yield self._status
+
         self._chat = _ChatScroll(id="chat_scroll")
         self._sidebar_list = ListView(id="session_list")
         self._sidebar = _Sidebar(
-            Label("Sessions", classes="header"),
+            Label("Agents · Sessions", classes="brand"),
             self._sidebar_list,
             id="sidebar",
         )
-        self._input = Input(placeholder="Type a message. / for commands.",
-                             id="input_box")
-        yield self._status
         with Horizontal(id="main"):
             yield self._sidebar
             yield self._chat
+
+        # Slash palette (initially hidden) sits between scroll and input.
+        self._palette = _SlashPalette(id="slash_palette")
+        self._palette.display = False
+        yield self._palette
+
+        # Thinking row (between chat and input) — text + spinner.
+        self._thinking_indicator = LoadingIndicator()
+        self._thinking_indicator.display = False
+        thinking_text = Static("", id="thinking")
+        thinking_text.display = False
+        with Horizontal(id="thinking_row"):
+            yield self._thinking_indicator
+            yield thinking_text
+
+        self._input = Input(placeholder="Type a message  ·  / for commands",
+                             id="input_box")
         yield self._input
         yield Footer()
 
     def on_mount(self) -> None:
         self._refresh_status()
         self._load_history_into_scroll()
-        self._refresh_sessions_list()
+        self._refresh_sidebar()
         self.set_focus(self._input)
 
     # ------------------------------------------------------------------
@@ -176,7 +277,23 @@ class OpenProgramTUI(App):
             f"New session `{self.conv_id}` under agent `{self.agent.id}`."
         )
         self._refresh_status()
-        self._refresh_sessions_list()
+        self._refresh_sidebar()
+
+    async def action_next_agent(self) -> None:
+        from openprogram.agents import manager as _A
+        agents = _A.list_all()
+        if len(agents) <= 1:
+            self._append_system(
+                "Only one agent. Add more with `openprogram agents add <id>`."
+            )
+            return
+        ids = [a.id for a in agents]
+        try:
+            idx = ids.index(self.agent.id)
+        except ValueError:
+            idx = -1
+        next_id = ids[(idx + 1) % len(ids)]
+        await self._switch_agent(next_id)
 
     async def action_toggle_sidebar(self) -> None:
         self._sidebar.display = not self._sidebar.display
@@ -185,24 +302,104 @@ class OpenProgramTUI(App):
         self._chat.remove_children()
         self._append_system("(view cleared — history on disk is intact)")
 
+    async def action_switch_focus(self) -> None:
+        if self.focused is self._input:
+            self.set_focus(self._sidebar_list)
+        else:
+            self.set_focus(self._input)
+
+    async def action_close_palette(self) -> None:
+        if self.show_palette:
+            self.show_palette = False
+
     # ------------------------------------------------------------------
-    # Input submission
+    # Input + slash palette
     # ------------------------------------------------------------------
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        v = event.value or ""
+        if v.startswith("/"):
+            self._update_palette(v)
+        else:
+            if self.show_palette:
+                self.show_palette = False
+
+    def watch_show_palette(self, value: bool) -> None:
+        if self._palette is not None:
+            self._palette.display = value
+
+    def _update_palette(self, text: str) -> None:
+        """Filter palette items by prefix, show widget if any match."""
+        prefix = text.lower()
+        candidates = [
+            (cmd, desc) for cmd, desc in _SLASH_COMMANDS
+            if cmd.startswith(prefix)
+        ]
+        self._palette.clear()
+        for cmd, desc in candidates:
+            cmd_lbl = Label(cmd, classes="cmd")
+            desc_lbl = Label(desc, classes="desc")
+            row = ListItem(Horizontal(cmd_lbl, desc_lbl))
+            row.data_cmd = cmd  # type: ignore[attr-defined]
+            self._palette.append(row)
+        self.show_palette = bool(candidates)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         text = (event.value or "").strip()
         if not text:
             return
+        self._input_history.append(text)
+        self._history_idx = len(self._input_history)
         self._input.value = ""
+        self.show_palette = False
         if text.startswith("/"):
             self._run_slash(text)
             return
-        if self._busy:
-            self._append_system("[busy — wait for the current turn to finish]")
+        if self.busy:
+            self._append_system(
+                "[busy — wait for the current turn to finish]"
+            )
             return
         self._append_user(text)
-        self._busy = True
+        self._set_busy(True)
         self._run_turn(text)
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Either palette pick or sidebar entry pick."""
+        if event.list_view is self._palette:
+            cmd = getattr(event.item, "data_cmd", None)
+            if cmd:
+                # Replace input with the selected command + space, leave
+                # focus there so the user can finish arguments.
+                self._input.value = cmd + " "
+                self._input.cursor_position = len(self._input.value)
+                self.set_focus(self._input)
+                self.show_palette = False
+            return
+
+        # Sidebar entry
+        sb_data = getattr(event.item, "data", None)
+        if not sb_data:
+            return
+        if sb_data["kind"] == "agent":
+            # User clicked an agent header — switch to it.
+            self.run_worker(self._switch_agent(sb_data["agent_id"]),
+                             exclusive=True)
+        elif sb_data["kind"] == "session":
+            cid = sb_data["conv_id"]
+            agent_id = sb_data["agent_id"]
+            if agent_id != self.agent.id:
+                # Switching agent + session at the same time
+                self.run_worker(
+                    self._switch_agent(agent_id, then_conv_id=cid),
+                    exclusive=True,
+                )
+            elif cid != self.conv_id:
+                self.conv_id = cid
+                self._chat.remove_children()
+                self._load_history_into_scroll()
+                self._refresh_status()
+                self._refresh_sidebar()
 
     # ------------------------------------------------------------------
     # Turn execution (off the event loop)
@@ -215,32 +412,41 @@ class OpenProgramTUI(App):
             reply = _run_turn_with_history(
                 self.agent, self.conv_id, user_text,
             )
+            error = False
         except Exception as e:  # noqa: BLE001
-            reply = f"[error] {type(e).__name__}: {e}"
-        # Back to the UI thread to render.
-        self.call_from_thread(self._append_assistant, reply)
-        self.call_from_thread(self._mark_idle)
+            reply = f"{type(e).__name__}: {e}"
+            error = True
+        self.call_from_thread(self._render_reply, reply, error)
 
-    def _mark_idle(self) -> None:
-        self._busy = False
-        self._refresh_sessions_list()
+    def _render_reply(self, reply: str, error: bool) -> None:
+        if error:
+            self._append_error(reply)
+        else:
+            self._append_assistant(reply)
+        self._set_busy(False)
+        self._refresh_sidebar()
+
+    def _set_busy(self, busy: bool) -> None:
+        self.busy = busy
+        if self._thinking_indicator is None:
+            return
+        self._thinking_indicator.display = busy
+        thinking_text = self.query_one("#thinking", Static)
+        thinking_text.display = busy
+        if busy:
+            thinking_text.update(
+                f"[dim]{self.agent.id} is thinking…[/]"
+            )
 
     # ------------------------------------------------------------------
-    # Slash commands — reuse cli_chat._handle_slash but capture output
+    # Slash commands — reuse cli_chat._handle_slash; capture output
     # ------------------------------------------------------------------
 
     def _run_slash(self, raw: str) -> None:
-        """Dispatch a slash command. cli_chat._handle_slash writes to
-        a ``console`` object; we feed it a capture shim that turns
-        each ``print`` into a system bubble inside the scroll.
-        """
         from rich.console import Console as _Console
         from io import StringIO
         buf = StringIO()
-        captured = _Console(file=buf, force_terminal=False,
-                            width=100, record=True)
-        # Light shim so `.print(markup)` without styles still produces
-        # readable output. We feed the captured string as system msg.
+        captured = _Console(file=buf, force_terminal=False, width=100)
         from openprogram.cli_chat import _handle_slash
         try:
             should_quit = _handle_slash(
@@ -249,13 +455,44 @@ class OpenProgramTUI(App):
             )
         except Exception as e:  # noqa: BLE001
             should_quit = False
-            self._append_system(f"[slash error] {type(e).__name__}: {e}")
+            self._append_error(f"slash error: {type(e).__name__}: {e}")
             return
         output = buf.getvalue().strip()
         if output:
             self._append_system(output)
         if should_quit:
             self.exit()
+        # Slash commands can mutate state we display; refresh.
+        self._refresh_status()
+        self._refresh_sidebar()
+
+    # ------------------------------------------------------------------
+    # Agent switching
+    # ------------------------------------------------------------------
+
+    async def _switch_agent(self, agent_id: str,
+                            then_conv_id: Optional[str] = None) -> None:
+        from openprogram.agents import manager as _A
+        from openprogram.agents import runtime_registry as _R
+        spec = _A.get(agent_id)
+        if spec is None:
+            self._append_error(f"no agent {agent_id!r}")
+            return
+        try:
+            self.rt = _R.get_runtime_for(spec)
+        except Exception as e:  # noqa: BLE001
+            self._append_error(f"runtime build failed: {e}")
+            return
+        self.agent = spec
+        self.conv_id = then_conv_id or ("local_" + uuid.uuid4().hex[:10])
+        self._chat.remove_children()
+        self._load_history_into_scroll()
+        self._append_system(
+            f"Switched to agent `{spec.id}` "
+            f"(model={spec.model.provider}/{spec.model.id or '?'})."
+        )
+        self._refresh_status()
+        self._refresh_sidebar()
 
     # ------------------------------------------------------------------
     # Scroll helpers
@@ -276,9 +513,14 @@ class OpenProgramTUI(App):
         self._chat.mount(w)
         self._chat.scroll_end(animate=False)
 
+    def _append_error(self, text: str) -> None:
+        w = Markdown(f"**error**\n\n{text}", classes="error")
+        self._chat.mount(w)
+        self._chat.scroll_end(animate=False)
+
     def _load_history_into_scroll(self) -> None:
-        """If --resume brought us into an existing session, render it
-        so the user sees their context, not a blank screen."""
+        """Render this session's persisted history into the scroll
+        on agent / session switch."""
         try:
             from openprogram.webui import persistence as _p
             data = _p.load_conversation(self.agent.id, self.conv_id)
@@ -287,7 +529,7 @@ class OpenProgramTUI(App):
         if not data:
             self._append_system(
                 f"New session `{self.conv_id}` under agent `{self.agent.id}`. "
-                f"Type to start, or `/login wechat` to wire up a channel."
+                f"Type to start or `/login wechat` to wire a channel in."
             )
             return
         msgs = data.get("messages") or []
@@ -312,69 +554,89 @@ class OpenProgramTUI(App):
             model = getattr(self.rt, "model", "") or ""
         self._status.model = model
         self._status.session_id = self.conv_id or ""
+        # Channels worker liveness — best-effort, no exception leaks.
+        try:
+            from openprogram.channels.worker import current_worker_pid
+            pid = current_worker_pid()
+            self._status.worker_state = (f"running (PID {pid})"
+                                          if pid else "off")
+        except Exception:
+            self._status.worker_state = ""
 
     # ------------------------------------------------------------------
-    # Sessions list
+    # Sidebar
     # ------------------------------------------------------------------
 
-    def _refresh_sessions_list(self) -> None:
-        """Populate the sidebar with this agent's sessions. Clicking a
-        row switches the main view to that session.
-        """
-        if self._sidebar_list is None or self.agent is None:
+    def _refresh_sidebar(self) -> None:
+        """Group sessions by agent. Each agent gets a header row;
+        sessions hang underneath. Active agent + active session get
+        highlighted classes."""
+        if self._sidebar_list is None:
             return
         self._sidebar_list.clear()
+        self._sidebar_index = []
         try:
+            from openprogram.agents import manager as _A
             from openprogram.agents.manager import sessions_dir
-            import json
-            root = sessions_dir(self.agent.id)
+            agents = _A.list_all()
+        except Exception:
+            return
+        for spec in agents:
+            head_classes = "agent_header"
+            if spec.id == self.agent.id:
+                head_classes += " active"
+            head_label = Label(f"{'▾' if spec.id == self.agent.id else '▸'} "
+                                f"{spec.name or spec.id}",
+                                classes=head_classes)
+            head_item = ListItem(head_label, classes=head_classes)
+            head_item.data = {"kind": "agent", "agent_id": spec.id}
+            self._sidebar_list.append(head_item)
+            self._sidebar_index.append(head_item.data)
+            # Sessions for this agent (only when expanded — we expand
+            # the active agent only to keep the list tight).
+            if spec.id != self.agent.id:
+                continue
             entries = []
-            for d in root.iterdir() if root.exists() else []:
+            root = sessions_dir(spec.id)
+            for d in sorted(root.iterdir()) if root.exists() else []:
                 if not d.is_dir():
                     continue
                 meta_p = d / "meta.json"
                 title = d.name
+                source = ""
                 ts = 0.0
                 if meta_p.exists():
                     try:
                         meta = json.loads(meta_p.read_text(encoding="utf-8"))
                         title = meta.get("title") or d.name
-                        ts = meta.get("_last_touched") or \
-                             meta.get("created_at") or 0
+                        source = (meta.get("channel") or
+                                  meta.get("source") or "")
+                        ts = (meta.get("_last_touched")
+                              or meta.get("created_at") or 0)
                     except Exception:
                         pass
-                entries.append((ts, d.name, title))
+                entries.append((ts, d.name, title, source))
             entries.sort(key=lambda e: -e[0])
-            for _ts, cid, title in entries[:80]:
-                label = title
+            for _ts, cid, title, source in entries[:80]:
+                icon = _PLATFORM_ICON.get(source, "•")
+                disp = title if len(title) <= 24 else title[:22] + "…"
+                line = f"  {icon} {disp}"
+                cls = "session"
                 if cid == self.conv_id:
-                    label = "▶ " + title
-                item = ListItem(Label(label), id=f"sess_{cid}")
-                item.data_id = cid  # type: ignore[attr-defined]
-                self._sidebar_list.append(item)
-        except Exception:
-            pass
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        """Sidebar row clicked — switch session."""
-        if event.item is None:
-            return
-        cid = getattr(event.item, "data_id", None)
-        if not cid or cid == self.conv_id:
-            return
-        self.conv_id = cid
-        self._chat.remove_children()
-        self._load_history_into_scroll()
-        self._refresh_status()
-        self._refresh_sessions_list()
+                    cls += " active"
+                lbl = Label(line)
+                row = ListItem(lbl, classes=cls)
+                row.data = {"kind": "session", "agent_id": spec.id,
+                             "conv_id": cid}
+                self._sidebar_list.append(row)
+                self._sidebar_index.append(row.data)
 
 
 def run_tui(agent, conv_id: str, rt) -> None:
     """Launch the Textual chat. Caller provides a default agent, a
     session id (new or --resume), and an LLM runtime object.
-
-    Any exception from Textual startup propagates to the caller,
-    which should fall back to the Rich REPL.
+    Falls through with an exception if Textual can't start (caller
+    falls back to the Rich REPL).
     """
     app = OpenProgramTUI(agent=agent, conv_id=conv_id, rt=rt)
     app.run()
