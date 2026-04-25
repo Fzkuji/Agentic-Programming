@@ -14,6 +14,10 @@ export interface SlashContext {
   toggleTools: () => void;
   /** Export the current transcript to a markdown file. */
   exportTranscript: (filename?: string) => string;
+  /** Get the most recent assistant reply text (for /copy). */
+  lastAssistantText?: () => string | null;
+  /** Copy the given text to the system clipboard. */
+  copyToClipboard?: (text: string) => Promise<boolean>;
   currentAgent?: string;
   currentModel?: string;
   currentConversation?: string;
@@ -308,7 +312,18 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     }
 
     case 'copy': {
-      ctx.pushSystem('Use ⌘+C / ctrl+shift+C in your terminal to copy. Native clipboard from inside Ink coming later.');
+      const text = ctx.lastAssistantText?.();
+      if (!text) {
+        ctx.pushSystem('Nothing to copy yet.');
+        return true;
+      }
+      ctx.copyToClipboard?.(text)
+        .then((ok) => {
+          ctx.pushSystem(ok ? 'Copied last assistant reply to clipboard.' : 'Clipboard backend not found.');
+        })
+        .catch((e) => {
+          ctx.pushSystem(`Copy failed: ${(e as Error).message}`);
+        });
       return true;
     }
 

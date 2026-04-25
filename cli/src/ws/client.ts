@@ -143,23 +143,37 @@ export type WsEnvelope =
   | { type: 'pong' };
 
 export type WsListener = (ev: WsEnvelope) => void;
+export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
+export type StateListener = (state: ConnectionState) => void;
 
 export class BackendClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<WsListener>();
+  private stateListeners = new Set<StateListener>();
   private url: string;
   private retry = 0;
-  private connected = false;
+  private state: ConnectionState = 'connecting';
   private queue: WsRequest[] = [];
 
   constructor(url: string) {
     this.url = url;
   }
 
+  private setState(next: ConnectionState): void {
+    if (this.state === next) return;
+    this.state = next;
+    for (const l of this.stateListeners) l(next);
+  }
+
+  getState(): ConnectionState {
+    return this.state;
+  }
+
   connect(): void {
+    this.setState('connecting');
     this.ws = new WebSocket(this.url);
     this.ws.on('open', () => {
-      this.connected = true;
+      this.setState('connected');
       this.retry = 0;
       const q = this.queue.splice(0);
       for (const a of q) this.send(a);
@@ -175,7 +189,7 @@ export class BackendClient {
       }
     });
     this.ws.on('close', () => {
-      this.connected = false;
+      this.setState('disconnected');
       const delay = Math.min(5000, 200 * Math.pow(2, this.retry++));
       setTimeout(() => this.connect(), delay);
     });
@@ -185,7 +199,7 @@ export class BackendClient {
   }
 
   send(req: WsRequest): void {
-    if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (this.state !== 'connected' || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
       this.queue.push(req);
       return;
     }
@@ -195,6 +209,12 @@ export class BackendClient {
   on(listener: WsListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  onState(listener: StateListener): () => void {
+    this.stateListeners.add(listener);
+    listener(this.state);
+    return () => this.stateListeners.delete(listener);
   }
 
   close(): void {

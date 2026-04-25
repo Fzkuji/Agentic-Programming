@@ -14,6 +14,10 @@ export interface BottomBarProps {
   tokens?: { input?: number; output?: number };
   /** Tools available for next turn. */
   toolsOn?: boolean;
+  /** ws connection state. */
+  connState?: 'connecting' | 'connected' | 'disconnected';
+  /** Total context window in tokens (for the % indicator). */
+  contextWindow?: number;
 }
 
 const formatTokens = (n?: number): string | null => {
@@ -30,6 +34,8 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   slashMode,
   tokens,
   toolsOn,
+  connState,
+  contextWindow,
 }) => {
   const cols = useTerminalWidth();
 
@@ -78,6 +84,14 @@ export const BottomBar: React.FC<BottomBarProps> = ({
       </Box>
       <Box flexShrink={0}>
         <Text color={colors.muted}>
+          {connState && connState !== 'connected' ? (
+            <>
+              <Text color={connState === 'disconnected' ? colors.error : colors.warning}>
+                {connState === 'disconnected' ? '○ offline' : '◌ connecting'}
+              </Text>
+              <Text color={colors.border}> · </Text>
+            </>
+          ) : null}
           {agent ?? '—'}
           <Text color={colors.border}> · </Text>
           {model ?? '—'}
@@ -93,6 +107,18 @@ export const BottomBar: React.FC<BottomBarProps> = ({
               {inTokens ? <Text color={colors.muted}>↓{inTokens}</Text> : null}
               {inTokens && outTokens ? <Text color={colors.border}> </Text> : null}
               {outTokens ? <Text color={colors.muted}>↑{outTokens}</Text> : null}
+            </>
+          ) : null}
+          {showTokens && contextWindow && tokens?.input ? (
+            <>
+              <Text color={colors.border}> · </Text>
+              <Text color={
+                tokens.input / contextWindow > 0.85 ? colors.error
+                : tokens.input / contextWindow > 0.65 ? colors.warning
+                : colors.muted
+              }>
+                {Math.round((tokens.input / contextWindow) * 100)}%
+              </Text>
             </>
           ) : null}
           {busy && showBusyTag ? (

@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { Box, useApp, useInput } from 'ink';
-import { BackendClient, WsEnvelope, StatsEnvelope } from '../ws/client.js';
+import { BackendClient, WsEnvelope, StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
 import { Spinner } from '../components/Spinner.js';
@@ -10,6 +10,8 @@ import { Picker, PickerItem } from '../components/Picker.js';
 import { Turn, ToolCall } from '../components/Turn.js';
 import { PromptInput } from '../components/PromptInput/PromptInput.js';
 import { handleSlash } from '../commands/handler.js';
+import { loadHistory, appendHistory, trimHistoryFile } from '../utils/history.js';
+import { copyToClipboard } from '../utils/clipboard.js';
 
 export interface REPLProps {
   client: BackendClient;
@@ -43,6 +45,10 @@ interface Activity {
   detail?: string;
   /** Wall clock when this turn started (used for elapsed display). */
   startedAt: number;
+  /** Cumulative characters received from text deltas. */
+  streamedChars?: number;
+  /** Wall clock when streaming first started (text first delta). */
+  streamStartedAt?: number;
 }
 
 export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConversation }) => {
@@ -57,7 +63,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [tick, setTick] = useState(0);
   const [slashMode, setSlashMode] = useState(false);
   const [tokens, setTokens] = useState<{ input?: number; output?: number }>({});
-  const [history, setHistory] = useState<string[]>([]);
+  const [history, setHistory] = useState<string[]>(() => loadHistory());
+  const [contextWindow, setContextWindow] = useState<number | undefined>(undefined);
   const [modelsList, setModelsList] = useState<string[]>([]);
   const [pastConversations, setPastConversations] = useState<
     Array<{ id?: string; title?: string; created_at?: number }>
@@ -67,6 +74,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   );
   const [agentsList, setAgentsList] = useState<AgentInfo[]>([]);
   const [toolsOn, setToolsOn] = useState(false);
+  const [connState, setConnState] = useState<ConnectionState>(client.getState());
   const agentSetRef = useRef(false);
 
   // 1Hz tick for elapsed-seconds display while a turn is active.
@@ -133,8 +141,17 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           const inner = (d as { event?: { type?: string; text?: string; tool?: string; input?: string } }).event;
           if (!inner) return;
           if (inner.type === 'text' && typeof inner.text === 'string') {
-            upsertStreamingText(inner.text);
-            setActivity((a) => (a ? { ...a, verb: 'Streaming' } : a));
+            const delta = inner.text;
+            upsertStreamingText(delta);
+            setActivity((a) => {
+              if (!a) return a;
+              return {
+                ...a,
+                verb: 'Streaming',
+                streamedChars: (a.streamedChars ?? 0) + delta.length,
+                streamStartedAt: a.streamStartedAt ?? Date.now(),
+              };
+            });
           } else if (inner.type === 'tool_use' && inner.tool) {
             appendStreamingTool(inner.tool, inner.input);
             setActivity((a) =>
@@ -177,9 +194,19 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             a ? { ...a, verb: (d.content as string).replace(/\.+$/, '') } : a,
           );
         } else if (d.type === 'context_stats') {
-          const chat = (d as { chat?: { input_tokens?: number; output_tokens?: number } }).chat;
-          if (chat)
-            setTokens({ input: chat.input_tokens, output: chat.output_tokens });
+          const cs = d as {
+            chat?: { input_tokens?: number; output_tokens?: number };
+            context_window?: number | null;
+          };
+          if (cs.chat) {
+            setTokens({
+              input: cs.chat.input_tokens,
+              output: cs.chat.output_tokens,
+            });
+          }
+          if (typeof cs.context_window === 'number' && cs.context_window > 0) {
+            setContextWindow(cs.context_window);
+          }
         }
       } else if (ev.type === 'stats') {
         setStats(ev.data);
@@ -264,10 +291,13 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         finishTurn();
       }
     });
+    const offState = client.onState((s) => setConnState(s));
     client.send({ action: 'stats' });
     client.send({ action: 'list_agents' });
+    trimHistoryFile();
     return () => {
       off();
+      offState();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
@@ -299,6 +329,13 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         exit: () => app.exit(),
         openPicker: (kind) => setPickerKind(kind),
         toggleTools: () => setToolsOn((on) => !on),
+        lastAssistantText: () => {
+          for (let i = committed.length - 1; i >= 0; i--) {
+            if (committed[i]?.role === 'assistant') return committed[i]!.text;
+          }
+          return null;
+        },
+        copyToClipboard: copyToClipboard,
         exportTranscript: (filename) => {
           const fname = filename ?? `openprogram-${Date.now()}.md`;
           const path = fname.startsWith('/') ? fname : join(process.cwd(), fname);
@@ -328,9 +365,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       if (handled) return;
     }
     setCommitted((m) => [...m, { id: `u-${Date.now()}`, role: 'user', text }]);
-    setHistory((h) =>
-      h[h.length - 1] === text ? h : [...h, text].slice(-200),
-    );
+    setHistory((h) => {
+      if (h[h.length - 1] === text) return h;
+      appendHistory(text);
+      return [...h, text].slice(-500);
+    });
     startTurn('Thinking');
     client.send({
       action: 'chat',
@@ -351,6 +390,12 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   const elapsed = activity ? (Date.now() - activity.startedAt) / 1000 : undefined;
   void tick; // depend on tick so elapsed re-renders every second
+  const streamRate = (() => {
+    if (!activity?.streamStartedAt || !activity.streamedChars) return undefined;
+    const dt = (Date.now() - activity.streamStartedAt) / 1000;
+    if (dt <= 0.1) return undefined;
+    return Math.round(activity.streamedChars / dt);
+  })();
 
   // Build picker items based on the current pickerKind.
   let pickerNode: React.ReactElement | null = null;
@@ -427,7 +472,15 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         welcome={stats ? stats : undefined}
       />
       {activity ? (
-        <Spinner verb={activity.verb} detail={activity.detail} elapsed={elapsed} />
+        <Spinner
+          verb={activity.verb}
+          detail={
+            streamRate !== undefined
+              ? `${streamRate} chars/s${activity.detail ? ` · ${activity.detail}` : ''}`
+              : activity.detail
+          }
+          elapsed={elapsed}
+        />
       ) : null}
       {pickerNode ? (
         pickerNode
@@ -448,6 +501,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         slashMode={slashMode}
         tokens={tokens}
         toolsOn={toolsOn}
+        connState={connState}
+        contextWindow={contextWindow}
       />
     </Box>
   );

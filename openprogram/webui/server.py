@@ -1190,11 +1190,21 @@ def _broadcast_context_stats(conv_id: str, msg_id: str, chat_runtime=None, exec_
     # Include provider name so frontend can apply provider-specific formatting
     provider_name = conv.get("provider_name", _runtime_management._default_provider) or ""
 
+    # Best-effort context window for the current model — frontend uses this
+    # to render the input/output % bar. Falls back to None on unknown.
+    context_window = None
+    if chat_runtime:
+        try:
+            context_window = getattr(chat_runtime, "_context_window_tokens", None)
+        except Exception:
+            context_window = None
+
     stats = {
         "type": "context_stats",
         "chat": conv.get("_chat_usage", dict(_zero)),
         "exec": exec_stats,
         "provider": provider_name,
+        "context_window": context_window,
     }
     conv["_last_context_stats"] = stats
     _broadcast_chat_response(conv_id, msg_id, stats)
