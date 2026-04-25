@@ -317,8 +317,16 @@ def _handle_slash(cmd: str, console, rt,
         return True
 
     if verb == "model":
-        console.print(f"[bold]{getattr(rt, 'model', '?')}[/]")
-        return False
+        return _handle_model(args, console, agent)
+
+    if verb == "agent":
+        return _handle_agent_switch(args, console, agent)
+
+    if verb == "new":
+        return _handle_new_session(console)
+
+    if verb == "copy":
+        return _handle_copy(console, agent, conv_id)
 
     if verb == "tools":
         count, names = _tool_inventory()
@@ -527,6 +535,160 @@ def _handle_login(args: list[str], console, agent) -> bool:
         f"Use /attach {channel} <peer_id> to pin a specific peer "
         f"to THIS session."
     )
+    return False
+
+
+def _handle_model(args: list[str], console, agent) -> bool:
+    """``/model`` lists every enabled model; ``/model <id>`` switches.
+    Both forms support ``provider/id`` and bare ``id`` if the id is
+    unique across providers."""
+    from openprogram.webui import _model_catalog as mc
+    from openprogram.agents import manager as _A
+    from openprogram.agents import runtime_registry as _R
+    enabled = mc.list_enabled_models()
+    if not args:
+        if not enabled:
+            console.print(
+                "[yellow]No enabled models. Run "
+                "`openprogram providers setup` and pick at least one.[/]"
+            )
+            return False
+        cur = ""
+        if agent and agent.model.provider and agent.model.id:
+            cur = f"{agent.model.provider}/{agent.model.id}"
+        console.print(
+            f"[bold]Current model[/]: [cyan]{cur or '(none)'}[/]"
+        )
+        console.print(
+            "[bold]Available[/] (use [cyan]/model <id>[/] to switch):"
+        )
+        for m in enabled:
+            full = f"{m['provider']}/{m['id']}"
+            tag = " ← current" if full == cur else ""
+            name = m.get("name") or m["id"]
+            console.print(f"  [cyan]{full:42}[/]  [dim]{name}[/]{tag}")
+        return False
+
+    target = args[0].strip()
+    # Resolve target — accept "provider/id" or bare id (if unique).
+    matches = [m for m in enabled
+               if f"{m['provider']}/{m['id']}" == target]
+    if not matches:
+        matches = [m for m in enabled if m["id"] == target]
+    if not matches:
+        console.print(f"[yellow]No enabled model matches {target!r}.[/]")
+        return False
+    if len(matches) > 1:
+        console.print(
+            f"[yellow]{target!r} is ambiguous: "
+            f"{', '.join(m['provider'] + '/' + m['id'] for m in matches)}. "
+            f"Use the full provider/id form.[/]"
+        )
+        return False
+    m = matches[0]
+    if agent is None:
+        console.print("[yellow]No active agent.[/]")
+        return False
+    _A.update(agent.id, {"model": {"provider": m["provider"], "id": m["id"]}})
+    _R.invalidate(agent.id)
+    console.print(
+        f"[green]Agent[/] [cyan]{agent.id}[/]: model = "
+        f"[bold]{m['provider']}/{m['id']}[/]"
+    )
+    return False
+
+
+def _handle_agent_switch(args: list[str], console, agent) -> bool:
+    """``/agent`` lists agents; ``/agent <id>`` switches.
+
+    Switching mid-REPL is partial — it changes the *default* agent
+    for new sessions but does not move the current REPL into the new
+    agent's runtime (that path lives only in the TUI). Tell the user
+    so they aren't surprised."""
+    from openprogram.agents import manager as _A
+    if not args:
+        rows = _A.list_all()
+        if not rows:
+            console.print(
+                "[yellow]No agents. "
+                "`openprogram agents add main`.[/]"
+            )
+            return False
+        cur = agent.id if agent else ""
+        console.print("[bold]Agents[/]:")
+        for a in rows:
+            tag = " ← current" if a.id == cur else (
+                "  [dim](default)[/]" if a.default else ""
+            )
+            pm = (f"{a.model.provider}/{a.model.id}"
+                  if a.model.provider else "no model")
+            console.print(
+                f"  [cyan]{a.id:14}[/]  [dim]{pm}[/]{tag}"
+            )
+        console.print(
+            "[dim]To switch: type[/] [cyan]/agent <id>[/]  "
+            "[dim](TUI: Ctrl+A also cycles)[/]"
+        )
+        return False
+    target = args[0].strip()
+    if _A.get(target) is None:
+        console.print(f"[yellow]No agent {target!r}.[/]")
+        return False
+    _A.set_default(target)
+    console.print(
+        f"[green]Default agent set to[/] [cyan]{target}[/]. "
+        "[dim](Open a new REPL or use /new for the change to take "
+        "effect — current REPL keeps its session bound to the old "
+        "agent.)[/]"
+    )
+    return False
+
+
+def _handle_new_session(console) -> bool:
+    """REPL-only stub. The TUI overrides this via Ctrl+N. In the
+    Rich REPL we can't reset the current process's session_id from
+    here, so we tell the user to relaunch."""
+    console.print(
+        "[yellow]/new applies in the TUI. "
+        "In the Rich REPL, exit and relaunch (or use Ctrl+N inside "
+        "the TUI) to start a fresh session.[/]"
+    )
+    return False
+
+
+def _handle_copy(console, agent, conv_id: str) -> bool:
+    """Copy the last assistant message to the system clipboard.
+
+    The TUI has its own override that uses ``app.copy_to_clipboard``;
+    this Rich-REPL fallback uses pyperclip when present, otherwise
+    prints the message to stdout so the user can use the terminal's
+    own selection."""
+    from openprogram.webui import persistence as _persist
+    if not (agent and conv_id):
+        console.print("[yellow]No active session.[/]")
+        return False
+    data = _persist.load_conversation(agent.id, conv_id)
+    if not data:
+        console.print("[yellow]Session has no messages yet.[/]")
+        return False
+    last_assistant = next(
+        (m for m in reversed(data.get("messages") or [])
+         if m.get("role") == "assistant"),
+        None,
+    )
+    if last_assistant is None:
+        console.print("[yellow]No assistant reply to copy yet.[/]")
+        return False
+    text = last_assistant.get("content") or ""
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        console.print(f"[green]Copied {len(text)} chars to clipboard.[/]")
+    except Exception:
+        # No pyperclip / no system clipboard daemon — fall back to
+        # printing so the user can still get the text out.
+        console.print("[dim]No clipboard backend; printing instead:[/]")
+        console.print(text)
     return False
 
 

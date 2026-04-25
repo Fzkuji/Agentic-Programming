@@ -58,12 +58,15 @@ from textual.widgets import (
 _SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/help",        "show every slash command"),
     ("/session",     "show current session id + agent"),
+    ("/new",         "start a new session under the current agent"),
+    ("/agent",       "switch agent (or list agents with no arg)"),
+    ("/model",       "switch chat model (or list with no arg)"),
     ("/login",       "log in to a channel (wechat: QR; others: token)"),
     ("/attach",      "route a channel peer into THIS session"),
     ("/detach",      "remove a channel peer alias"),
     ("/connections", "list channel peers wired to this session"),
+    ("/copy",        "copy the last assistant reply to clipboard"),
     ("/web",         "open the Web UI"),
-    ("/model",       "show current chat model"),
     ("/tools",       "list tools"),
     ("/skills",      "list skills"),
     ("/functions",   "list agentic functions"),
@@ -192,6 +195,8 @@ class OpenProgramTUI(App):
         Binding("ctrl+q", "quit_chat", "Quit", priority=True),
         Binding("ctrl+n", "new_session", "New session"),
         Binding("ctrl+a", "next_agent", "Next agent"),
+        Binding("ctrl+m", "pick_model", "Switch model"),
+        Binding("ctrl+y", "copy_last", "Copy reply"),
         Binding("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
         Binding("ctrl+l", "clear_scroll", "Clear"),
         Binding("tab", "switch_focus", "Switch focus"),
@@ -217,6 +222,9 @@ class OpenProgramTUI(App):
         self._sidebar_index: list[dict] = []  # parsed entries for nav
         self._input_history: list[str] = []
         self._history_idx = 0
+        # When non-None the slash palette is in modal picker mode and
+        # input typing should NOT re-filter it.
+        self._picker_callback = None
 
     # ------------------------------------------------------------------
     # Layout
@@ -230,7 +238,6 @@ class OpenProgramTUI(App):
         self._chat = _ChatScroll(id="chat_scroll")
         self._sidebar_list = ListView(id="session_list")
         self._sidebar = _Sidebar(
-            Label("Agents · Sessions", classes="brand"),
             self._sidebar_list,
             id="sidebar",
         )
@@ -314,11 +321,141 @@ class OpenProgramTUI(App):
         if self.show_palette:
             self.show_palette = False
 
+    async def action_pick_model(self) -> None:
+        self._action_pick_model()
+
+    async def action_copy_last(self) -> None:
+        self._action_copy_last()
+
+    # Sidebar action-row callbacks. Names match the strings in
+    # _refresh_sidebar's action tuples; ListView routes a click on
+    # the row to the corresponding bound method.
+
+    def _action_new_session(self) -> None:
+        self.run_worker(self.action_new_session(), exclusive=True)
+
+    def _action_pick_model(self) -> None:
+        """Open a slash-palette-style model picker. Each row is one
+        enabled model from the registry; selecting it switches the
+        active agent's model."""
+        try:
+            from openprogram.webui import _model_catalog as mc
+            enabled = mc.list_enabled_models()
+        except Exception as e:  # noqa: BLE001
+            self._append_error(f"model list failed: {e}")
+            return
+        if not enabled:
+            self._append_system(
+                "No enabled models. Run `openprogram providers setup` "
+                "first to import a credential."
+            )
+            return
+        self._open_picker(
+            title="Pick a model",
+            options=[
+                (f"{m['provider']}/{m['id']}",
+                 m.get("name") or m["id"])
+                for m in enabled
+            ],
+            on_select=self._set_model,
+        )
+
+    def _set_model(self, full_id: str) -> None:
+        from openprogram.agents import manager as _A
+        from openprogram.agents import runtime_registry as _R
+        provider, _, model_id = full_id.partition("/")
+        if not provider or not model_id:
+            self._append_error(f"unparseable model id: {full_id!r}")
+            return
+        _A.update(self.agent.id,
+                  {"model": {"provider": provider, "id": model_id}})
+        _R.invalidate(self.agent.id)
+        # Re-pull the spec so reactives see the new model.
+        self.agent = _A.get(self.agent.id) or self.agent
+        # Also drop our local rt so the next turn rebuilds.
+        self.rt = None
+        self._append_system(
+            f"Switched model to **{provider}/{model_id}**."
+        )
+        self._refresh_status()
+        self._refresh_sidebar()
+
+    def _open_picker(self, *, title: str,
+                     options: list[tuple[str, str]],
+                     on_select) -> None:
+        """Show a modal picker with two-column rows (id, description).
+
+        ``options`` = ``[(value, label), ...]``. Up/Down to highlight,
+        Enter to confirm, Esc to cancel. The selected value is fed
+        into ``on_select``.
+
+        Implementation note: we reuse the slash palette widget so the
+        user gets the same look and feel as / commands. While the
+        picker is up, the input doesn't drive palette filtering — we
+        use a transient mode flag.
+        """
+        if not options:
+            self._append_system(f"Nothing to pick for: {title}")
+            return
+        self._palette.clear()
+        for value, label in options:
+            cmd_lbl = Label(value, classes="cmd")
+            desc_lbl = Label(label, classes="desc")
+            row = ListItem(Horizontal(cmd_lbl, desc_lbl))
+            row.data_cmd = value  # type: ignore[attr-defined]
+            row.data_picker = True  # type: ignore[attr-defined]
+            self._palette.append(row)
+        self._picker_callback = on_select
+        self.show_palette = True
+        self.set_focus(self._palette)
+        self._append_system(f"**{title}** — Up/Down + Enter, Esc to cancel.")
+
+    def _action_show_add_agent_hint(self) -> None:
+        self._append_system(
+            "Add a new agent from your shell:\n\n"
+            "  `openprogram agents add <id> --provider <name> "
+            "--model <id>`\n\n"
+            "Then come back here and use Ctrl+A or `/agent <id>` to "
+            "switch into it."
+        )
+
+    def _action_copy_last(self) -> None:
+        """Copy the last assistant message to the system clipboard
+        via Textual's built-in OSC-52 path. Works in iTerm2, kitty,
+        WezTerm, recent VS Code terminals, GNOME Terminal 3.50+,
+        Windows Terminal, tmux with set-clipboard on."""
+        try:
+            from openprogram.webui import persistence as _persist
+            data = _persist.load_conversation(self.agent.id, self.conv_id)
+        except Exception:
+            data = None
+        if not data:
+            self._append_system("No messages yet to copy.")
+            return
+        last = next(
+            (m for m in reversed(data.get("messages") or [])
+             if m.get("role") == "assistant"),
+            None,
+        )
+        if last is None:
+            self._append_system("No assistant reply to copy yet.")
+            return
+        text = last.get("content") or ""
+        try:
+            self.copy_to_clipboard(text)
+            self._append_system(f"Copied {len(text)} chars to clipboard.")
+        except Exception as e:  # noqa: BLE001
+            self._append_error(f"copy failed: {e}")
+
     # ------------------------------------------------------------------
     # Input + slash palette
     # ------------------------------------------------------------------
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        # Don't fight the picker — once a modal picker (model / agent
+        # / etc.) is showing, ignore user keystrokes in the input.
+        if self._picker_callback is not None:
+            return
         v = event.value or ""
         if v.startswith("/"):
             self._update_palette(v)
@@ -331,12 +468,33 @@ class OpenProgramTUI(App):
             self._palette.display = value
 
     def _update_palette(self, text: str) -> None:
-        """Filter palette items by prefix, show widget if any match."""
-        prefix = text.lower()
-        candidates = [
-            (cmd, desc) for cmd, desc in _SLASH_COMMANDS
-            if cmd.startswith(prefix)
-        ]
+        """Two-tier filter:
+
+          * empty query → list every command
+          * otherwise → first try prefix on the command name (so
+            typing ``/m`` shows ``/model`` first); if no prefix
+            matches, fall back to substring across cmd + description
+            (so typing ``/wec`` finds ``/login`` because the desc
+            mentions wechat).
+
+        Always shows SOME results when a query is non-empty so the
+        user gets feedback instead of an empty popup.
+        """
+        query = text.lstrip("/").strip().lower()
+        if not query:
+            candidates = list(_SLASH_COMMANDS)
+        else:
+            prefix_hits = [
+                (cmd, desc) for cmd, desc in _SLASH_COMMANDS
+                if cmd[1:].lower().startswith(query)
+            ]
+            if prefix_hits:
+                candidates = prefix_hits
+            else:
+                candidates = [
+                    (cmd, desc) for cmd, desc in _SLASH_COMMANDS
+                    if query in cmd.lower() or query in desc.lower()
+                ]
         self._palette.clear()
         for cmd, desc in candidates:
             cmd_lbl = Label(cmd, classes="cmd")
@@ -376,7 +534,17 @@ class OpenProgramTUI(App):
         """
         if event.list_view is self._palette:
             cmd = getattr(event.item, "data_cmd", None)
-            if cmd:
+            picker = getattr(event.item, "data_picker", False)
+            if not cmd:
+                return
+            if picker:
+                cb = getattr(self, "_picker_callback", None)
+                self.show_palette = False
+                self._picker_callback = None
+                self.set_focus(self._input)
+                if cb:
+                    cb(cmd)
+            else:
                 self._input.value = cmd + " "
                 self._input.cursor_position = len(self._input.value)
                 self.set_focus(self._input)
@@ -385,6 +553,14 @@ class OpenProgramTUI(App):
 
         sb_data = getattr(event.item, "data", None)
         if not sb_data:
+            return
+        if sb_data["kind"] == "separator":
+            return
+        if sb_data["kind"] == "action":
+            cb = sb_data.get("callback")
+            handler = getattr(self, cb, None) if cb else None
+            if handler:
+                handler()
             return
         if sb_data["kind"] == "agent":
             target = sb_data["agent_id"]
@@ -596,6 +772,28 @@ class OpenProgramTUI(App):
             agents = _A.list_all()
         except Exception:
             return
+
+        # Top row: actionable shortcuts. Click → fires the same code
+        # path as the matching slash command.
+        for action in (
+            ("+ New session", "_action_new_session", "action"),
+            ("⌥ Switch model…", "_action_pick_model", "action"),
+            ("+ Add agent (CLI)", "_action_show_add_agent_hint", "action"),
+        ):
+            label, callback, kind = action
+            row = ListItem(Label(label, classes="action_row"),
+                           classes="action_row")
+            row.data = {"kind": kind, "callback": callback}
+            self._sidebar_list.append(row)
+            self._sidebar_index.append(row.data)
+
+        # Spacer divider so actions don't blend into the agent list.
+        sep = ListItem(Label("─ Agents ─", classes="agent_header"),
+                       classes="separator_row")
+        sep.data = {"kind": "separator"}
+        self._sidebar_list.append(sep)
+        self._sidebar_index.append(sep.data)
+
         for spec in agents:
             head_classes = "agent_header"
             if spec.id == self.agent.id:
