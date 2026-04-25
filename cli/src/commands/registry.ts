@@ -25,6 +25,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'export', description: 'Export the current transcript to a file' },
   { name: 'doctor', description: 'Run health diagnostics' },
   { name: 'review', description: 'Review the diff' },
+  { name: 'diff', description: 'Show git working-tree diff' },
   { name: 'init', description: 'Initialize an OpenProgram workspace' },
   { name: 'attach', description: 'Attach a channel peer to this session' },
   { name: 'detach', description: 'Detach a channel peer' },

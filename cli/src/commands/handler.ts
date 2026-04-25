@@ -86,6 +86,9 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
       return true;
 
     case 'clear':
+      // Clearing only resets React state — Ink's <Static> already-printed
+      // turns stay on the terminal scrollback. Type / for /welcome to
+      // re-print the banner.
       ctx.clearCommitted();
       return true;
 
@@ -338,6 +341,37 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
         'For provider auth (Anthropic / Codex / Gemini): run\n' +
         '  openprogram providers login <name> from the shell.',
       );
+      return true;
+    }
+
+    case 'diff': {
+      // Show the working-tree diff. Spawn git, capture stdout, render as
+      // a system note. Bounded — too long renders a (+N more) tail.
+      try {
+        const range = args.join(' ') || '';
+        import('child_process').then(({ spawnSync }) => {
+          const out = spawnSync('git', range ? ['diff', range] : ['diff'], {
+            encoding: 'utf8',
+            maxBuffer: 1024 * 1024,
+          });
+          if (out.status !== 0 && (out.stderr ?? '').trim()) {
+            ctx.pushSystem(`git diff: ${out.stderr}`);
+            return;
+          }
+          const text = (out.stdout ?? '').trimEnd();
+          if (!text) {
+            ctx.pushSystem('No working-tree changes.');
+            return;
+          }
+          const lines = text.split('\n');
+          const cap = 60;
+          const shown = lines.slice(0, cap).join('\n');
+          const tail = lines.length > cap ? `\n… (+${lines.length - cap} more lines)` : '';
+          ctx.pushSystem(`${shown}${tail}`);
+        });
+      } catch (e) {
+        ctx.pushSystem(`/diff failed: ${(e as Error).message}`);
+      }
       return true;
     }
 
