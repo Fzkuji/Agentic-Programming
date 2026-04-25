@@ -171,17 +171,33 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const row2 = [providers, channels, functions, applications];
   const rowAll = [...row1, ...row2];
 
-  // Fixed chrome cost inside the welcome panel:
-  //   1 top border + 1 title + 1 marginTop + (row 1 height) +
-  //   1 marginTop + (row 2 height) + 1 marginTop + 1 tip + 1 bottom border
-  // → 7 chrome rows + 2 × tileHeight
-  // Reserve outside the panel: input box (3) + bottom bar (1) + safety (2).
-  const reservedOutside = 6;
-  const available = Math.max(8, rows - reservedOutside);
-  const chrome = 7;
-  // Per-tile minimum: 2 (count + label).
-  // Items per tile = (available - chrome) / 2 - 2.
-  const itemsPerTile = Math.max(0, Math.floor((available - chrome) / 2) - 2);
+  // Three display modes by available height. Budget breakdown:
+  //   outside reserved (input box 3 + bottom bar 1 + welcome marginBottom 1
+  //   + safety 1) = 6 rows
+  //   welcome chrome (border × 2 + title + 3 marginTop + tip) = 7 rows
+  //   one-row variant chrome = 6 rows
+  // Tile rows:
+  //   compact   = 2 (count + label)
+  //   with items, worst case = maxRows + 3 (count + label + items + overflow)
+  //
+  // Mode thresholds:
+  //   rows >= 21  → two rows of tiles, items per tile = (rows - 19) / 2
+  //   rows >= 17  → two rows compact (no items, just count + label)
+  //   rows >= 14  → one row of tiles (drop row2), compact
+  //   else        → skip welcome entirely
+  type Mode = 'none' | 'one-row' | 'two-rows-compact' | 'two-rows-items';
+  let mode: Mode;
+  let itemsPerTile = 0;
+  if (rows >= 21) {
+    mode = 'two-rows-items';
+    itemsPerTile = Math.min(8, Math.max(0, Math.floor((rows - 19) / 2)));
+  } else if (rows >= 17) {
+    mode = 'two-rows-compact';
+  } else if (rows >= 14) {
+    mode = 'one-row';
+  } else {
+    mode = 'none';
+  }
 
   // Width per tile. Always 4 columns when cols >= 50; below that fall back
   // to a 2-col grid (4 rows of 2 tiles).
@@ -190,6 +206,24 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
     ? Math.floor((width - 4) / 4)
     : Math.floor((width - 4) / 2);
   const twoSubCols = cols >= 130;
+  // The 4 most useful tiles when only one row fits.
+  const oneRowSubset = [skills, agentsCol, sessionsCol, tools];
+
+  // Smallest fallback — no room for a panel. Still print one line so the
+  // user knows what's going on.
+  if (mode === 'none') {
+    return (
+      <Box paddingX={1} marginBottom={0}>
+        <Text color={colors.primary} bold>
+          OpenProgram
+        </Text>
+        <Text color={colors.border}> · </Text>
+        <Text color={colors.muted}>
+          {agentName} · {model}
+        </Text>
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -211,9 +245,8 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
         </Text>
       </Box>
 
-      {/* 4-across layout: two rows of 4 tiles each.
-          On narrow terminals, fall back to 2-across with 4 rows. */}
-      {fourAcross ? (
+      {/* Tile layout — mode switches based on terminal height. */}
+      {mode === 'two-rows-items' && fourAcross ? (
         <>
           <Box marginTop={1}>
             {row1.map((c) => (
@@ -238,7 +271,45 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
             ))}
           </Box>
         </>
+      ) : mode === 'two-rows-compact' && fourAcross ? (
+        <>
+          <Box marginTop={1}>
+            {row1.map((c) => (
+              <Column
+                key={c.label}
+                spec={c}
+                width={tileWidth}
+                twoCols={false}
+                maxRows={0}
+              />
+            ))}
+          </Box>
+          <Box marginTop={1}>
+            {row2.map((c) => (
+              <Column
+                key={c.label}
+                spec={c}
+                width={tileWidth}
+                twoCols={false}
+                maxRows={0}
+              />
+            ))}
+          </Box>
+        </>
+      ) : mode === 'one-row' && fourAcross ? (
+        <Box marginTop={1}>
+          {oneRowSubset.map((c) => (
+            <Column
+              key={c.label}
+              spec={c}
+              width={tileWidth}
+              twoCols={false}
+              maxRows={0}
+            />
+          ))}
+        </Box>
       ) : (
+        // Narrow (<50 cols) fallback: 2-across grid, drop items if tight.
         <Box flexDirection="column" marginTop={1}>
           {Array.from({ length: Math.ceil(rowAll.length / 2) }).map((_, r) => (
             <Box key={r}>
@@ -248,7 +319,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
                   spec={c}
                   width={tileWidth}
                   twoCols={false}
-                  maxRows={Math.max(0, itemsPerTile - 1)}
+                  maxRows={mode === 'two-rows-items' ? Math.max(0, itemsPerTile - 1) : 0}
                 />
               ))}
             </Box>
