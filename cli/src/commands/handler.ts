@@ -3,7 +3,7 @@ import { SLASH_COMMANDS } from './registry.js';
 
 export interface SlashContext {
   client: BackendClient;
-  pushUser: () => void;
+  /** Append a system-style note (gray, no role label). */
   pushSystem: (text: string) => void;
   clearCommitted: () => void;
   newSession: () => void;
@@ -51,7 +51,7 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
 
   switch (cmd) {
     case 'help':
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       ctx.pushSystem(helpText());
       return true;
 
@@ -76,20 +76,20 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
         `model          : ${ctx.currentModel ?? '—'}`,
         `conversation   : ${ctx.currentConversation ?? '(new)'}`,
       ];
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       ctx.pushSystem(lines.join('\n'));
       return true;
     }
 
     case 'agents': {
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       ctx.client.send({ action: 'list_agents' });
       ctx.pushSystem('Listing agents… (see sidebar update once received)');
       return true;
     }
 
     case 'connections': {
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       ctx.client.send({ action: 'list_channel_bindings' });
       ctx.pushSystem('Listing channel bindings…');
       return true;
@@ -97,7 +97,7 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
 
     case 'aliases':
     case 'sessions': {
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       ctx.client.send({
         action: cmd === 'aliases' ? 'list_session_aliases' : 'list_conversations',
       });
@@ -106,7 +106,7 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     }
 
     case 'attach': {
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       if (args.length < 3) {
         ctx.pushSystem(attachUsage);
         return true;
@@ -130,7 +130,7 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     }
 
     case 'detach': {
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       if (args.length < 3) {
         ctx.pushSystem(detachUsage);
         return true;
@@ -142,7 +142,7 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     }
 
     case 'agent': {
-      ctx.pushUser();
+      // slash commands run silently — no user echo
       if (args.length < 1) {
         ctx.pushSystem('Usage: /agent <agent_id>');
         return true;

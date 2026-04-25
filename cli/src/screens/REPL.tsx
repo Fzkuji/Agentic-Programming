@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Box, useApp, useInput } from 'ink';
 import { BackendClient, WsEnvelope, StatsEnvelope } from '../ws/client.js';
-import { StatusLine } from '../components/StatusLine.js';
+import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
 import { Welcome } from '../components/Welcome.js';
 import { Spinner } from '../components/Spinner.js';
@@ -47,6 +47,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [activity, setActivity] = useState<Activity | null>(null);
   const [stats, setStats] = useState<StatsEnvelope['data'] | undefined>(undefined);
   const [tick, setTick] = useState(0);
+  const [slashMode, setSlashMode] = useState(false);
+  const [tokens, setTokens] = useState<{ input?: number; output?: number }>({});
   const agentSetRef = useRef(false);
 
   // 1Hz tick for elapsed-seconds display while a turn is active.
@@ -154,6 +156,9 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           setActivity((a) =>
             a ? { ...a, verb: (d.content as string).replace(/\.+$/, '') } : a,
           );
+        } else if (d.type === 'context_stats') {
+          const chat = (d as { chat?: { input?: number; output?: number } }).chat;
+          if (chat) setTokens({ input: chat.input, output: chat.output });
         }
       } else if (ev.type === 'stats') {
         setStats(ev.data);
@@ -203,7 +208,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     if (text.startsWith('/')) {
       const handled = handleSlash(text, {
         client,
-        pushUser: () => setCommitted((m) => [...m, { id: `u-${Date.now()}`, role: 'user', text }]),
         pushSystem,
         clearCommitted: () => setCommitted([]),
         newSession: () => {
@@ -238,12 +242,14 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       {activity ? (
         <Spinner verb={activity.verb} detail={activity.detail} elapsed={elapsed} />
       ) : null}
-      <PromptInput onSubmit={onSubmit} busy={!!activity} />
-      <StatusLine
+      <PromptInput onSubmit={onSubmit} busy={!!activity} onSlashModeChange={setSlashMode} />
+      <BottomBar
         agent={agent}
         model={model}
-        conversationId={conversationId ?? '(new)'}
+        conversationId={conversationId}
         busy={!!activity}
+        slashMode={slashMode}
+        tokens={tokens}
       />
     </Box>
   );

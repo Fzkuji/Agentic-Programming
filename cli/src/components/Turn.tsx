@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { colors } from '../theme/colors.js';
+import { renderMarkdown } from '../utils/markdown.js';
 
 export type Role = 'user' | 'assistant' | 'system';
 
@@ -55,7 +56,11 @@ const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
 };
 
 export const TurnRow: React.FC<{ turn: Turn }> = ({ turn }) => {
-  const lines = turn.text.split('\n');
+  // Run assistant text through the markdown renderer; user / system stay
+  // raw so a backtick or asterisk in a question doesn't get colorized.
+  const rendered =
+    turn.role === 'assistant' && turn.text ? renderMarkdown(turn.text) : turn.text;
+  const lines = rendered.split('\n');
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Box>

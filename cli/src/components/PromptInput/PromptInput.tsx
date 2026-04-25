@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { PromptInputHelpMenu } from './PromptInputHelpMenu.js';
-import { PromptInputFooter } from './PromptInputFooter.js';
 import { SLASH_COMMANDS, SlashCommand } from '../../commands/registry.js';
 import { colors } from '../../theme/colors.js';
 
 export interface PromptInputProps {
   onSubmit: (text: string) => void;
   busy?: boolean;
+  onSlashModeChange?: (slashMode: boolean) => void;
 }
 
 const filterCommands = (filter: string): SlashCommand[] => {
@@ -16,7 +16,7 @@ const filterCommands = (filter: string): SlashCommand[] => {
   return SLASH_COMMANDS.filter((c) => c.name.toLowerCase().includes(needle));
 };
 
-export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy }) => {
+export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy, onSlashModeChange }) => {
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -27,6 +27,10 @@ export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy }) => {
   useEffect(() => {
     if (menuIndex >= matches.length) setMenuIndex(0);
   }, [matches.length, menuIndex]);
+
+  useEffect(() => {
+    onSlashModeChange?.(inSlashMode && matches.length > 0);
+  }, [inSlashMode, matches.length, onSlashModeChange]);
 
   const submitText = (text: string) => {
     if (busy || !text.trim()) return;
@@ -120,7 +124,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy }) => {
         <Text inverse>{at || ' '}</Text>
         <Text>{after}</Text>
       </Box>
-      <PromptInputFooter inSlashMode={inSlashMode && matches.length > 0} />
     </Box>
   );
 };
