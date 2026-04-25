@@ -73,26 +73,29 @@ def run_ink_tui(*, agent=None, conv_id: str | None = None, rt=None) -> None:
     entry = _resolve_cli_entry()
 
     port = _find_free_port()
-    log_dir = Path.home() / ".openprogram" / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / "ink-server.log"
 
-    # Redirect Python stdout/stderr to a log file so the server thread's
-    # prints don't bleed into the Node CLI's terminal. Save the originals
-    # first; we'll hand them to the Node child explicitly.
-    tty_out = os.dup(1)
-    tty_err = os.dup(2)
-    log_fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
-    os.dup2(log_fd, 1)
-    os.dup2(log_fd, 2)
-    os.close(log_fd)
+    # cli.py already did the early dup2 for the TUI path and stashed the
+    # original tty fds on the cli module. Reuse those so the Node child
+    # gets a clean terminal while the server's threads keep writing into
+    # ~/.openprogram/logs/ink-startup.log. Fall back to a fresh redirect
+    # if the early hook didn't run (e.g. when run_ink_tui is called from
+    # somewhere other than the cli entry point).
+    from openprogram import cli as _cli
+    tty_out = getattr(_cli, "_TUI_TTY_OUT", None)
+    tty_err = getattr(_cli, "_TUI_TTY_ERR", None)
+    if tty_out is None or tty_err is None:
+        log_dir = Path.home() / ".openprogram" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "ink-server.log"
+        tty_out = os.dup(1)
+        tty_err = os.dup(2)
+        log_fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        os.dup2(log_fd, 1)
+        os.dup2(log_fd, 2)
+        os.close(log_fd)
 
     start_web(port=port, open_browser=False)
     if not _wait_until_listening(port):
-        os.dup2(tty_out, 1)
-        os.dup2(tty_err, 2)
-        os.close(tty_out)
-        os.close(tty_err)
         raise RuntimeError(f"webui server did not come up on port {port}")
 
     ws_url = f"ws://127.0.0.1:{port}/ws"

@@ -74,6 +74,12 @@ export const PromptInput: React.FC<PromptInputProps> = ({ onSubmit, busy, onSlas
     }
 
     if (key.return) {
+      // alt+enter inserts a newline; plain enter submits.
+      if (key.meta) {
+        setValue((v) => v.slice(0, cursor) + '\n' + v.slice(cursor));
+        setCursor((c) => c + 1);
+        return;
+      }
       submitText(value);
       return;
     }

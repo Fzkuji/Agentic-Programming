@@ -73,6 +73,8 @@ export interface StatsEnvelope {
     programs_count?: number;
     skills_count?: number;
     conversations_count?: number;
+    top_programs?: Array<{ name?: string; category?: string }>;
+    top_skills?: Array<{ name?: string; slug?: string }>;
   };
 }
 

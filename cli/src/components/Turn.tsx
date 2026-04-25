@@ -17,22 +17,10 @@ export interface Turn {
   id: string;
   role: Role;
   text: string;
-  /** Inline tool calls between text segments. Order is preserved by .order. */
+  /** Inline tool calls between text segments. Order is preserved. */
   tools?: ToolCall[];
   tag?: string;
 }
-
-const barColor = (role: Role): string => {
-  if (role === 'user') return colors.primary;
-  if (role === 'assistant') return colors.success;
-  return colors.muted;
-};
-
-const Bar: React.FC<{ role: Role }> = ({ role }) => (
-  <Box flexDirection="column" marginRight={1}>
-    <Text color={barColor(role)}>▎</Text>
-  </Box>
-);
 
 const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
   const arrow =
@@ -55,28 +43,45 @@ const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
   );
 };
 
-export const TurnRow: React.FC<{ turn: Turn }> = ({ turn }) => {
-  // Run assistant text through the markdown renderer; user / system stay
-  // raw so a backtick or asterisk in a question doesn't get colorized.
-  const rendered =
-    turn.role === 'assistant' && turn.text ? renderMarkdown(turn.text) : turn.text;
+const UserRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  // User message: gray background block, leading `>` glyph. Each visual
+  // line is its own <Text> so newlines split correctly inside the block.
+  const lines = turn.text.split('\n');
+  return (
+    <Box marginBottom={1} flexDirection="column">
+      {lines.map((line, i) => (
+        <Box key={i} paddingX={1}>
+          <Text backgroundColor="#222" color={colors.text}>
+            {i === 0 ? '> ' : '  '}
+            {line || ' '}
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  );
+};
+
+const AssistantRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  const rendered = turn.text ? renderMarkdown(turn.text) : '';
   const lines = rendered.split('\n');
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Bar role={turn.role} />
-        <Box flexDirection="column" flexGrow={1}>
-          {turn.tag ? (
-            <Text color={colors.muted}>
-              <Text color={barColor(turn.role)}>{turn.role}</Text>
-              <Text color={colors.border}> · </Text>
-              {turn.tag}
-            </Text>
-          ) : null}
-          {lines.map((l, i) => (
-            <Text key={i}>{l || ' '}</Text>
-          ))}
-        </Box>
+    <Box marginBottom={1} flexDirection="column">
+      <Box paddingX={1} flexDirection="column">
+        {lines.length > 0 && lines[0] ? (
+          <Box>
+            <Text color={colors.success}>● </Text>
+            <Text>{lines[0]}</Text>
+          </Box>
+        ) : (
+          <Box>
+            <Text color={colors.success}>● </Text>
+          </Box>
+        )}
+        {lines.slice(1).map((l, i) => (
+          <Box key={i} paddingLeft={2}>
+            <Text>{l || ' '}</Text>
+          </Box>
+        ))}
       </Box>
       {turn.tools && turn.tools.length > 0 ? (
         <Box flexDirection="column" marginTop={0}>
@@ -87,4 +92,23 @@ export const TurnRow: React.FC<{ turn: Turn }> = ({ turn }) => {
       ) : null}
     </Box>
   );
+};
+
+const SystemRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  const lines = turn.text.split('\n');
+  return (
+    <Box marginBottom={1} paddingX={1} flexDirection="column">
+      {lines.map((l, i) => (
+        <Text key={i} color={colors.muted} italic>
+          {l || ' '}
+        </Text>
+      ))}
+    </Box>
+  );
+};
+
+export const TurnRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  if (turn.role === 'user') return <UserRow turn={turn} />;
+  if (turn.role === 'assistant') return <AssistantRow turn={turn} />;
+  return <SystemRow turn={turn} />;
 };

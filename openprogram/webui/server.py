@@ -1437,11 +1437,20 @@ async def _handle_ws_command(ws, cmd: dict):
             agent_summary = None
 
         # Programs (loaded callable functions, excluding internal helpers).
+        # Also surface a few names for the welcome panel so the user knows
+        # what's available without typing /functions.
         try:
             programs = _discover_functions()
-            programs_count = len([p for p in programs if p.get("category") not in ("meta",)])
+            non_meta = [p for p in programs if p.get("category") not in ("meta",)]
+            programs_count = len(non_meta)
+            top_programs = [
+                {"name": p.get("name"), "category": p.get("category")}
+                for p in non_meta[:6]
+                if p.get("name")
+            ]
         except Exception:
             programs_count = 0
+            top_programs = []
 
         # Skills (SKILL.md registry).
         try:
@@ -1459,6 +1468,18 @@ async def _handle_ws_command(ws, cmd: dict):
         except Exception:
             conversations_count = 0
 
+        # Top skills by name (a few representative ones).
+        try:
+            from openprogram.agentic_programming.skills import (
+                default_skill_dirs as _ds, load_skills as _ls,
+            )
+            top_skills = [
+                {"name": s.name, "slug": s.slug}
+                for s in _ls(_ds())[:6]
+            ]
+        except Exception:
+            top_skills = []
+
         await ws.send_text(json.dumps({
             "type": "stats",
             "data": {
@@ -1467,6 +1488,8 @@ async def _handle_ws_command(ws, cmd: dict):
                 "programs_count": programs_count,
                 "skills_count": skills_count,
                 "conversations_count": conversations_count,
+                "top_programs": top_programs,
+                "top_skills": top_skills,
             },
         }, default=str))
         return

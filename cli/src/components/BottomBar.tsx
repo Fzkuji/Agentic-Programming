@@ -29,7 +29,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
 }) => {
   const leftHint = slashMode
     ? '↑↓ choose · enter run · tab fill · esc cancel'
-    : '/ commands · enter send · ctrl+c quit';
+    : 'type / for commands · enter send · ctrl+c quit';
 
   const inTokens = formatTokens(tokens?.input);
   const outTokens = formatTokens(tokens?.output);

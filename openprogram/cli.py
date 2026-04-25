@@ -26,8 +26,77 @@ Examples:
 """
 
 import argparse
+import os
 import sys
 import json
+
+
+# --- Pre-import TTY redirect ------------------------------------------------
+# When the user is launching the Ink TUI (no subcommand or just `--resume`),
+# we want a clean terminal: anything printed during openprogram package import
+# (RequestsDependencyWarning, "[detect] claude-code OK", uvicorn boot logs)
+# would otherwise show up above the TUI. Do the dup2 BEFORE pulling any
+# openprogram modules so the noise lands in a log file. The original tty fds
+# are exposed as module attributes so cli_ink can hand them to the Node child.
+
+_TUI_TTY_OUT: int | None = None
+_TUI_TTY_ERR: int | None = None
+
+
+def _looks_like_tui_invocation(argv: list[str]) -> bool:
+    """Return True if argv corresponds to launching the chat TUI.
+
+    Bare `openprogram` and `openprogram --resume <id>` go to the TUI. Any
+    subcommand (programs, skills, agents, sessions, channels, config,
+    providers, web), and any one-shot flag (--print, -p, --no-tui), keep
+    stdio plain.
+    """
+    bypass_words = {
+        "agents", "sessions", "channels", "config", "programs", "skills",
+        "providers", "web", "resume", "init", "doctor",
+    }
+    bypass_flags = {
+        "--print", "-p", "--no-tui", "--web", "--help", "-h", "--version",
+        "--print-prompt",
+    }
+    for arg in argv:
+        if arg in bypass_flags:
+            return False
+        if arg.startswith("--print=") or arg.startswith("-p="):
+            return False
+        if arg in bypass_words:
+            return False
+    return True
+
+
+def _maybe_redirect_for_tui() -> None:
+    global _TUI_TTY_OUT, _TUI_TTY_ERR
+    try:
+        if not sys.stdout.isatty():
+            return
+    except Exception:
+        return
+    if not _looks_like_tui_invocation(sys.argv[1:]):
+        return
+    try:
+        from pathlib import Path
+        log_dir = Path.home() / ".openprogram" / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "ink-startup.log"
+        _TUI_TTY_OUT = os.dup(1)
+        _TUI_TTY_ERR = os.dup(2)
+        fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        os.dup2(fd, 1)
+        os.dup2(fd, 2)
+        os.close(fd)
+    except Exception:
+        # If anything goes wrong with the redirect we'd rather have a noisy
+        # terminal than block the launch.
+        _TUI_TTY_OUT = None
+        _TUI_TTY_ERR = None
+
+
+_maybe_redirect_for_tui()
 
 
 def _add_provider_args(parser):
