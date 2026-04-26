@@ -53,7 +53,7 @@ def _looks_like_tui_invocation(argv: list[str]) -> bool:
     """
     bypass_words = {
         "agents", "sessions", "channels", "config", "programs", "skills",
-        "providers", "web", "resume", "init", "doctor",
+        "providers", "web", "resume", "init", "doctor", "browser",
     }
     bypass_flags = {
         "--print", "-p", "--no-tui", "--web", "--help", "-h", "--version",
