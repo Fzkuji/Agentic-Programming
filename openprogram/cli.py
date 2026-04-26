@@ -888,7 +888,9 @@ def _cmd_browser_attach(port: int, keep_running: bool) -> int:
 
     if not keep_running:
         # Quit Chrome so we can re-launch with the debug port (Chrome
-        # refuses to share a profile across processes).
+        # refuses to share a profile across processes — and worse, it
+        # silently merges new launches into the existing instance, where
+        # the --remote-debugging-port flag does NOT take effect).
         print("This will close any running Chrome and reopen it with a debug port")
         print(f"so the browser tool can drive your logged-in session.")
         print(f"  Chrome:    {chrome}")
@@ -903,8 +905,18 @@ def _cmd_browser_attach(port: int, keep_running: bool) -> int:
             print("Cancelled.")
             return 1
 
-        # Send AppleScript quit (graceful) on macOS, fall back to pkill.
         import sys as _sys
+
+        def _chrome_processes() -> list[int]:
+            """All running 'Google Chrome.app/Contents/MacOS' main+helper PIDs."""
+            try:
+                out = subprocess.check_output(["pgrep", "-f", "Google Chrome"],
+                                              stderr=subprocess.DEVNULL)
+                return [int(x) for x in out.split() if x.strip().isdigit()]
+            except subprocess.CalledProcessError:
+                return []
+
+        # Step 1: graceful quit.
         if _sys.platform == "darwin":
             subprocess.run(
                 ["osascript", "-e", 'quit app "Google Chrome"'],
@@ -914,12 +926,39 @@ def _cmd_browser_attach(port: int, keep_running: bool) -> int:
             subprocess.run(["pkill", "-f", "google-chrome"],
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        # Wait until Chrome's profile lock releases.
+        # Step 2: wait up to 5s for processes to actually exit.
         for _ in range(20):
             time.sleep(0.25)
-            lock = Path(user_data) / "SingletonLock"
-            if not lock.exists():
+            if not _chrome_processes():
                 break
+
+        # Step 3: if anything still alive, force kill — this is the
+        # critical step that fixes "Chrome opens but port isn't bound"
+        # caused by Cocoa merging our launch into a still-alive instance.
+        remaining = _chrome_processes()
+        if remaining:
+            print(f"  Still {len(remaining)} Chrome process(es) alive — sending SIGKILL.")
+            subprocess.run(["pkill", "-9", "-f", "Google Chrome"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for _ in range(20):
+                time.sleep(0.25)
+                if not _chrome_processes():
+                    break
+
+        if _chrome_processes():
+            print("  Chrome processes still alive after SIGKILL. Aborting.")
+            print("  Try: pkill -9 -f 'Google Chrome' && rm -f "
+                  f"'{user_data}/SingletonLock'")
+            return 1
+
+        # Step 4: also remove a stale SingletonLock if Chrome left one.
+        for marker in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            p = Path(user_data) / marker
+            if p.exists() or p.is_symlink():
+                try:
+                    p.unlink()
+                except OSError:
+                    pass
 
     # Re-launch Chrome detached so quitting our shell doesn't take it down.
     # On macOS the binary itself routes through Cocoa's single-instance
