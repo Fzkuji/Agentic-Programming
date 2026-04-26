@@ -168,8 +168,20 @@ def _acquire_bootstrap_lock(timeout_s: float = 60.0):
             time.sleep(0.2)
 
 
-def launch_sidecar_chrome(port: int = DEFAULT_PORT, timeout_s: float = 30.0) -> bool:
+def launch_sidecar_chrome(
+    port: int = DEFAULT_PORT,
+    timeout_s: float = 30.0,
+    headless: bool = True,
+) -> bool:
     """Start the sidecar Chrome and wait for the CDP port to come up.
+
+    Default ``headless=True`` runs the sidecar with --headless=new — no
+    window pops up on the user's screen. The ariaSnapshot / locator API
+    works identically; the only thing missing is the visible browser
+    chrome the user can interact with by hand.
+
+    Pass ``headless=False`` if you actually want a window (e.g. to
+    log into a new site by hand inside the sidecar).
 
     Idempotent + concurrency-safe — if the port is already listening we
     return True without touching anything. If two callers race, only one
@@ -203,6 +215,10 @@ def launch_sidecar_chrome(port: int = DEFAULT_PORT, timeout_s: float = 30.0) -> 
             "--no-first-run",
             "--no-default-browser-check",
         ]
+        if headless:
+            # `--headless=new` is Chrome's modern headless flag (since v109).
+            # The legacy `--headless` runs a different, less-compatible mode.
+            args.append("--headless=new")
         # Detach so the child outlives our Python process — agents come
         # and go but the sidecar stays.
         subprocess.Popen(
