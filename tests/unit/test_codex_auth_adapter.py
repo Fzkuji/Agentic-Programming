@@ -209,7 +209,7 @@ def test_acquire_sync_from_non_async_caller(store):
     assert cred.payload.access_token == "A"
 
 
-def test_acquire_sync_rejects_running_loop(store):
+def test_acquire_sync_works_inside_running_loop(store):
     fresh = Credential(
         provider_id=adapter.PROVIDER_ID,
         profile_id="default",
@@ -227,9 +227,10 @@ def test_acquire_sync_rejects_running_loop(store):
     mgr = AuthManager(store=store)
 
     async def inside():
-        # We're inside a running loop now — acquire_sync must refuse.
-        with pytest.raises(RuntimeError, match="running event loop"):
-            mgr.acquire_sync(adapter.PROVIDER_ID, "default")
+        # Direct call from a running event loop should still work via the
+        # manager's private background-thread fallback.
+        cred = mgr.acquire_sync(adapter.PROVIDER_ID, "default")
+        assert cred.payload.access_token == "A"
 
     asyncio.run(inside())
 

@@ -107,6 +107,17 @@ class Block:
                      "tool_arguments", "tool_result", "tool_is_error",
                      "citation_source", "citation_title"):
                 d.pop(k, None)
+        elif self.type == "citation":
+            for k in ("text", "elapsed_ms", "tool_call_id", "tool_name",
+                     "tool_arguments", "tool_result", "tool_is_error",
+                     "image_uri", "image_mime"):
+                d.pop(k, None)
+        elif self.type == "error":
+            for k in ("elapsed_ms", "tool_call_id", "tool_name",
+                     "tool_arguments", "tool_result", "tool_is_error",
+                     "image_uri", "image_mime", "citation_source",
+                     "citation_title"):
+                d.pop(k, None)
         return d
 
     @classmethod
