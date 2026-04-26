@@ -51,6 +51,10 @@ SPEC: dict[str, Any] = {
                     "open", "navigate", "click", "type",
                     "extract", "screenshot", "close", "list",
                     "upload", "wait", "eval", "html",
+                    "hover", "select", "press",
+                    "accessibility", "screenshot_b64",
+                    "tabs", "new_tab", "switch_tab",
+                    "download", "cookies",
                 ],
                 "description": "What to do.",
             },
@@ -86,6 +90,18 @@ SPEC: dict[str, Any] = {
                 "type": "string",
                 "enum": ["attached", "detached", "visible", "hidden", "load", "domcontentloaded", "networkidle"],
                 "description": "For ``wait``: with a selector, the element state to wait for (visible/hidden/attached/detached). Without a selector, a page load state (load/domcontentloaded/networkidle). Default 'visible' / 'networkidle'.",
+            },
+            "key": {
+                "type": "string",
+                "description": "For ``press``: keyboard key (e.g. 'Enter', 'Escape', 'Control+A', 'ArrowDown').",
+            },
+            "value": {
+                "type": "string",
+                "description": "For ``select``: option value to select inside the <select> at `selector`. Pass a list-as-string for multi-select if the element supports it.",
+            },
+            "tab_index": {
+                "type": "integer",
+                "description": "For ``switch_tab``: zero-based index returned by ``tabs`` / ``new_tab``.",
             },
             "headless": {
                 "type": "boolean",
@@ -132,6 +148,13 @@ def _require_session(session_id: str) -> dict[str, Any] | str:
     return sess
 
 
+def _current_page(sess: dict[str, Any]):
+    """Return the active page for a session (multi-tab support)."""
+    pages = sess.get("pages") or [sess.get("page")]
+    idx = sess.get("active", 0)
+    return pages[idx] if 0 <= idx < len(pages) else pages[0]
+
+
 def _open(*, headless: bool = True, timeout_ms: int = 30_000) -> str:
     if not check_playwright():
         return _install_hint()
@@ -150,7 +173,10 @@ def _open(*, headless: bool = True, timeout_ms: int = 30_000) -> str:
             "playwright": pw,
             "browser": browser,
             "context": context,
-            "page": page,
+            "page": page,            # legacy alias (always = pages[active])
+            "pages": [page],
+            "active": 0,
+            "default_timeout": timeout_ms,
         }
         return (
             f"Opened browser session `{session_id}` "
@@ -334,6 +360,184 @@ def _html(session_id: str, selector: str | None) -> str:
         return f"Error fetching HTML: {type(e).__name__}: {e}"
 
 
+def _hover(session_id: str, selector: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not selector:
+        return "Error: `selector` is required for hover."
+    try:
+        sess["page"].hover(selector)
+        return f"Hovered `{selector}`."
+    except Exception as e:
+        return f"Error hovering: {type(e).__name__}: {e}"
+
+
+def _select_option(session_id: str, selector: str, value: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not selector:
+        return "Error: `selector` is required for select."
+    if not value:
+        return "Error: `value` is required for select."
+    try:
+        # Accept comma-list for multi-select.
+        values = [v.strip() for v in value.split(",")] if "," in value else value
+        sess["page"].select_option(selector, values)
+        return f"Selected `{value}` in `{selector}`."
+    except Exception as e:
+        return f"Error selecting: {type(e).__name__}: {e}"
+
+
+def _press(session_id: str, key: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not key:
+        return "Error: `key` is required for press (e.g. 'Enter', 'Escape', 'Control+A')."
+    try:
+        sess["page"].keyboard.press(key)
+        return f"Pressed `{key}`."
+    except Exception as e:
+        return f"Error pressing key: {type(e).__name__}: {e}"
+
+
+def _accessibility(session_id: str, selector: str | None) -> str:
+    """Return a YAML-style aria snapshot of the page or a subtree.
+
+    Uses Playwright's locator.aria_snapshot(), which renders the
+    accessibility tree as a compact role/name outline. Useful as an
+    alternative to raw HTML when an LLM needs to find interactive
+    elements without parsing CSS selectors out of class soup.
+    """
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    try:
+        page = sess["page"]
+        target = page.locator(selector) if selector else page.locator("body")
+        if target.count() == 0:
+            return f"(no elements matched `{selector}`)"
+        snap = target.first.aria_snapshot()
+        if not snap:
+            return "(empty accessibility tree)"
+        if len(snap) > 8000:
+            snap = snap[:8000] + f"\n\n[truncated, {len(snap) - 8000} more chars]"
+        return snap
+    except Exception as e:
+        return f"Error fetching accessibility tree: {type(e).__name__}: {e}"
+
+
+def _screenshot_b64(session_id: str, selector: str | None = None) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    try:
+        page = sess["page"]
+        if selector:
+            el = page.locator(selector)
+            if el.count() == 0:
+                return f"(no elements matched `{selector}`)"
+            buf = el.first.screenshot()
+        else:
+            buf = page.screenshot(full_page=True)
+        import base64
+        b64 = base64.b64encode(buf).decode("ascii")
+        return f"data:image/png;base64,{b64}"
+    except Exception as e:
+        return f"Error taking screenshot: {type(e).__name__}: {e}"
+
+
+def _tabs(session_id: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    pages = sess.get("pages") or [sess.get("page")]
+    active = sess.get("active", 0)
+    lines = [f"Tabs (active = {active}):"]
+    for i, p in enumerate(pages):
+        try:
+            url = p.url
+            title = p.title()
+        except Exception:
+            url, title = "?", "?"
+        marker = "→" if i == active else " "
+        lines.append(f"  {marker} [{i}]  {title!r}  {url}")
+    return "\n".join(lines)
+
+
+def _new_tab(session_id: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    try:
+        page = sess["context"].new_page()
+        page.set_default_timeout(sess.get("default_timeout", 30_000))
+        sess.setdefault("pages", []).append(page)
+        sess["active"] = len(sess["pages"]) - 1
+        sess["page"] = page
+        return f"Opened tab [{sess['active']}], now active."
+    except Exception as e:
+        return f"Error opening tab: {type(e).__name__}: {e}"
+
+
+def _switch_tab(session_id: str, tab_index: int) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    pages = sess.get("pages") or []
+    if not (0 <= tab_index < len(pages)):
+        return f"Error: tab_index {tab_index} out of range (have {len(pages)} tab(s))."
+    sess["active"] = tab_index
+    sess["page"] = pages[tab_index]
+    try:
+        url = sess["page"].url
+    except Exception:
+        url = "?"
+    return f"Switched to tab [{tab_index}] ({url})."
+
+
+def _download(session_id: str, selector: str, path: str, timeout_ms: int) -> str:
+    """Click a selector and capture the resulting download to `path`."""
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    if not selector:
+        return "Error: `selector` is required for download (the trigger element)."
+    if not path:
+        return "Error: `path` is required for download (where to save the file)."
+    import os
+    if not os.path.isabs(path):
+        path = os.path.abspath(path)
+    try:
+        page = sess["page"]
+        with page.expect_download(timeout=timeout_ms) as info:
+            page.click(selector)
+        dl = info.value
+        dl.save_as(path)
+        return f"Downloaded {dl.suggested_filename!r} → {path}"
+    except Exception as e:
+        return f"Error downloading: {type(e).__name__}: {e}"
+
+
+def _cookies(session_id: str) -> str:
+    sess = _require_session(session_id)
+    if isinstance(sess, str):
+        return sess
+    try:
+        rows = sess["context"].cookies()
+        if not rows:
+            return "(no cookies)"
+        import json as _json
+        text = _json.dumps(rows, default=str, ensure_ascii=False, indent=2)
+        if len(text) > 4000:
+            text = text[:4000] + f"\n\n[truncated, {len(text) - 4000} more chars]"
+        return text
+    except Exception as e:
+        return f"Error reading cookies: {type(e).__name__}: {e}"
+
+
 def _close(session_id: str) -> str:
     sess = _sessions.pop(session_id, None)
     if sess is None:
@@ -381,6 +585,9 @@ def execute(
     path: str | None = None,
     code: str | None = None,
     state: str | None = None,
+    key: str | None = None,
+    value: str | None = None,
+    tab_index: int | None = None,
     headless: bool = True,
     timeout_ms: int = 30_000,
     **kw: Any,
@@ -397,6 +604,15 @@ def execute(
     path = path or read_string_param(kw, "path", "file")
     code = code if code is not None else read_string_param(kw, "code", "js", "expression")
     state = state or read_string_param(kw, "state")
+    key = key or read_string_param(kw, "key", "shortcut")
+    value = value if value is not None else read_string_param(kw, "value", "option")
+    if tab_index is None:
+        tab_raw = read_string_param(kw, "tab_index", "index", "tab")
+        if tab_raw is not None:
+            try:
+                tab_index = int(tab_raw)
+            except (TypeError, ValueError):
+                tab_index = None
 
     if action == "open":
         return _open(headless=headless, timeout_ms=timeout_ms)
@@ -418,6 +634,26 @@ def execute(
         return _eval_js(session_id or "", code or "")
     if action == "html":
         return _html(session_id or "", selector or None)
+    if action == "hover":
+        return _hover(session_id or "", selector or "")
+    if action == "select":
+        return _select_option(session_id or "", selector or "", value or "")
+    if action == "press":
+        return _press(session_id or "", key or "")
+    if action == "accessibility":
+        return _accessibility(session_id or "", selector or None)
+    if action == "screenshot_b64":
+        return _screenshot_b64(session_id or "", selector or None)
+    if action == "tabs":
+        return _tabs(session_id or "")
+    if action == "new_tab":
+        return _new_tab(session_id or "")
+    if action == "switch_tab":
+        return _switch_tab(session_id or "", tab_index or 0)
+    if action == "download":
+        return _download(session_id or "", selector or "", path or "", timeout_ms)
+    if action == "cookies":
+        return _cookies(session_id or "")
     if action == "close":
         return _close(session_id or "")
     if action == "list":

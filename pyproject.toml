@@ -84,6 +84,12 @@ channels = [
     # Slack Socket Mode bot.
     "slack_sdk>=3.27.0",
 ]
+# Browser automation tool (tools/browser). After `pip install`, also
+# run `playwright install chromium` to fetch the browser binary
+# (~150MB, into ~/Library/Caches/ms-playwright/ on macOS).
+browser = [
+    "playwright>=1.45.0",
+]
 all = [
     # LLM providers
     "anthropic>=0.30.0",
@@ -104,6 +110,8 @@ all = [
     "qrcode>=7.0",
     "discord.py>=2.3.0",
     "slack_sdk>=3.27.0",
+    # Browser tool (run `playwright install chromium` after install)
+    "playwright>=1.45.0",
 ]
 
 [project.scripts]

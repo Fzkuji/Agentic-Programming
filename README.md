@@ -49,11 +49,13 @@ Install the package and start coding:
 
 ```bash
 pip install openprogram                   # core package (pure Python, no deps)
-pip install "openprogram[all]"            # everything: providers + web UI + GUI harness
+pip install "openprogram[all]"            # everything: providers + web UI + GUI harness + browser
 # …or pick what you need:
 pip install "openprogram[openai]"         #   just the OpenAI SDK  (also [anthropic], [gemini])
 pip install "openprogram[web]"            #   just the web UI
 pip install "openprogram[gui]"            #   GUI-Agent-Harness deps (opencv / torch / ultralytics — ~2GB)
+pip install "openprogram[browser]"        #   Playwright + Chromium for the browser tool
+playwright install chromium               #   one-time chromium binary fetch (~150MB) for the browser tool
 ```
 
 ```python
