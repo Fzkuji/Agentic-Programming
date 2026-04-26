@@ -308,7 +308,7 @@ codex login --device-auth
 
 ## GeminiCLIRuntime
 
-Gemini CLI。适合本机已登录 Google 账号的轻量场景，不需要在 Python 里单独传 API key。
+Gemini CLI 兼容入口。`openprogram.providers.GeminiCLIRuntime` 仍然可用，但底层实现已经切到 `GoogleGeminiCLIRuntime`，用于保持旧代码不破。
 
 ```python
 from openprogram.providers import GeminiCLIRuntime
@@ -318,6 +318,14 @@ rt = GeminiCLIRuntime(
     timeout=120,
     yolo=True,
 )
+```
+
+如果你想显式使用新类名，也可以直接这样写：
+
+```python
+from openprogram.providers.google_gemini_cli import GoogleGeminiCLIRuntime
+
+rt = GoogleGeminiCLIRuntime(model="gemini-2.5-flash")
 ```
 
 使用前先完成：

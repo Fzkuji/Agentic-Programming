@@ -182,6 +182,8 @@ from openprogram.providers import GeminiCLIRuntime
 runtime = GeminiCLIRuntime()
 ```
 
+`GeminiCLIRuntime` 目前是兼容别名，底层实现对应 `GoogleGeminiCLIRuntime`。旧代码可以继续保持不变；如果你更想用显式类名，也可以从 `openprogram.providers.google_gemini_cli` 直接导入。
+
 **Pros:** Local CLI workflow, no Python-side SDK setup.
 **Cons:** Subprocess overhead, text-only.
 
@@ -464,6 +466,8 @@ from openprogram.providers import GeminiCLIRuntime
 
 runtime = GeminiCLIRuntime()
 ```
+
+`GeminiCLIRuntime` 现在是一个兼容别名，底层实现对应 `GoogleGeminiCLIRuntime`。所以旧示例不用改；如果你想显式使用新类名，也可以从 `openprogram.providers.google_gemini_cli` 直接导入。
 
 **优点：** 本地 CLI 工作流友好，不需要额外装 Python SDK。
 **缺点：** 有子进程开销，仅支持文本。
