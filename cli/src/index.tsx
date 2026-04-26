@@ -25,12 +25,26 @@ client.connect();
 // instead of the chat. Streaming into the primary buffer keeps the
 // whole transcript scrollable like a normal terminal app.
 //
-// Resize quirks: on resize Ink may stack a frame or two of ghost
-// prompt boxes. Static items (committed turns + welcome) re-mount via
-// resizeNonce in REPL.tsx so their content is preserved at the new
-// width — see Messages.tsx.
-
-const restoreScreen = (): void => { /* no-op (altscreen disabled) */ };
+// On resize, do a full refresh:
+//   \e[2J  clear visible viewport
+//   \e[3J  clear scrollback buffer (xterm extension; iTerm2 / Terminal /
+//          GNOME Terminal / kitty / Windows Terminal honor this)
+//   \e[H   cursor home
+// Then Ink + Static (which is keyed on resizeNonce in REPL.tsx)
+// re-mounts and re-prints every committed turn at the new width. Net
+// effect: the user sees a clean reflow at the new size with no fossil
+// frames piling up in scrollback.
+let _lastCols = process.stdout.columns ?? 0;
+let _lastRows = process.stdout.rows ?? 0;
+process.stdout.on('resize', () => {
+  const cols = process.stdout.columns ?? 0;
+  const rows = process.stdout.rows ?? 0;
+  if (cols !== _lastCols || rows !== _lastRows) {
+    _lastCols = cols;
+    _lastRows = rows;
+    process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+  }
+});
 
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
@@ -41,6 +55,5 @@ const { waitUntilExit } = render(<REPL client={client} />, {
 
 waitUntilExit().then(() => {
   client.close();
-  restoreScreen();
   process.exit(0);
 });
