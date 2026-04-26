@@ -922,22 +922,44 @@ def _cmd_browser_attach(port: int, keep_running: bool) -> int:
                 break
 
     # Re-launch Chrome detached so quitting our shell doesn't take it down.
-    args = [
-        chrome,
+    # On macOS the binary itself routes through Cocoa's single-instance
+    # logic — launching it directly when the app process hasn't fully
+    # released the profile may silently reuse the existing instance with
+    # the wrong flags. `open -na` forces a fresh application launch and
+    # passes the args via --args.
+    import sys as _sys
+    chrome_args = [
         f"--remote-debugging-port={port}",
         f"--user-data-dir={user_data}",
         "--restore-last-session",
+        "--no-first-run",
+        "--no-default-browser-check",
     ]
-    subprocess.Popen(
-        args,
+    if _sys.platform == "darwin":
+        # /Applications/Google Chrome.app
+        app_dir = chrome
+        for _ in range(4):
+            app_dir = os.path.dirname(app_dir)
+            if app_dir.endswith(".app"):
+                break
+        if not app_dir.endswith(".app"):
+            app_dir = "/Applications/Google Chrome.app"
+        cmd = ["open", "-na", app_dir, "--args", *chrome_args]
+    else:
+        cmd = [chrome, *chrome_args]
+
+    proc = subprocess.Popen(
+        cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
 
-    # Wait for the debug port to come up.
+    # Wait for the debug port to come up. macOS app launch can take a few
+    # seconds when restoring tabs, so be patient.
     import socket as _socket
-    for _ in range(40):
+    print(f"Waiting for Chrome to expose port {port}…")
+    for i in range(120):  # 30s
         time.sleep(0.25)
         try:
             with _socket.create_connection(("127.0.0.1", port), 0.2):
@@ -945,7 +967,14 @@ def _cmd_browser_attach(port: int, keep_running: bool) -> int:
         except OSError:
             continue
     else:
-        print(f"Chrome did not expose port {port} within 10s. Aborting.")
+        print(f"Chrome did not expose port {port} within 30s.")
+        print()
+        print("Diagnose:")
+        print(f"  ps aux | grep -i 'chrome.*remote-debugging' | grep -v grep")
+        print(f"  lsof -i :{port}")
+        print(f"  Or launch Chrome manually with:")
+        cmd_str = " ".join(f'"{c}"' if " " in c else c for c in cmd)
+        print(f"    {cmd_str}")
         return 1
 
     state = Path.home() / ".openprogram" / "browser-cdp-port"
