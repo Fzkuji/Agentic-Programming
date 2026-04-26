@@ -1,42 +1,25 @@
-/**
- * Lazy-loaded markdown renderer. The marked + marked-terminal packages
- * are heavy (a few hundred ms of import work because of their internal
- * regex compilation and language tables) — and totally cold at startup.
- * Defer the import until the first assistant reply actually needs
- * formatting, so `openprogram` boots into the input box faster.
- */
-
-type MarkedFn = (text: string) => string;
-let _renderer: MarkedFn | null = null;
-
-const buildRenderer = (): MarkedFn => {
-  // require() rather than import() because esbuild bundles both into
-  // the same chunk anyway, and require is synchronous (the first call
-  // pays the loading cost on demand instead of awaiting). createRequire
-  // is set up by our esbuild banner.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { marked } = require('marked');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { markedTerminal } = require('marked-terminal');
-  marked.use(markedTerminal());
-  return (text: string) => {
-    try {
-      const out = marked.parse(text) as string;
-      return out.replace(/\n+$/, '');
-    } catch {
-      return text;
-    }
-  };
-};
+import { marked } from 'marked';
+import { markedTerminal } from 'marked-terminal';
 
 /**
- * Convert a markdown string into ANSI text for terminal display.
+ * Markdown → ANSI for terminal display.
  *
- * The first call lazily loads marked + marked-terminal; subsequent calls
- * reuse the cached renderer. Falls back to the raw input on any parse
- * error so a bad fence can't swallow the assistant's reply.
+ * marked + marked-terminal cost ~100ms at module-import time. We tried
+ * lazy require() but esbuild's ESM bundle can't dynamic-require, so we
+ * pay the cost up front. The trade-off is fine — Ink's first render is
+ * still under 100ms after this.
  */
+let configured = false;
+
 export const renderMarkdown = (text: string): string => {
-  if (!_renderer) _renderer = buildRenderer();
-  return _renderer(text);
+  if (!configured) {
+    marked.use(markedTerminal() as Parameters<typeof marked.use>[0]);
+    configured = true;
+  }
+  try {
+    const out = marked.parse(text) as string;
+    return out.replace(/\n+$/, '');
+  } catch {
+    return text;
+  }
 };

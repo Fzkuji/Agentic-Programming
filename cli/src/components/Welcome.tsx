@@ -58,13 +58,14 @@ const Column: React.FC<{
   }
   return (
     <Box flexDirection="column" width={width} paddingX={1}>
-      <Box justifyContent="center">
+      {/* Count + label flush-left with the items below — uniform vertical
+          alignment is easier to scan than centered headers over ragged
+          lists. Count colored, label dim. */}
+      <Box>
         <Text bold color={colors.primary}>
           {spec.count}
         </Text>
-      </Box>
-      <Box justifyContent="center">
-        <Text color={colors.muted}>{spec.label}</Text>
+        <Text color={colors.muted}>{`  ${spec.label}`}</Text>
       </Box>
       {rows.map(([a, b], i) => (
         <Box key={i}>

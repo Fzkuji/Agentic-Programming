@@ -18,42 +18,22 @@ const { ws } = parseArgs(process.argv.slice(2));
 const client = new BackendClient(ws);
 client.connect();
 
-// Enter alternate screen buffer so the TUI owns the whole terminal and
-// anything printed before this (server logs, warnings) stays on the
-// primary screen, hidden behind us.
-process.stdout.write('\x1b[?1049h\x1b[2J\x1b[H');
+// We deliberately do NOT enter the alternate screen buffer. altscreen
+// gives a clean canvas at startup but loses native scrollback — once
+// Ink scrolls past the visible viewport the early turns vanish, and
+// the terminal's mouse-wheel scrollback returns the OS shell history
+// instead of the chat. Streaming into the primary buffer keeps the
+// whole transcript scrollable like a normal terminal app.
+//
+// Resize quirks: on resize Ink may stack a frame or two of ghost
+// prompt boxes. Static items (committed turns + welcome) re-mount via
+// resizeNonce in REPL.tsx so their content is preserved at the new
+// width — see Messages.tsx.
 
-// Resize ghost-frame fix (Claude Code's "fullResetSequence_CAUSES_FLICKER"
-// approach): when the terminal resizes, Ink re-renders the dynamic part
-// at the new width but the OLD frame is still in the terminal cell
-// buffer — Ink can't unwrite it. Clear the screen so Ink's next render
-// lands fresh. One-frame flicker is preferable to stacked ghost prompt
-// boxes.
-let _lastCols = process.stdout.columns ?? 0;
-let _lastRows = process.stdout.rows ?? 0;
-process.stdout.on('resize', () => {
-  const cols = process.stdout.columns ?? 0;
-  const rows = process.stdout.rows ?? 0;
-  if (cols !== _lastCols || rows !== _lastRows) {
-    _lastCols = cols;
-    _lastRows = rows;
-    process.stdout.write('\x1b[2J\x1b[H');
-  }
-});
+const restoreScreen = (): void => { /* no-op (altscreen disabled) */ };
 
-const restoreScreen = () => {
-  process.stdout.write('\x1b[?1049l');
-};
-
-process.on('exit', restoreScreen);
-process.on('SIGINT', () => {
-  restoreScreen();
-  process.exit(0);
-});
-process.on('SIGTERM', () => {
-  restoreScreen();
-  process.exit(0);
-});
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
 
 const { waitUntilExit } = render(<REPL client={client} />, {
   exitOnCtrlC: false,
