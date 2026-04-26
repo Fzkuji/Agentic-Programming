@@ -56,6 +56,9 @@ pip install "openprogram[web]"            #   just the web UI
 pip install "openprogram[gui]"            #   GUI-Agent-Harness deps (opencv / torch / ultralytics — ~2GB)
 pip install "openprogram[browser]"        #   Playwright + Chromium for the browser tool
 playwright install chromium               #   one-time chromium binary fetch (~150MB) for the browser tool
+pip install "openprogram[browser-stealth]" #  + patchright + camoufox for Cloudflare-protected sites
+patchright install chromium               #   stealth-patched chromium binary
+camoufox fetch                            #   stealth-patched firefox binary (alternative engine)
 ```
 
 ```python

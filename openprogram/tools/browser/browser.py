@@ -107,6 +107,15 @@ SPEC: dict[str, Any] = {
                 "type": "boolean",
                 "description": "For ``open``: start browser in headless mode (default true).",
             },
+            "stealth": {
+                "type": "boolean",
+                "description": "For ``open``: apply anti-bot patches (navigator.webdriver, chrome runtime, plugins, WebGL vendor) so Cloudflare/Distil-style detection passes more often (default true).",
+            },
+            "engine": {
+                "type": "string",
+                "enum": ["chromium", "patchright", "camoufox"],
+                "description": "For ``open``: which browser backend to use. 'chromium' is stock Playwright. 'patchright' is a drop-in stealth fork that patches deeper Chromium fingerprints (use this for Cloudflare-protected sites). 'camoufox' is a stealth-patched Firefox. Defaults to chromium; falls back to chromium if the chosen engine isn't installed.",
+            },
             "timeout_ms": {
                 "type": "integer",
                 "description": "Per-action timeout in ms (default 30000).",
@@ -155,33 +164,168 @@ def _current_page(sess: dict[str, Any]):
     return pages[idx] if 0 <= idx < len(pages) else pages[0]
 
 
-def _open(*, headless: bool = True, timeout_ms: int = 30_000) -> str:
+# Init script that patches the most commonly fingerprinted Playwright
+# tells. Cloudflare Turnstile / Distil / DataDome use these to flag
+# automation. Doesn't make us undetectable — sites with sophisticated
+# canvas / WebGL / TLS fingerprinting will still catch us — but
+# handles the trivial checks (navigator.webdriver, missing plugins,
+# languages, chrome runtime).
+_STEALTH_INIT_SCRIPT = """
+() => {
+  // 1. navigator.webdriver = undefined (default true under automation)
+  Object.defineProperty(Navigator.prototype, 'webdriver', {
+    get: () => undefined,
+    configurable: true,
+  });
+  // 2. window.chrome (real Chrome has this, headless doesn't)
+  if (!window.chrome) {
+    window.chrome = { runtime: {}, app: {}, csi: () => {}, loadTimes: () => {} };
+  }
+  // 3. plugins / mimeTypes — empty arrays in Playwright
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+      { name: 'PDF Viewer', filename: 'internal-pdf-viewer' },
+      { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer' },
+    ],
+    configurable: true,
+  });
+  // 4. languages — Playwright sets ['en-US'] by default; en-US is fine
+  //    but having the array fall through navigator.language is good
+  Object.defineProperty(navigator, 'languages', {
+    get: () => ['en-US', 'en'],
+    configurable: true,
+  });
+  // 5. permissions.query — return prompt for notifications instead of denied
+  if (window.navigator.permissions) {
+    const orig = window.navigator.permissions.query.bind(window.navigator.permissions);
+    window.navigator.permissions.query = (params) =>
+      params && params.name === 'notifications'
+        ? Promise.resolve({ state: 'prompt' })
+        : orig(params);
+  }
+  // 6. WebGL vendor / renderer — common gates
+  const getParam = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function (p) {
+    if (p === 37445) return 'Intel Inc.';                     // VENDOR
+    if (p === 37446) return 'Intel Iris OpenGL Engine';       // RENDERER
+    return getParam.call(this, p);
+  };
+}
+"""
+
+
+def _start_engine(engine: str):
+    """Start the playwright/patchright/camoufox runtime.
+
+    Returns (pw_instance, browser_kind) where browser_kind is the launcher
+    we'll call .launch() on. Falls back to chromium if the requested
+    engine isn't installed.
+    """
+    engine = (engine or "chromium").lower()
+    if engine == "patchright":
+        try:
+            from patchright.sync_api import sync_playwright as _sync_pw
+            pw = _sync_pw().start()
+            return pw, pw.chromium, "patchright"
+        except ImportError:
+            return None, None, (
+                "Error: patchright not installed. Run:\n"
+                "  pip install \"openprogram[browser-stealth]\"\n"
+                "  patchright install chromium"
+            )
+    if engine == "camoufox":
+        try:
+            from camoufox.sync_api import Camoufox  # type: ignore
+            cam = Camoufox(headless=True)  # caller will re-call with kwargs
+            return cam, None, "camoufox"
+        except ImportError:
+            return None, None, (
+                "Error: camoufox not installed. Run:\n"
+                "  pip install \"openprogram[browser-stealth]\"\n"
+                "  camoufox fetch"
+            )
+    # Default: stock playwright + chromium.
+    try:
+        from playwright.sync_api import sync_playwright as _sync_pw
+        pw = _sync_pw().start()
+        return pw, pw.chromium, "chromium"
+    except ImportError:
+        return None, None, _install_hint()
+
+
+def _open(
+    *,
+    headless: bool = True,
+    timeout_ms: int = 30_000,
+    stealth: bool = True,
+    engine: str = "chromium",
+) -> str:
     if not check_playwright():
         return _install_hint()
+    pw, kind, name_or_err = _start_engine(engine)
+    if pw is None:
+        return name_or_err  # error string from _start_engine
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return _install_hint()
-    try:
-        pw = sync_playwright().start()
-        browser = pw.chromium.launch(headless=headless)
-        context = browser.new_context()
+        if name_or_err == "camoufox":
+            # Camoufox manages its own context; everything below is
+            # redundant for it.
+            cam = pw  # alias for clarity
+            cm = cam.__enter__()  # equivalent to `with Camoufox(...) as cm:`
+            page = cm.new_page()
+            page.set_default_timeout(timeout_ms)
+            session_id = "br_" + uuid.uuid4().hex[:10]
+            _sessions[session_id] = {
+                "engine": "camoufox",
+                "playwright": cam,           # camoufox manager
+                "browser": cm,               # browser-like
+                "context": cm,
+                "page": page,
+                "pages": [page],
+                "active": 0,
+                "default_timeout": timeout_ms,
+            }
+            return (
+                f"Opened browser session `{session_id}` "
+                f"(engine=camoufox, headless=True, timeout={timeout_ms}ms)."
+            )
+
+        # playwright / patchright path (chromium-based)
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-features=IsolateOrigins,site-per-process",
+        ] if stealth else []
+        browser = kind.launch(headless=headless, args=launch_args)
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/130.0.0.0 Safari/537.36"
+            ) if stealth else None,
+            viewport={"width": 1280, "height": 800},
+            locale="en-US",
+        )
+        if stealth and name_or_err == "chromium":
+            # patchright already does deep patches; layering ours on top can
+            # actually re-introduce detectable inconsistencies, so only
+            # apply our init script when running stock chromium.
+            context.add_init_script(f"({_STEALTH_INIT_SCRIPT})()")
         page = context.new_page()
         page.set_default_timeout(timeout_ms)
         session_id = "br_" + uuid.uuid4().hex[:10]
         _sessions[session_id] = {
+            "engine": name_or_err,
             "playwright": pw,
             "browser": browser,
             "context": context,
-            "page": page,            # legacy alias (always = pages[active])
+            "page": page,
             "pages": [page],
             "active": 0,
             "default_timeout": timeout_ms,
         }
         return (
             f"Opened browser session `{session_id}` "
-            f"(headless={headless}, timeout={timeout_ms}ms). "
-            f"Pass this id to navigate / click / type / extract / screenshot."
+            f"(engine={name_or_err}, headless={headless}, "
+            f"stealth={stealth}, timeout={timeout_ms}ms)."
         )
     except Exception as e:
         return f"Error opening browser: {type(e).__name__}: {e}"
@@ -589,6 +733,8 @@ def execute(
     value: str | None = None,
     tab_index: int | None = None,
     headless: bool = True,
+    stealth: bool = True,
+    engine: str = "chromium",
     timeout_ms: int = 30_000,
     **kw: Any,
 ) -> str:
@@ -615,7 +761,13 @@ def execute(
                 tab_index = None
 
     if action == "open":
-        return _open(headless=headless, timeout_ms=timeout_ms)
+        eng = engine or read_string_param(kw, "engine", "backend") or "chromium"
+        return _open(
+            headless=headless,
+            timeout_ms=timeout_ms,
+            stealth=stealth,
+            engine=eng,
+        )
     if action == "navigate":
         return _navigate(session_id or "", url or "")
     if action == "click":

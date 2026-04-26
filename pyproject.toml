@@ -90,6 +90,14 @@ channels = [
 browser = [
     "playwright>=1.45.0",
 ]
+# Stealth-patched browser backends for sites with bot protection
+# (Cloudflare Turnstile, DataDome, etc.). After install also run
+# `patchright install chromium` and/or `camoufox fetch`.
+browser-stealth = [
+    "playwright>=1.45.0",
+    "patchright>=1.40",
+    "camoufox>=0.4.0",
+]
 all = [
     # LLM providers
     "anthropic>=0.30.0",
