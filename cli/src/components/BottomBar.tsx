@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { colors } from '../theme/colors.js';
+import { useColors } from '../theme/ThemeProvider.js';
 import { useTerminalWidth, usePanelWidth } from '../utils/useTerminalWidth.js';
 
 export interface BottomBarProps {
@@ -46,6 +46,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   connState,
   contextWindow,
 }) => {
+  const colors = useColors();
   const cols = useTerminalWidth();
 
   // Bottom-bar left hint is now context-only (slash menu / busy / quit).

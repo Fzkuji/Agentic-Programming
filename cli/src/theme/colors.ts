@@ -1,45 +1,12 @@
 /**
- * Semantic theme tokens used across the Ink TUI.
+ * Legacy single-theme export. New code should use `useColors()` from
+ * ./ThemeProvider so palettes can switch at runtime via /theme.
  *
- * Palette: warm orange-red. Swap the values here to reskin without
- * touching component code.
+ * Kept as the dark palette so any non-React caller (e.g. tests imported
+ * outside a provider) gets a sensible default.
  */
-export const colors = {
-  // Common roles --------------------------------------------------------
-  primary: '#ff7a45',     // warm orange — used for accents, prompt arrow, headings
-  secondary: '#888888',
-  success: '#7ad17a',      // muted green for assistant glyph
-  warning: '#ffb86c',      // soft amber for spinners, working tag
-  error: '#e25c4d',        // brick red
-  muted: '#9c9c9c',
-  accent: '#d76b3a',
-  text: '#f0f0f0',
-  border: '#5a5a5a',
+export { getTheme as getColors, THEME_NAMES, THEME_LABELS, isThemeName } from './themes.js';
+export type { ColorTheme, ThemeName } from './themes.js';
+import { getTheme } from './themes.js';
 
-  // Chat-turn roles -----------------------------------------------------
-  user: {
-    /** Hex used as the user-message block background. Subtle warm tint. */
-    bg: '#3a2118',
-    fg: '#f5e8da',
-    glyph: '#ff7a45',
-  },
-  assistant: {
-    bg: undefined as string | undefined,
-    fg: '#f0f0f0',
-    glyph: '#7ad17a',
-  },
-  system: {
-    bg: undefined as string | undefined,
-    fg: '#9c9c9c',
-    glyph: '#9c9c9c',
-  },
-
-  // Tool-call rendering -------------------------------------------------
-  tool: {
-    running: '#ffb86c',
-    done: '#9c9c9c',
-    error: '#e25c4d',
-  },
-} as const;
-
-export type ColorTheme = typeof colors;
+export const colors = getTheme('dark');

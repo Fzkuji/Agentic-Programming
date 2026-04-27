@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { colors } from '../theme/colors.js';
+import { useColors } from '../theme/ThemeProvider.js';
 import { useTerminalWidth, usePanelWidth, useTerminalHeight } from '../utils/useTerminalWidth.js';
 
 export interface WelcomeStats {
@@ -43,6 +43,7 @@ const Column: React.FC<{
   /** Cap on number of item rows shown (truncates with "+N more"). */
   maxRows: number;
 }> = ({ spec, width, twoCols, maxRows }) => {
+  const colors = useColors();
   const innerWidth = Math.max(8, width - 2);
   const subWidth = twoCols ? Math.floor(innerWidth / 2) : innerWidth;
   const limitedItems = spec.items.slice(0, twoCols ? maxRows * 2 : maxRows);
@@ -92,6 +93,7 @@ const Column: React.FC<{
 };
 
 export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
+  const colors = useColors();
   const cols = useTerminalWidth();
   const rows = useTerminalHeight();
   const width = usePanelWidth();

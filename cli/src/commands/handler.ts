@@ -8,8 +8,10 @@ export interface SlashContext {
   clearCommitted: () => void;
   newSession: () => void;
   exit: () => void;
-  /** Open an interactive picker (model / resume / agent / channel). */
-  openPicker: (kind: 'model' | 'resume' | 'agent' | 'channel') => void;
+  /** Open an interactive picker (model / resume / agent / channel / theme). */
+  openPicker: (kind: 'model' | 'resume' | 'agent' | 'channel' | 'theme') => void;
+  /** Apply a theme by name. Returns true on success, false on unknown name. */
+  setTheme?: (name: string) => boolean;
   /** Toggle (or set) the "tools-on" flag passed with the next chat turn. */
   toggleTools: () => void;
   /** Toggle the terminal-bell-on-long-turn-complete flag. */
@@ -267,6 +269,23 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     case 'bell': {
       const on = ctx.toggleBell();
       ctx.pushSystem(`Terminal bell on long turns: ${on ? 'on' : 'off'}`);
+      return true;
+    }
+
+    case 'theme': {
+      // /theme            → picker
+      // /theme <name>     → direct switch (dark / dark-dim / light / light-dim)
+      if (args.length < 1) {
+        ctx.openPicker('theme');
+        return true;
+      }
+      const name = args[0]!;
+      const ok = ctx.setTheme?.(name) ?? false;
+      ctx.pushSystem(
+        ok
+          ? `Theme set to ${name}.`
+          : `Unknown theme '${name}'. Try /theme to pick from a list.`,
+      );
       return true;
     }
 

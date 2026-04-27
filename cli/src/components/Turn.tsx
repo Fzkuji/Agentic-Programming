@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { colors } from '../theme/colors.js';
+import { useColors } from '../theme/ThemeProvider.js';
 import { renderMarkdown } from '../utils/markdown.js';
 
 export type Role = 'user' | 'assistant' | 'system';
@@ -26,6 +26,7 @@ export interface Turn {
 }
 
 const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
+  const colors = useColors();
   const arrow =
     call.status === 'running' ? '◌' : call.status === 'error' ? '✗' : '●';
   const color =
@@ -66,6 +67,7 @@ const ToolRow: React.FC<{ call: ToolCall }> = ({ call }) => {
 };
 
 const UserRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  const colors = useColors();
   // User message: gray background block, leading `>` glyph. Each visual
   // line is its own <Text> so newlines split correctly inside the block.
   const lines = turn.text.split('\n');
@@ -84,6 +86,7 @@ const UserRow: React.FC<{ turn: Turn }> = ({ turn }) => {
 };
 
 const AssistantRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  const colors = useColors();
   const rendered = turn.streaming
     ? turn.text
     : turn.text
@@ -121,6 +124,7 @@ const AssistantRow: React.FC<{ turn: Turn }> = ({ turn }) => {
 };
 
 const SystemRow: React.FC<{ turn: Turn }> = ({ turn }) => {
+  const colors = useColors();
   const lines = turn.text.split('\n');
   return (
     <Box marginBottom={1} paddingX={1} flexDirection="column">

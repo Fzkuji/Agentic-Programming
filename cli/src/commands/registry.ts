@@ -34,6 +34,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: 'connections', description: 'List channel bindings' },
   { name: 'copy', description: 'Copy the last assistant reply' },
   { name: 'bell', description: 'Toggle terminal-bell on long turns' },
+  { name: 'theme', description: 'Switch the color theme (dark / light / dim)' },
   { name: 'welcome', description: 'Re-show the welcome banner' },
   { name: 'quit', description: 'Exit OpenProgram' },
 ];

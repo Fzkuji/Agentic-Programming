@@ -2,6 +2,7 @@ import React from 'react';
 import { render } from 'ink';
 import { REPL } from './screens/REPL.js';
 import { BackendClient } from './ws/client.js';
+import { ThemeProvider } from './theme/ThemeProvider.js';
 
 function parseArgs(argv: string[]): { ws: string } {
   let ws = process.env.OPENPROGRAM_WS ?? 'ws://127.0.0.1:8765/ws';
@@ -49,9 +50,12 @@ process.stdout.on('resize', () => {
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 
-const { waitUntilExit } = render(<REPL client={client} />, {
-  exitOnCtrlC: false,
-});
+const { waitUntilExit } = render(
+  <ThemeProvider>
+    <REPL client={client} />
+  </ThemeProvider>,
+  { exitOnCtrlC: false },
+);
 
 waitUntilExit().then(() => {
   client.close();

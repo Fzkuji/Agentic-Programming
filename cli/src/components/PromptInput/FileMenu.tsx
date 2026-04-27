@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { FileMatch } from '../../utils/fileCompletions.js';
-import { colors } from '../../theme/colors.js';
+import { useColors } from '../../theme/ThemeProvider.js';
 
 export interface FileMenuProps {
   items: FileMatch[];
@@ -11,6 +11,7 @@ export interface FileMenuProps {
 const MAX_VISIBLE = 8;
 
 export const FileMenu: React.FC<FileMenuProps> = ({ items, selectedIndex }) => {
+  const colors = useColors();
   if (items.length === 0) {
     return (
       <Box paddingX={1}>

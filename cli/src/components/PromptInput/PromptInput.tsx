@@ -5,7 +5,7 @@ import { FileMenu } from './FileMenu.js';
 import { SLASH_COMMANDS, SlashCommand } from '../../commands/registry.js';
 import { fileCompletions, findAtToken, FileMatch } from '../../utils/fileCompletions.js';
 import { usePanelWidth } from '../../utils/useTerminalWidth.js';
-import { colors } from '../../theme/colors.js';
+import { useColors } from '../../theme/ThemeProvider.js';
 
 export interface PromptInputProps {
   onSubmit: (text: string) => void;
@@ -40,6 +40,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   onCancel,
   history,
 }) => {
+  const colors = useColors();
   const [value, setValue] = useState('');
   const [cursor, setCursor] = useState(0);
   const [menuIndex, setMenuIndex] = useState(0);

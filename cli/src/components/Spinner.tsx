@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
-import { colors } from '../theme/colors.js';
+import { useColors } from '../theme/ThemeProvider.js';
 
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
@@ -14,6 +14,7 @@ export interface SpinnerProps {
 }
 
 export const Spinner: React.FC<SpinnerProps> = ({ verb, detail, elapsed }) => {
+  const colors = useColors();
   const [frame, setFrame] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setFrame((f) => (f + 1) % FRAMES.length), 80);

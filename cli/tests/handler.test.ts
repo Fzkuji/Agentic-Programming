@@ -139,4 +139,25 @@ describe('handleSlash', () => {
     handleSlash('/agent inspect', ctx);
     expect(ctx.showAgentInfo).toHaveBeenCalled();
   });
+
+  it('/theme with no arg opens theme picker', () => {
+    const ctx = makeCtx();
+    handleSlash('/theme', ctx);
+    expect(ctx.openPicker).toHaveBeenCalledWith('theme');
+  });
+
+  it('/theme <name> calls setTheme and reports result', () => {
+    const setTheme = vi.fn(() => true);
+    const ctx = makeCtx({ setTheme });
+    handleSlash('/theme light', ctx);
+    expect(setTheme).toHaveBeenCalledWith('light');
+    expect(ctx.pushSystem).toHaveBeenCalledWith(expect.stringContaining('Theme set to light'));
+  });
+
+  it('/theme <bogus> reports unknown', () => {
+    const setTheme = vi.fn(() => false);
+    const ctx = makeCtx({ setTheme });
+    handleSlash('/theme bogus', ctx);
+    expect(ctx.pushSystem).toHaveBeenCalledWith(expect.stringContaining('Unknown theme'));
+  });
 });

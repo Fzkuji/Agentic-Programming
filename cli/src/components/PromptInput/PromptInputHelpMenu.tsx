@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { SlashCommand } from '../../commands/registry.js';
-import { colors } from '../../theme/colors.js';
+import { useColors } from '../../theme/ThemeProvider.js';
 
 export interface PromptInputHelpMenuProps {
   items: SlashCommand[];
@@ -11,6 +11,7 @@ export interface PromptInputHelpMenuProps {
 const MAX_VISIBLE = 8;
 
 export const PromptInputHelpMenu: React.FC<PromptInputHelpMenuProps> = ({ items, selectedIndex }) => {
+  const colors = useColors();
   if (items.length === 0) {
     return (
       <Box paddingX={1}>

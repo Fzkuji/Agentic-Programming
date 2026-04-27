@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { colors } from '../theme/colors.js';
+import { useColors } from '../theme/ThemeProvider.js';
 import { usePanelWidth } from '../utils/useTerminalWidth.js';
 
 export interface PickerItem<V> {
@@ -22,6 +22,7 @@ export interface PickerProps<V> {
 }
 
 export function Picker<V>({ title, items, onSelect, onCancel, maxVisible = 10 }: PickerProps<V>): React.ReactElement {
+  const colors = useColors();
   const [index, setIndex] = useState(0);
   const [filter, setFilter] = useState('');
 
