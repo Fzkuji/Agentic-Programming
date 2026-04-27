@@ -83,7 +83,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [pickerKind, setPickerKind] = useState<
     null | 'model' | 'resume' | 'agent' | 'channel' | 'channel_account' | 'theme'
   >(null);
-  const { setThemeSetting } = useTheme();
+  const { setThemeSetting, currentTheme } = useTheme();
   const [channelAccounts, setChannelAccounts] = useState<
     Array<{ channel?: string; account_id?: string; configured?: boolean }>
   >([]);
@@ -110,6 +110,21 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       setResizeNonce((n) => n + 1);
     }
   }, [cols, rows]);
+
+  // Theme switch — Ink's <Static> caches every committed turn's first
+  // render, so without a key bump those rows stay locked to the old
+  // palette until the next resize. Bump the nonce on theme change AND
+  // clear the visible viewport first, otherwise the freshly-printed
+  // (new-theme) rows would stack on top of the still-on-screen
+  // (old-theme) ones.
+  const lastThemeRef = useRef<string>(currentTheme);
+  useEffect(() => {
+    if (lastThemeRef.current !== currentTheme) {
+      lastThemeRef.current = currentTheme;
+      process.stdout.write('\x1b[2J\x1b[H');
+      setResizeNonce((n) => n + 1);
+    }
+  }, [currentTheme]);
 
   // 1Hz tick for elapsed-seconds display while a turn is active.
   useEffect(() => {
