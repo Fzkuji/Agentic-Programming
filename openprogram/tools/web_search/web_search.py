@@ -66,8 +66,11 @@ def _format(query: str, provider_name: str, results: list[SearchResult]) -> str:
     lines = [f"# Web search: {query!r}  (via {provider_name}, {len(results)} results)\n"]
     for i, r in enumerate(results, 1):
         snippet = r.snippet.strip().replace("\n", " ")
-        if len(snippet) > 300:
-            snippet = snippet[:297] + "…"
+        # Tight snippet cap — tool results live in context for every
+        # subsequent turn, and ranking signals + URL are usually enough
+        # for the model to pick the right link to WebFetch.
+        if len(snippet) > 150:
+            snippet = snippet[:147] + "…"
         lines.append(f"{i}. **{r.title or '(no title)'}** — {r.url}\n   {snippet}")
     return "\n".join(lines)
 
@@ -79,7 +82,7 @@ def _tool_check_fn() -> bool:
 
 def execute(
     query: str | None = None,
-    num_results: int = 8,
+    num_results: int = 5,
     provider: str | None = None,
     **kw: Any,
 ) -> str:

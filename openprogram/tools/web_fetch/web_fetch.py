@@ -53,10 +53,13 @@ MAX_BYTES = 5 * 1024 * 1024
 DEFAULT_TIMEOUT = 30.0
 MAX_TIMEOUT = 120.0
 
-# Default truncation for returned text. Agent context windows can handle
-# 50 KB without flinching; longer pages get a clear truncation note so the
-# model knows to refine its prompt if it needs the tail.
-DEFAULT_MAX_CHARS = 50_000
+# Default truncation for returned text. We deliberately keep this small —
+# tool results stick around in conversation history for every subsequent
+# LLM call, so a 50 KB page eaten now costs 50 KB × N future turns. CJK
+# content also balloons in tokens (3-4× ASCII per UTF-8 char). 15 KB is
+# enough for most pages' main content; the model can request more via
+# explicit `max_chars` when it actually needs the long tail.
+DEFAULT_MAX_CHARS = 15_000
 
 # Spoofed UA — same reasoning as opencode / claude-code: too many sites
 # reject "python-requests" or empty UAs despite their robots.txt being
