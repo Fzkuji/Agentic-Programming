@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { useColors, usePreviewTheme, useThemeSetting } from '../theme/ThemeProvider.js';
+import { useColors, usePreviewTheme, useThemeSetting, useTheme } from '../theme/ThemeProvider.js';
 import { THEME_SETTINGS, THEME_LABELS, ThemeSetting } from '../theme/themes.js';
 import { usePanelWidth } from '../utils/useTerminalWidth.js';
+import { queryTerminalBg } from '../theme/oscQuery.js';
+import { setCachedSystemTheme, getSystemThemeName } from '../theme/systemTheme.js';
 
 export interface ThemePickerProps {
   /** Called after the user confirms a choice (preview already saved). */
@@ -23,12 +25,30 @@ export interface ThemePickerProps {
 export const ThemePicker: React.FC<ThemePickerProps> = ({ onDone, onCancel }) => {
   const colors = useColors();
   const savedSetting = useThemeSetting();
+  const { currentTheme } = useTheme();
   const { setPreviewTheme, savePreview, cancelPreview } = usePreviewTheme();
   const width = usePanelWidth();
 
   // Start the cursor on the saved setting so the user sees what's active.
   const initial = Math.max(0, THEME_SETTINGS.indexOf(savedSetting));
   const [index, setIndex] = useState(initial);
+  const [resolvedAuto, setResolvedAuto] = useState<string>(getSystemThemeName());
+
+  // Re-query the terminal every time the picker opens. The startup query
+  // can lose its reply if Ink claims stdin in a way that swallows the
+  // chunk; re-firing on demand gives us a second shot. A successful reply
+  // updates the cache and bumps everyone subscribed to system-theme
+  // changes (which includes ThemeProvider), so the live preview reflects
+  // the freshly-detected bg immediately.
+  useEffect(() => {
+    let cancelled = false;
+    queryTerminalBg(300).then((bg) => {
+      if (cancelled || !bg) return;
+      setCachedSystemTheme(bg);
+      setResolvedAuto(bg);
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Push the highlighted setting as a preview so the surrounding UI repaints.
   useEffect(() => {
@@ -87,6 +107,11 @@ export const ThemePicker: React.FC<ThemePickerProps> = ({ onDone, onCancel }) =>
         {THEME_SETTINGS.map((setting, i) => {
           const selected = i === index;
           const isSaved = setting === savedSetting;
+          // For 'auto' show what it currently resolves to so the user can
+          // tell whether OSC 11 actually came back from their terminal.
+          const suffix = setting === 'auto'
+            ? `  · now: ${resolvedAuto}`
+            : isSaved ? '  · saved' : '';
           return (
             <Box key={setting}>
               <Text color={selected ? colors.primary : colors.border}>
@@ -99,7 +124,7 @@ export const ThemePicker: React.FC<ThemePickerProps> = ({ onDone, onCancel }) =>
               </Box>
               <Text color={selected ? colors.text : colors.muted} wrap="truncate-end">
                 {THEME_LABELS[setting]}
-                {isSaved ? '  · saved' : ''}
+                {suffix}
               </Text>
             </Box>
           );
@@ -108,6 +133,8 @@ export const ThemePicker: React.FC<ThemePickerProps> = ({ onDone, onCancel }) =>
       <Box marginTop={1}>
         <Text color={colors.muted}>
           Saved → <Text color={colors.text}>{savedSetting}</Text>
+          <Text color={colors.border}>  ·  </Text>
+          rendering as <Text color={colors.text}>{currentTheme}</Text>
         </Text>
       </Box>
     </Box>

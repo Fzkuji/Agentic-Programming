@@ -31,19 +31,23 @@ queryTerminalBg(200)
   .then((bg) => { if (bg) setCachedSystemTheme(bg); })
   .catch(() => { /* fall back to COLORFGBG / dark */ });
 
-// Enter the alternate screen buffer (vim / less / htop / tmux pattern).
-// `\e[?1049h` saves the cursor + switches to a fresh canvas; `\e[?1049l`
-// restores the cursor + the original primary-buffer contents on exit, so
-// the user's previous shell output reappears untouched.
+// Vim / less / htop / tmux startup pattern.
 //
-// Trade-off: altscreen has no native scrollback. Chat history scrolls past
-// the top of the viewport and is lost — Ink's <Static> still reprints what
-// fits on the next render (e.g. after resize) but the user can't mouse-
-// wheel back to earlier turns. The vim-like overlay UX is the explicit
-// goal here, accepted in exchange for that limitation.
+// Terminal.app and iTerm2 (with default profile) MERGE the primary-buffer
+// scrollback into the altscreen view — so just entering altscreen (\e[?1049h)
+// still lets the user mouse-wheel back to whatever was on screen before
+// `openprogram` ran. To get the "fresh-canvas" feel users expect from
+// vim-style apps, we first wipe the primary buffer:
+//   \e[H    cursor home (so \e[3J operates from a known anchor)
+//   \e[2J   erase visible viewport
+//   \e[3J   erase scrollback (xterm extension; honored by Terminal.app,
+//           iTerm2, GNOME Terminal, kitty, Alacritty, Windows Terminal)
+// Then we switch to altscreen. On exit we drop back to the (now-empty)
+// primary buffer, which leaves the user's shell prompt intact below.
 const ENTER_ALT = '\x1b[?1049h';
 const EXIT_ALT = '\x1b[?1049l';
-process.stdout.write(ENTER_ALT);
+const CLEAR_PRIMARY = '\x1b[H\x1b[2J\x1b[3J';
+process.stdout.write(CLEAR_PRIMARY + ENTER_ALT);
 
 let _altRestored = false;
 const restoreScreen = (): void => {
