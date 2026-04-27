@@ -47,19 +47,20 @@ export async function queryTerminalBg(timeoutMs = 200): Promise<SystemTheme | un
   if (!process.stdin.isTTY || !process.stdout.isTTY) return undefined;
 
   const stdin = process.stdin;
-  const wasRaw = stdin.isRaw ?? false;
   let buf = '';
 
   return new Promise<SystemTheme | undefined>((resolve) => {
     let done = false;
     let timer: NodeJS.Timeout | undefined;
+    // Cleanup leaves stdin's raw-mode + flowing state alone. Ink takes
+    // over the same stdin moments later (synchronously after we return)
+    // and manages those flags itself; if we toggle them on the way out
+    // we'd race against Ink's setup and break user input.
     const cleanup = (result: SystemTheme | undefined) => {
       if (done) return;
       done = true;
       if (timer) clearTimeout(timer);
       stdin.removeListener('data', onData);
-      try { stdin.setRawMode(wasRaw); } catch { /* best effort */ }
-      try { stdin.pause(); } catch { /* best effort */ }
       resolve(result);
     };
     const onData = (chunk: Buffer) => {
@@ -72,6 +73,9 @@ export async function queryTerminalBg(timeoutMs = 200): Promise<SystemTheme | un
     };
 
     try {
+      // Raw mode is required so the terminal sends the OSC reply byte-for-
+      // byte instead of waiting for a newline. We keep it raw afterwards —
+      // Ink's renderer also wants raw mode, so this is a wash.
       stdin.setRawMode(true);
       stdin.resume();
       stdin.on('data', onData);
