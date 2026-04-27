@@ -1,5 +1,5 @@
 import React from 'react';
-import { render } from 'ink';
+import { render, AlternateScreen } from '@openprogram/ink';
 import { REPL } from './screens/REPL.js';
 import { BackendClient } from './ws/client.js';
 import { ThemeProvider } from './theme/ThemeProvider.js';
@@ -21,23 +21,6 @@ const { ws } = parseArgs(process.argv.slice(2));
 const client = new BackendClient(ws);
 client.connect();
 
-// Startup screen reset. We intentionally do NOT use altscreen
-// (\e[?1049h) — Apple's Terminal preserves the pre-switch cursor
-// position across the switch and Ink ends up rendering its first frame
-// from a row that isn't (1,1), leaving the top of the screen blank.
-// Different versions of Terminal/iTerm2 also merge primary + altscreen
-// scrollback in surprising ways. Stay in the primary buffer and just:
-//   \e[H    cursor home
-//   \e[2J   erase the visible viewport
-//   \e[3J   erase scrollback (xterm extension; Terminal.app, iTerm2,
-//           VSCode, Ghostty, kitty, GNOME Terminal, Windows Terminal)
-// After this the terminal is genuinely empty, cursor at (1,1), and
-// Ink can render top-down from there. The trade-off vs. altscreen:
-// when openprogram exits, the chat content stays on screen instead
-// of being replaced by the original shell view — but the launch
-// experience is reliable across emulators.
-process.stdout.write('\x1b[H\x1b[2J\x1b[3J');
-
 // OSC 11 (background-color query) for the auto theme. The reply lands
 // via setCachedSystemTheme whenever it arrives; ThemeProvider's
 // subscriber bumps state and flips 'auto' from dark to light in place.
@@ -45,22 +28,35 @@ queryTerminalBg(200)
   .then((bg) => { if (bg) setCachedSystemTheme(bg); })
   .catch(() => { /* fall back to COLORFGBG / dark */ });
 
-// Resize is left to Ink. Its own listener recomputes Yoga layout and
-// triggers a re-render — adding our own clear-screen on top of that
-// raced against log-update's previousLineCount and produced blank
-// frames at certain widths.
-
 process.on('SIGINT', () => process.exit(0));
 process.on('SIGTERM', () => process.exit(0));
 
-const { waitUntilExit } = render(
-  <ThemeProvider>
-    <REPL client={client} />
-  </ThemeProvider>,
-  { exitOnCtrlC: false },
-);
+// <AlternateScreen> tells hermes-ink to enter the terminal alt buffer
+// and run as a fullscreen app. Resize / theme / state changes all go
+// through hermes-ink's Frame model + cell-diff log-update — full
+// frames written atomically inside BSU/ESU brackets, no ghost stacks
+// from stale eraseLines accounting.
+//
+// hermes-ink's render() resolves to an Instance once mounted (async,
+// unlike stock Ink's sync return), so we await it before subscribing
+// to waitUntilExit.
+async function main(): Promise<void> {
+  const instance = await render(
+    <AlternateScreen>
+      <ThemeProvider>
+        <REPL client={client} />
+      </ThemeProvider>
+    </AlternateScreen>,
+    { exitOnCtrlC: false },
+  );
 
-waitUntilExit().then(() => {
+  await instance.waitUntilExit();
   client.close();
   process.exit(0);
+}
+
+main().catch((err: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error(err);
+  process.exit(1);
 });

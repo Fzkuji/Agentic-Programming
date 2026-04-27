@@ -170,6 +170,8 @@ def _save_conversation(conv_id: str):
             "agent_id": agent_id,
             "title": conv.get("title", "Untitled"),
             "provider_name": conv.get("provider_name"),
+            "provider_override": conv.get("provider_override"),
+            "model_override": conv.get("model_override"),
             "session_id": getattr(runtime, "_session_id", None),
             "model": getattr(runtime, "model", None),
             "created_at": conv.get("created_at"),
@@ -237,21 +239,31 @@ def _restore_sessions():
                 root_ctx.status = "idle"
 
             provider_name = data.get("provider_name")
+            provider_override = data.get("provider_override")
+            model_override = data.get("model_override")
             session_id = data.get("session_id")
             model = data.get("model")
 
+            # Skip eager runtime restore unless this conversation was
+            # explicitly switched (provider_override). Without an
+            # override we can't tell whether the persisted
+            # ``provider_name`` reflects a user choice or stale state
+            # written by the old auto-default-on-create path; letting
+            # ``_get_conv_runtime`` build the runtime lazily from agent
+            # config is the only way old buggy sessions escape the
+            # claude-code default.
             runtime = None
-            if provider_name:
+            if provider_override:
                 try:
-                    runtime = _create_runtime_for_visualizer(provider_name)
-                    if model:
-                        runtime.model = model
+                    runtime = _create_runtime_for_visualizer(
+                        provider_override, model=model_override or model
+                    )
                     if session_id and hasattr(runtime, "_session_id"):
                         runtime._session_id = session_id
                         runtime._turn_count = 1
                         runtime.has_session = True
                 except Exception:
-                    pass
+                    runtime = None
 
             # ContextGit migration: backfill parent_id on legacy
             # messages and pick a head_id. Old conversations become a
@@ -271,7 +283,9 @@ def _restore_sessions():
                     "title": data.get("title", "Untitled"),
                     "root_context": root_ctx,
                     "runtime": runtime,
-                    "provider_name": provider_name,
+                    "provider_name": provider_override or None,
+                    "provider_override": provider_override,
+                    "model_override": model_override,
                     "messages": msgs,
                     "function_trees": data.get("function_trees", []),
                     "created_at": data.get("created_at", time.time()),
@@ -1199,11 +1213,14 @@ def _broadcast_context_stats(conv_id: str, msg_id: str, chat_runtime=None, exec_
         except Exception:
             context_window = None
 
+    chat_model = getattr(chat_runtime, "model", None) if chat_runtime else None
+
     stats = {
         "type": "context_stats",
         "chat": conv.get("_chat_usage", dict(_zero)),
         "exec": exec_stats,
         "provider": provider_name,
+        "model": chat_model,
         "context_window": context_window,
     }
     conv["_last_context_stats"] = stats
@@ -2278,6 +2295,43 @@ async def _handle_ws_command(ws, cmd: dict):
             "type": "channel_accounts", "data": rows,
         }, default=str))
 
+    elif action == "add_channel_account":
+        # Token-based registration for discord / telegram / slack.
+        # Wechat goes through the QR-login pair below since it has no
+        # static token to paste.
+        from openprogram.channels import accounts as _acc
+        ch = (cmd.get("channel") or "").strip().lower()
+        acct_id = (cmd.get("account_id") or "").strip()
+        token = cmd.get("token") or ""
+        if ch not in {"discord", "telegram", "slack"} or not acct_id or not token:
+            await ws.send_text(json.dumps({
+                "type": "channel_account_added",
+                "data": {"ok": False, "error": "channel/account_id/token required"},
+            }))
+        else:
+            try:
+                _acc.create(ch, acct_id)
+                # Each channel uses a different credential key shape.
+                # We mirror what the shell `openprogram channels
+                # accounts add` flow stores so the worker can pick it
+                # up unchanged.
+                if ch == "discord":
+                    creds = {"bot_token": token}
+                elif ch == "telegram":
+                    creds = {"bot_token": token}
+                else:  # slack
+                    creds = {"bot_token": token}
+                _acc.save_credentials(ch, acct_id, creds)
+                await ws.send_text(json.dumps({
+                    "type": "channel_account_added",
+                    "data": {"ok": True, "channel": ch, "account_id": acct_id},
+                }))
+            except Exception as e:
+                await ws.send_text(json.dumps({
+                    "type": "channel_account_added",
+                    "data": {"ok": False, "error": f"{type(e).__name__}: {e}"},
+                }))
+
     elif action == "list_channel_bindings":
         try:
             from openprogram.channels import bindings as _bindings_mod
@@ -3045,8 +3099,12 @@ def create_app():
                         except Exception: pass
                     conv["runtime"] = new_rt
                     conv["provider_name"] = prov
+                    conv["provider_override"] = prov
+                    conv["model_override"] = bare_model
                 else:
                     old_rt.model = bare_model
+                    conv["provider_override"] = prov
+                    conv["model_override"] = bare_model
                 info = _get_provider_info(conv_id)
                 _broadcast(json.dumps({"type": "provider_changed", "data": info}))
                 return JSONResponse(content={"switched": True, "provider": prov, "model": bare_model})

@@ -14,25 +14,27 @@
  *     or when the high-saturation orange feels loud.
  */
 
+import type { Color } from '@openprogram/ink';
+
 export interface ColorTheme {
   // Common roles
-  primary: string;
-  secondary: string;
-  success: string;
-  warning: string;
-  error: string;
-  muted: string;
-  accent: string;
-  text: string;
-  border: string;
+  primary: Color;
+  secondary: Color;
+  success: Color;
+  warning: Color;
+  error: Color;
+  muted: Color;
+  accent: Color;
+  text: Color;
+  border: Color;
 
   // Chat-turn roles
-  user: { bg: string | undefined; fg: string; glyph: string };
-  assistant: { bg: string | undefined; fg: string; glyph: string };
-  system: { bg: string | undefined; fg: string; glyph: string };
+  user: { bg: Color | undefined; fg: Color; glyph: Color };
+  assistant: { bg: Color | undefined; fg: Color; glyph: Color };
+  system: { bg: Color | undefined; fg: Color; glyph: Color };
 
   // Tool-call rendering
-  tool: { running: string; done: string; error: string };
+  tool: { running: Color; done: Color; error: Color };
 }
 
 export const THEME_NAMES = ['dark', 'dark-dim', 'light', 'light-dim'] as const;

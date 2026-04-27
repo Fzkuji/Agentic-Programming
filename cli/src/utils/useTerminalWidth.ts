@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useStdout } from 'ink';
+import { useStdout } from '@openprogram/ink';
 
 /** Floor so a transient resize (e.g. sliding the window narrow) doesn't
  * propagate negative widths into Ink and crash the layout. */

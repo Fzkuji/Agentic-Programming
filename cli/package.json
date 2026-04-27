@@ -3,34 +3,32 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "workspaces": ["vendor/ink"],
   "bin": {
     "openprogram-cli": "dist/index.js"
   },
   "scripts": {
-    "build": "esbuild src/index.tsx --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --packages=external --jsx=automatic --banner:js=\"#!/usr/bin/env node\\nimport { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
+    "build": "(cd vendor/ink && npm run build) && esbuild src/index.tsx --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --packages=external --jsx=automatic --banner:js=\"#!/usr/bin/env node\\nimport { createRequire } from 'module'; const require = createRequire(import.meta.url);\"",
     "dev": "esbuild src/index.tsx --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --packages=external --jsx=automatic --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@openprogram/ink": "file:./vendor/ink",
     "chalk": "^5.3.0",
     "figures": "^6.1.0",
-    "ink": "^5.0.1",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
     "marked": "^15.0.12",
     "marked-terminal": "^7.3.0",
-    "react": "^18.3.1",
+    "react": "^19.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/react": "^18.3.3",
+    "@types/react": "^19.0.0",
     "@types/ws": "^8.5.13",
     "@vitest/ui": "^4.1.5",
     "esbuild": "^0.24.0",
-    "ink-testing-library": "^4.0.0",
     "typescript": "^5.5.4",
     "vitest": "^4.1.5"
   }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '@openprogram/ink';
 import { useColors } from '../theme/ThemeProvider.js';
 import { useTerminalWidth, usePanelWidth, useTerminalHeight } from '../utils/useTerminalWidth.js';
 
@@ -67,7 +67,7 @@ const Column: React.FC<{
         <Text bold color={colors.primary}>
           {spec.count}
         </Text>
-        <Text bold color={colors.text}>{`  ${spec.label}`}</Text>
+        <Text bold color={colors.text}>{` ${spec.label}`}</Text>
       </Box>
       {rows.map(([a, b], i) => (
         <Box key={i}>
@@ -86,7 +86,7 @@ const Column: React.FC<{
         </Box>
       ))}
       {overflow > 0 ? (
-        <Text color={colors.border}>  +{overflow}</Text>
+        <Text color={colors.border}> +{overflow}</Text>
       ) : null}
     </Box>
   );

@@ -25,6 +25,7 @@ export type WsRequest =
   | { action: 'load_conversation'; id: string }
   | { action: 'delete_conversation'; id: string }
   | { action: 'list_channel_accounts' }
+  | { action: 'add_channel_account'; channel: string; account_id: string; token: string }
   | { action: 'list_channel_bindings' }
   | { action: 'add_binding'; binding: Record<string, unknown> }
   | { action: 'remove_binding'; index: number }
@@ -88,6 +89,11 @@ export interface ChannelAccountsEnvelope {
   data: Array<{ channel?: string; id?: string; [k: string]: unknown }>;
 }
 
+export interface ChannelAccountAddedEnvelope {
+  type: 'channel_account_added';
+  data: { ok?: boolean; channel?: string; account_id?: string; error?: string };
+}
+
 export interface BrowserResultEnvelope {
   type: 'browser_result';
   data: { verb: string; result: string };
@@ -145,6 +151,7 @@ export type WsEnvelope =
   | ChannelBindingsEnvelope
   | SessionAliasesEnvelope
   | ChannelAccountsEnvelope
+  | ChannelAccountAddedEnvelope
   | BrowserResultEnvelope
   | ErrorEnvelope
   | { type: 'pong' };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '@openprogram/ink';
 import { useColors } from '../theme/ThemeProvider.js';
 import { useTerminalWidth, usePanelWidth } from '../utils/useTerminalWidth.js';
 
@@ -24,6 +24,9 @@ export interface BottomBarProps {
   connState?: 'connecting' | 'connected' | 'disconnected';
   /** Total context window in tokens (for the % indicator). */
   contextWindow?: number;
+  /** True after the first Ctrl+C while the 800 ms double-press window
+   *  is open. Replaces the regular hint with a confirm-to-exit prompt. */
+  exitPending?: boolean;
 }
 
 const formatTokens = (n?: number): string | null => {
@@ -45,6 +48,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   thinkingEffort,
   connState,
   contextWindow,
+  exitPending,
 }) => {
   const colors = useColors();
   const cols = useTerminalWidth();
@@ -52,12 +56,18 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   // Bottom-bar left hint is now context-only (slash menu / busy / quit).
   // The "type / for commands" placeholder lives inside the input box,
   // and ↵ enter is rendered there too — no need to duplicate.
-  const hintLong = slashMode
+  // exitPending overrides everything else with a confirm-to-quit
+  // prompt while the 800 ms double-press window is open.
+  const hintLong = exitPending
+    ? 'press ctrl+c again to exit'
+    : slashMode
     ? '↑↓ choose · enter run · tab fill · esc cancel'
     : busy
     ? 'esc to stop · ctrl+c quit'
     : 'ctrl+c quit · ctrl+r history · @ files';
-  const hintShort = slashMode
+  const hintShort = exitPending
+    ? 'ctrl+c again to exit'
+    : slashMode
     ? '↑↓ enter tab esc'
     : busy
     ? 'esc stop'
@@ -103,7 +113,7 @@ export const BottomBar: React.FC<BottomBarProps> = ({
         {showHint ? (
           <>
             <Text color={colors.border}> · </Text>
-            <Text color={colors.muted} wrap="truncate-end">
+            <Text color={exitPending ? colors.warning : colors.muted} wrap="truncate-end">
               {hint}
             </Text>
           </>
@@ -131,9 +141,9 @@ export const BottomBar: React.FC<BottomBarProps> = ({
           {showTokens ? (
             <>
               <Text color={colors.border}> · </Text>
-              {inTokens ? <Text color={colors.muted}>↓{inTokens}</Text> : null}
+              {inTokens ? <Text color={colors.muted}>↑{inTokens}</Text> : null}
               {inTokens && outTokens ? <Text color={colors.border}> </Text> : null}
-              {outTokens ? <Text color={colors.muted}>↑{outTokens}</Text> : null}
+              {outTokens ? <Text color={colors.muted}>↓{outTokens}</Text> : null}
             </>
           ) : null}
           {showTokens && contextWindow && tokens?.input ? (

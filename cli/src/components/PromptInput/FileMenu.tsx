@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text } from '@openprogram/ink';
 import { FileMatch } from '../../utils/fileCompletions.js';
 import { useColors } from '../../theme/ThemeProvider.js';
 

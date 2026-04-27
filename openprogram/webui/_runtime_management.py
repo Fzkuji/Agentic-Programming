@@ -227,7 +227,18 @@ def _init_providers():
 
 
 def _get_conv_runtime(conv_id: str, msg_id: str = None):
-    """Get chat runtime for a conversation, creating if needed."""
+    """Get chat runtime for a conversation, creating if needed.
+
+    Resolution order for the runtime's provider/model:
+      1. The conversation's already-attached runtime (sticky once created).
+      2. Explicit user choice (``provider_override`` set by ``/model``).
+      3. The conversation's agent's configured ``model.provider`` /
+         ``model.id`` (agent.json). Honouring this is what makes the
+         agent setting load-bearing instead of cosmetic — the previous
+         version always used the global auto-detected default and
+         silently ignored what the user picked in the agents UI.
+      4. Global ``_chat_provider`` fallback.
+    """
     _init_providers()
 
     _conversations, _ = _get_conversations()
@@ -235,18 +246,51 @@ def _get_conv_runtime(conv_id: str, msg_id: str = None):
     if conv and conv.get("runtime"):
         return conv["runtime"]
 
-    if not _chat_provider:
+    provider, model = _resolve_conv_provider_model(conv)
+
+    if not provider:
         raise RuntimeError(
             "No provider available. Install a CLI (codex/claude/gemini) or set an API key."
         )
 
-    rt = _create_runtime_for_visualizer(_chat_provider)
-    if _chat_model:
-        rt.model = _chat_model
+    rt = _create_runtime_for_visualizer(provider, model=model)
     if conv:
         conv["runtime"] = rt
-        conv["provider_name"] = _chat_provider
+        conv["provider_name"] = provider
     return rt
+
+
+def _resolve_conv_provider_model(conv: dict | None) -> tuple[str | None, str | None]:
+    """Pick (provider, model) for a conversation.
+
+    Resolution order:
+      1. Explicit ``provider_override`` on the conv (set by ``/model``
+         switch). The older ``provider_name`` field is deliberately NOT
+         consulted as a user choice — past versions of
+         ``_get_conv_runtime`` polluted it with the global default, so
+         persisted ``provider_name`` is treated as a runtime-cache only.
+      2. The conversation's agent's configured model (agent.json
+         ``model.provider`` / ``model.id``).
+      3. Global ``_chat_provider`` fallback when no agent / no model.
+    """
+    if conv:
+        if conv.get("provider_override"):
+            return conv["provider_override"], conv.get("model_override") or _chat_model
+
+        agent_id = conv.get("agent_id")
+        if agent_id:
+            try:
+                from openprogram.agents.manager import get as _get_agent
+                spec = _get_agent(agent_id)
+            except Exception:
+                spec = None
+            if spec is not None:
+                ap = (spec.model.provider or "").strip()
+                am = (spec.model.id or "").strip()
+                if ap:
+                    return ap, am or None
+
+    return _chat_provider, _chat_model
 
 
 def _get_exec_runtime(no_tools: bool = False):
@@ -308,6 +352,10 @@ def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
             if conv:
                 conv["runtime"] = _create_runtime_for_visualizer(name)
                 conv["provider_name"] = name
+                # User-explicit switch — record as override so future
+                # resolutions don't fall back to agent config.
+                conv["provider_override"] = name
+                conv["model_override"] = getattr(rt, "model", None)
 
         if conv_id and msg_id:
             _broadcast_chat_response(conv_id, msg_id, {
@@ -324,18 +372,43 @@ def _switch_runtime(provider: str, conv_id: str = None, msg_id: str = None):
 
 
 def _get_provider_info(conv_id: str = None) -> dict:
-    """Get provider info. If conv_id given, return that conversation's provider."""
-    provider_name = _default_provider
-    runtime = _default_runtime
+    """Get provider info. If conv_id given, return that conversation's provider.
 
+    When the conversation has no live runtime yet (lazy restore — runtime
+    is only built on the first turn after a server restart), resolve
+    provider/model from agent config instead of falling through to the
+    global default. Otherwise pre-chat displays show the auto-detected
+    fallback even after the user fixed the agent's model.
+    """
     if conv_id:
         _conversations, _conversations_lock = _get_conversations()
         with _conversations_lock:
             conv = _conversations.get(conv_id)
-        if conv and conv.get("runtime"):
-            runtime = conv["runtime"]
-            provider_name = conv.get("provider_name", _default_provider)
+        if conv:
+            runtime = conv.get("runtime")
+            if runtime is not None:
+                provider_name = conv.get("provider_name") or _default_provider
+                provider_type = "CLI" if provider_name in _CLI_PROVIDERS else "API"
+                return {
+                    "provider": provider_name,
+                    "type": provider_type,
+                    "model": runtime.model,
+                    "runtime": type(runtime).__name__,
+                    "session_id": getattr(runtime, "_session_id", None),
+                }
+            provider_name, model = _resolve_conv_provider_model(conv)
+            if provider_name:
+                provider_type = "CLI" if provider_name in _CLI_PROVIDERS else "API"
+                return {
+                    "provider": provider_name,
+                    "type": provider_type,
+                    "model": model,
+                    "runtime": None,
+                    "session_id": None,
+                }
 
+    runtime = _default_runtime
+    provider_name = _default_provider
     if runtime is None:
         return {"provider": None, "type": None, "model": None,
                 "runtime": None, "session_id": None}

@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
-import { Box, useApp, useInput } from 'ink';
+import { Box, useApp, useInput } from '@openprogram/ink';
 import { BackendClient, WsEnvelope, StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
 import { Messages } from '../components/Messages.js';
 import { Spinner } from '../components/Spinner.js';
 import { Picker, PickerItem } from '../components/Picker.js';
+import { LineInput } from '../components/LineInput.js';
 import { Turn, ToolCall, TurnBlock } from '../components/Turn.js';
 import { PromptInput } from '../components/PromptInput/PromptInput.js';
 import { handleSlash } from '../commands/handler.js';
@@ -39,6 +40,16 @@ const renderModel = (m: AgentInfo['model']): string | undefined => {
   if (!m) return undefined;
   if (typeof m === 'string') return m;
   return m.id ?? m.provider;
+};
+
+/** Some runtimes embed the provider as a prefix in ``runtime.model`` (e.g.
+ *  Codex emits ``openai-codex:gpt-5.4``). Strip it for display so the
+ *  BottomBar only shows the bare model id. */
+const stripProviderPrefix = (m: string | undefined): string | undefined => {
+  if (!m) return m;
+  const idx = m.indexOf(':');
+  if (idx <= 0) return m;
+  return m.slice(idx + 1);
 };
 
 interface Activity {
@@ -80,8 +91,14 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     Array<{ id?: string; title?: string; created_at?: number }>
   >([]);
   const [pickerKind, setPickerKind] = useState<
-    null | 'model' | 'resume' | 'agent' | 'channel' | 'channel_account' | 'theme'
+    null
+    | 'model' | 'resume' | 'agent' | 'channel' | 'channel_account' | 'theme'
+    | 'register_account_id' | 'register_token'
   >(null);
+  const [registerForm, setRegisterForm] = useState<{
+    channel?: string;
+    accountId?: string;
+  }>({});
   const { setThemeSetting, currentTheme } = useTheme();
   const [channelAccounts, setChannelAccounts] = useState<
     Array<{ channel?: string; account_id?: string; configured?: boolean }>
@@ -95,23 +112,13 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [thinkingEffort, setThinkingEffort] = useState<'off' | 'low' | 'medium' | 'high'>('medium');
   const [connState, setConnState] = useState<ConnectionState>(client.getState());
   const agentSetRef = useRef(false);
-  // Theme switch — Ink's <Static> caches every committed turn's first
-  // render, so without a key bump those rows stay locked to the old
-  // palette. Bump a nonce on theme change AND clear the visible viewport
-  // first, otherwise the freshly-printed (new-theme) rows would stack
-  // on top of the still-on-screen (old-theme) ones.
-  //
-  // Resize is left alone. Ink's own listener handles resize: it
-  // re-computes Yoga layout and triggers onRender. Adding our own
-  // clear-screen + key bump on top of that races against Ink's
-  // log-update internals and produces blank frames at certain widths.
+  // Theme switch: with hermes-ink every render is a full cell-grid
+  // frame, so changing useColors() context just re-renders the entire
+  // tree with the new palette — no Static remount or nonce needed.
   const lastThemeRef = useRef<string>(currentTheme);
-  const [themeNonce, setThemeNonce] = useState(0);
   useEffect(() => {
     if (lastThemeRef.current !== currentTheme) {
       lastThemeRef.current = currentTheme;
-      process.stdout.write('\x1b[2J\x1b[H');
-      setThemeNonce((n) => n + 1);
     }
   }, [currentTheme]);
 
@@ -307,6 +314,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             chat?: { input_tokens?: number; output_tokens?: number };
             context_window?: number | null;
             conv_id?: string;
+            model?: string;
           };
           // Server tags every context_stats with the conv_id it
           // belongs to. Stash by id so switching branches flips the
@@ -325,6 +333,13 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           ) {
             setWindowByConv((m) => ({ ...m, [cid]: cs.context_window as number }));
           }
+          // Live model from the actual runtime. Trumps agent-default
+          // values seeded by stats/agents_list events: those describe
+          // what the agent is configured to use, not what the runtime
+          // we're talking to right now actually is.
+          if (cs.model && cid === conversationId) {
+            setModel(stripProviderPrefix(cs.model));
+          }
         }
       } else if (ev.type === 'stats') {
         setStats(ev.data);
@@ -342,6 +357,18 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         pushSystem(`[browser ${data.verb}] ${data.result}`);
       } else if (ev.type === 'channel_accounts') {
         setChannelAccounts((ev.data ?? []) as Array<{ channel?: string; account_id?: string; configured?: boolean }>);
+      } else if (ev.type === 'channel_account_added') {
+        const data = (ev as { data: { ok?: boolean; channel?: string; account_id?: string; error?: string } }).data;
+        if (data?.ok) {
+          pushSystem(
+            `Account added: ${data.channel}:${data.account_id}.\n` +
+            `Next: /attach ${data.channel} ${data.account_id} <peer-id>\n` +
+            `to bind a contact to the current session.`,
+          );
+          client.send({ action: 'list_channel_accounts' });
+        } else {
+          pushSystem(`Failed to add account: ${data?.error ?? 'unknown error'}`);
+        }
       } else if (ev.type === 'history_list') {
         setPastConversations(ev.data ?? []);
       } else if (ev.type === 'conversations_list') {
@@ -373,9 +400,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           id?: string;
           title?: string;
           messages?: Array<{ role?: string; content?: string }>;
+          provider_info?: { model?: string };
         };
         if (data.id) setConversationId(data.id);
         if (data.title) setConversationTitle(data.title);
+        if (data.provider_info?.model) setModel(stripProviderPrefix(data.provider_info.model));
         const turns = (data.messages ?? [])
           .filter((m) => m.role && m.content)
           .map((m, i) => ({
@@ -427,9 +456,37 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
+  // Double-press Ctrl+C to exit (Claude Code / Hermes pattern).
+  // First press: surface a "Press Ctrl+C again to exit" hint in
+  // BottomBar and start an 800 ms timer. Second press inside the
+  // window: app.exit(). Timer expires: clear the hint and reset.
+  const [exitPending, setExitPending] = useState(false);
+  const exitTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastCtrlCRef = useRef<number>(0);
+
+  useEffect(() => () => {
+    if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+  }, []);
+
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
-      app.exit();
+      const now = Date.now();
+      const recent = now - lastCtrlCRef.current <= 800
+        && exitTimerRef.current !== null;
+      if (recent) {
+        if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+        setExitPending(false);
+        app.exit();
+        return;
+      }
+      lastCtrlCRef.current = now;
+      setExitPending(true);
+      if (exitTimerRef.current) clearTimeout(exitTimerRef.current);
+      exitTimerRef.current = setTimeout(() => {
+        exitTimerRef.current = null;
+        setExitPending(false);
+      }, 800);
       return;
     }
     // shift+tab cycles permission mode (Claude Code parity):
@@ -644,21 +701,34 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     );
   } else if (pickerKind === 'channel_account') {
     const filtered = channelAccounts.filter((a) => a.channel === chosenChannel);
-    const items: PickerItem<string>[] = filtered.length === 0
-      ? [{ label: '(no accounts — run shell login first)', description: '', value: '' }]
-      : filtered.map((a) => ({
-          label: a.account_id ?? '',
-          description: a.configured ? 'logged in' : 'not configured',
-          value: a.account_id ?? '',
-        }));
+    const accountItems: PickerItem<string>[] = filtered.map((a) => ({
+      label: a.account_id ?? '',
+      description: a.configured ? 'logged in' : 'not configured',
+      value: a.account_id ?? '',
+    }));
+    const isTokenChannel =
+      chosenChannel === 'discord' || chosenChannel === 'telegram' || chosenChannel === 'slack';
+    const items: PickerItem<string>[] = [
+      ...accountItems,
+      isTokenChannel
+        ? { label: '+ Register new', description: 'paste a bot token to add an account', value: '__register__' }
+        : { label: '+ Register new', description: 'wechat needs shell QR — select for command', value: '__register_wechat__' },
+    ];
     pickerNode = (
       <Picker
         title={`Pick a ${chosenChannel} account`}
         items={items}
         onSelect={(it) => {
-          if (!it.value) {
+          if (it.value === '__register__') {
+            setRegisterForm({ channel: chosenChannel });
+            setPickerKind('register_account_id');
+            return;
+          }
+          if (it.value === '__register_wechat__') {
             pushSystem(
-              `Run \`openprogram channels accounts ${chosenChannel === 'wechat' ? 'login' : 'add'} ${chosenChannel} default\` from the shell first, then re-open /channel.`,
+              `WeChat login uses QR scanning, run from a shell on the gateway host:\n` +
+              `  openprogram channels accounts login wechat default\n` +
+              `Scan with WeChat on your phone, then come back to /channel.`,
             );
             setPickerKind(null);
             setChosenChannel(undefined);
@@ -680,6 +750,61 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         }}
         onCancel={() => {
           setPickerKind('channel');
+        }}
+      />
+    );
+  } else if (pickerKind === 'register_account_id') {
+    pickerNode = (
+      <LineInput
+        label={`Register ${registerForm.channel ?? '?'} account`}
+        hint="Choose a short id you'll use to refer to this account (e.g. 'default', 'work')."
+        initial="default"
+        onSubmit={(v) => {
+          const id = v.trim();
+          if (!id) {
+            pushSystem('account_id required.');
+            return;
+          }
+          setRegisterForm((f) => ({ ...f, accountId: id }));
+          setPickerKind('register_token');
+        }}
+        onCancel={() => {
+          setPickerKind('channel_account');
+          setRegisterForm({});
+        }}
+      />
+    );
+  } else if (pickerKind === 'register_token') {
+    pickerNode = (
+      <LineInput
+        label={`${registerForm.channel ?? '?'} bot token for "${registerForm.accountId}"`}
+        hint="Paste the bot token from your provider dashboard."
+        mask
+        onSubmit={(token) => {
+          const t = token.trim();
+          if (!t) {
+            pushSystem('token required.');
+            return;
+          }
+          if (!registerForm.channel || !registerForm.accountId) {
+            pushSystem('register form incomplete; aborting.');
+            setPickerKind(null);
+            setRegisterForm({});
+            return;
+          }
+          client.send({
+            action: 'add_channel_account',
+            channel: registerForm.channel,
+            account_id: registerForm.accountId,
+            token: t,
+          });
+          setPickerKind(null);
+          setRegisterForm({});
+          setChosenChannel(undefined);
+          client.send({ action: 'list_channel_accounts' });
+        }}
+        onCancel={() => {
+          setPickerKind('register_account_id');
         }}
       />
     );
@@ -723,7 +848,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         committed={committed}
         streaming={streaming}
         welcome={stats ? stats : undefined}
-        themeNonce={themeNonce}
       />
       {activity ? (
         <Spinner
@@ -760,6 +884,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         thinkingEffort={thinkingEffort}
         connState={connState}
         contextWindow={conversationId ? windowByConv[conversationId] : undefined}
+        exitPending={exitPending}
       />
     </Box>
   );

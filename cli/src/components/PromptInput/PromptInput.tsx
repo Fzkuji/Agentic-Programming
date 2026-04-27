@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput } from '@openprogram/ink';
 import { PromptInputHelpMenu } from './PromptInputHelpMenu.js';
 import { FileMenu } from './FileMenu.js';
 import { SLASH_COMMANDS, SlashCommand } from '../../commands/registry.js';
@@ -333,7 +333,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
               <Text inverse>{at || ' '}</Text>
               <Text>{after}</Text>
               {suggestion ? (
-                <Text color={colors.muted} dimColor>
+                <Text color={colors.muted}>
                   {suggestion}
                 </Text>
               ) : null}
@@ -341,7 +341,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
           )}
         </Box>
         <Box flexShrink={0} marginLeft={2}>
-          <Text color={colors.muted} dimColor>
+          <Text color={colors.muted}>
             ↵ enter
           </Text>
         </Box>
