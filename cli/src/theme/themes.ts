@@ -131,7 +131,12 @@ export const THEMES: Record<ThemeName, ColorTheme> = {
 };
 
 export const DEFAULT_THEME: ThemeName = 'dark';
-export const DEFAULT_SETTING: ThemeSetting = 'dark';
+/**
+ * First-launch default. `auto` means we ask the terminal what its bg is
+ * via OSC 11 and resolve to dark or light. Falls back to dark if the
+ * terminal doesn't reply, so the worst case is the same as before.
+ */
+export const DEFAULT_SETTING: ThemeSetting = 'auto';
 
 export function getTheme(name: ThemeName): ColorTheme {
   return THEMES[name] ?? THEMES[DEFAULT_THEME];

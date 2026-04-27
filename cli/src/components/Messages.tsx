@@ -9,50 +9,34 @@ export interface MessagesProps {
   /** Currently-streaming assistant turn, if any. Re-renders every delta. */
   streaming?: Turn | null;
   /**
-   * If provided, the welcome panel is included as the first item in the
-   * static region — it then scrolls up naturally as turns grow rather
-   * than disappearing on the first message.
+   * Welcome stats. Shown ONLY while no committed turns exist; once the
+   * user sends the first message the panel unmounts. Crucially, Welcome
+   * sits OUTSIDE <Static> so Ink can dynamically erase it on unmount —
+   * Static commits its items to the terminal's scrollback permanently,
+   * which means a Welcome inside Static can't be repositioned and would
+   * get scroll-pushed off the top whenever Static re-prints (resize,
+   * theme switch).
    */
   welcome?: WelcomeStats;
   /**
-   * Bumps when the terminal resizes. Used as the React key on the
-   * inner Static so resizing wipes Ink's "we already printed these"
-   * memo and the whole transcript re-prints fresh at the new width.
-   * Without this, our resize-time clear-screen escape would leave the
-   * scroll empty.
+   * Bumps when the terminal resizes or the active theme changes. Used as
+   * the React key on <Static> so Ink's "we already printed these" memo
+   * is invalidated and the whole transcript re-prints fresh — at the new
+   * width or in the new palette.
    */
   resizeNonce?: number;
 }
 
-type StaticItem =
-  | { kind: 'welcome'; key: string; welcome: WelcomeStats }
-  | { kind: 'turn'; key: string; turn: Turn };
-
 export const Messages: React.FC<MessagesProps> = ({
   committed, streaming, welcome, resizeNonce = 0,
 }) => {
-  const items: StaticItem[] = [];
-  if (welcome) {
-    items.push({ kind: 'welcome', key: '__welcome__', welcome });
-  }
-  for (const t of committed) {
-    items.push({ kind: 'turn', key: t.id, turn: t });
-  }
+  const showWelcome = welcome && committed.length === 0 && !streaming;
 
-  // Re-mount Static on resize so it re-prints the whole transcript at
-  // the new width. Ink otherwise considers the previously-printed items
-  // permanent and skips them, which combined with our resize-time
-  // clear-screen leaves a blank scroll above the input box.
   return (
     <>
-      <Static key={`static-${resizeNonce}`} items={items}>
-        {(item) =>
-          item.kind === 'welcome' ? (
-            <Welcome key={item.key} stats={item.welcome} />
-          ) : (
-            <TurnRow key={item.key} turn={item.turn} />
-          )
-        }
+      {showWelcome ? <Welcome stats={welcome} /> : null}
+      <Static key={`static-${resizeNonce}`} items={committed}>
+        {(turn) => <TurnRow key={turn.id} turn={turn} />}
       </Static>
       {streaming ? <TurnRow turn={streaming} /> : null}
     </>
