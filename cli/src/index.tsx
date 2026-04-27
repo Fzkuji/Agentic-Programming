@@ -31,22 +31,37 @@ queryTerminalBg(200)
   .then((bg) => { if (bg) setCachedSystemTheme(bg); })
   .catch(() => { /* fall back to COLORFGBG / dark */ });
 
-// We deliberately do NOT enter the alternate screen buffer. altscreen
-// gives a clean canvas at startup but loses native scrollback — once
-// Ink scrolls past the visible viewport the early turns vanish, and
-// the terminal's mouse-wheel scrollback returns the OS shell history
-// instead of the chat. Streaming into the primary buffer keeps the
-// whole transcript scrollable like a normal terminal app.
+// Enter the alternate screen buffer (vim / less / htop / tmux pattern).
+// `\e[?1049h` saves the cursor + switches to a fresh canvas; `\e[?1049l`
+// restores the cursor + the original primary-buffer contents on exit, so
+// the user's previous shell output reappears untouched.
 //
-// On resize, do a full refresh:
-//   \e[2J  clear visible viewport
-//   \e[3J  clear scrollback buffer (xterm extension; iTerm2 / Terminal /
-//          GNOME Terminal / kitty / Windows Terminal honor this)
-//   \e[H   cursor home
-// Then Ink + Static (which is keyed on resizeNonce in REPL.tsx)
-// re-mounts and re-prints every committed turn at the new width. Net
-// effect: the user sees a clean reflow at the new size with no fossil
-// frames piling up in scrollback.
+// Trade-off: altscreen has no native scrollback. Chat history scrolls past
+// the top of the viewport and is lost — Ink's <Static> still reprints what
+// fits on the next render (e.g. after resize) but the user can't mouse-
+// wheel back to earlier turns. The vim-like overlay UX is the explicit
+// goal here, accepted in exchange for that limitation.
+const ENTER_ALT = '\x1b[?1049h';
+const EXIT_ALT = '\x1b[?1049l';
+process.stdout.write(ENTER_ALT);
+
+let _altRestored = false;
+const restoreScreen = (): void => {
+  if (_altRestored) return;
+  _altRestored = true;
+  try { process.stdout.write(EXIT_ALT); } catch { /* nothing to do on a closed pipe */ }
+};
+process.on('exit', restoreScreen);
+process.on('uncaughtException', (err) => {
+  restoreScreen();
+  // Re-throw so Node still surfaces the error and exits non-zero.
+  throw err;
+});
+
+// On resize, repaint the visible viewport. `\e[3J` (clear scrollback) is
+// meaningless inside altscreen so we drop it. Ink + Static (keyed on
+// resizeNonce in REPL.tsx) re-mounts and re-prints every committed turn
+// at the new width.
 let _lastCols = process.stdout.columns ?? 0;
 let _lastRows = process.stdout.rows ?? 0;
 process.stdout.on('resize', () => {
@@ -55,7 +70,7 @@ process.stdout.on('resize', () => {
   if (cols !== _lastCols || rows !== _lastRows) {
     _lastCols = cols;
     _lastRows = rows;
-    process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+    process.stdout.write('\x1b[2J\x1b[H');
   }
 });
 
@@ -71,5 +86,6 @@ const { waitUntilExit } = render(
 
 waitUntilExit().then(() => {
   client.close();
+  restoreScreen();
   process.exit(0);
 });
