@@ -1,25 +1,30 @@
 import React from 'react';
 import { render } from '@openprogram/ink';
 import { REPL } from './screens/REPL.js';
+import { Demo } from './screens/Demo.js';
 import { BackendClient } from './ws/client.js';
 import { ThemeProvider } from './theme/ThemeProvider.js';
 import { queryTerminalBg } from './theme/oscQuery.js';
 import { setCachedSystemTheme } from './theme/systemTheme.js';
 
-function parseArgs(argv: string[]): { ws: string } {
+function parseArgs(argv: string[]): { ws: string; demo: boolean } {
   let ws = process.env.OPENPROGRAM_WS ?? 'ws://127.0.0.1:8765/ws';
+  let demo = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--ws' && argv[i + 1]) {
       ws = argv[i + 1]!;
       i++;
     }
+    if (argv[i] === '--demo') {
+      demo = true;
+    }
   }
-  return { ws };
+  return { ws, demo };
 }
 
-const { ws } = parseArgs(process.argv.slice(2));
+const { ws, demo } = parseArgs(process.argv.slice(2));
 const client = new BackendClient(ws);
-client.connect();
+if (!demo) client.connect();
 
 // OSC 11 (background-color query) for the auto theme. The reply lands
 // via setCachedSystemTheme whenever it arrives; ThemeProvider's
@@ -36,13 +41,10 @@ process.on('SIGTERM', () => process.exit(0));
 // flex tree, ScrollView handles overflow internally. On exit alt-
 // screen is restored and the user's prior terminal state comes back.
 async function main(): Promise<void> {
-  const instance = await render(
-    <ThemeProvider>
-      <REPL client={client} />
-    </ThemeProvider>,
-    { exitOnCtrlC: false },
-  );
-
+  const root = demo
+    ? <ThemeProvider><Demo /></ThemeProvider>
+    : <ThemeProvider><REPL client={client} /></ThemeProvider>;
+  const instance = await render(root, { exitOnCtrlC: false });
   await instance.waitUntilExit();
   client.close();
   process.exit(0);
