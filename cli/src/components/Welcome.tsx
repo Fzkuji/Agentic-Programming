@@ -203,13 +203,24 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
     mode = 'none';
   }
 
-  // Width per tile. Always 4 columns when cols >= 50; below that fall back
-  // to a 2-col grid (4 rows of 2 tiles). Clamp to a minimum so a sudden
-  // resize down to ~10 cols doesn't produce negative widths and crash Ink.
-  const fourAcross = cols >= 50;
-  const rawTileWidth = fourAcross
-    ? Math.floor((width - 4) / 4)
-    : Math.floor((width - 4) / 2);
+  // Width per tile. Each Column has paddingX={1} (= 2 chars overhead) so
+  // the effective per-tile slot in the panel is tileWidth + 2. Bug we
+  // saw at 107×41: rawTileWidth was computed as (panelInner / 4) without
+  // accounting for that padding — 4 × (25+2) = 108 > 103 inner = yoga
+  // overflow → entire Welcome panel disappears at certain heights where
+  // the stack gets tall enough that yoga can't compress it any more.
+  //
+  // Each Column needs ~12 chars for "0 channels" + at least one item.
+  // 12 + 2 (padding) = 14. So 4-across needs an inner width of ~56.
+  // Below that we fall back to the 2-col grid (4 rows of 2 tiles).
+  const PADDING_PER_TILE = 2;
+  const innerPanel = Math.max(0, width - 4);   // Welcome panel paddingX={2}
+  const minTileSlot = 14;                      // tileWidth 12 + padding 2
+  const fourAcross = innerPanel >= minTileSlot * 4;
+  const tilesPerRow = fourAcross ? 4 : 2;
+  const rawTileWidth = Math.floor(innerPanel / tilesPerRow) - PADDING_PER_TILE;
+  // Clamp to a minimum so a sudden resize down to ~10 cols doesn't
+  // produce negative widths and crash Ink.
   const tileWidth = Math.max(8, rawTileWidth);
   const twoSubCols = cols >= 130;
   // The 4 most useful tiles when only one row fits.
@@ -241,14 +252,24 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
       marginBottom={1}
       width={width}
     >
-      {/* Title row */}
-      <Box justifyContent="space-between">
-        <Text bold color={colors.error}>
-          OpenProgram
-        </Text>
-        <Text color={colors.muted}>
-          {agentName} <Text color={colors.border}>·</Text> {model}
-        </Text>
+      {/* Title row — same flexShrink trick as BottomBar so the right
+          side (agent · model) stays anchored to the right edge when
+          the window narrows; only the left "OpenProgram" label
+          truncates. width={width-4} matches the Welcome panel's inner
+          width (border 2 + paddingX*2 = 4) — without an explicit width
+          on this row Yoga sizes it to content and space-between has
+          no extra space to distribute. */}
+      <Box justifyContent="space-between" width={Math.max(20, width - 6)}>
+        <Box flexShrink={1}>
+          <Text bold color={colors.error} wrap="truncate-end">
+            OpenProgram
+          </Text>
+        </Box>
+        <Box flexShrink={0}>
+          <Text color={colors.muted}>
+            {agentName} <Text color={colors.border}>·</Text> {model}
+          </Text>
+        </Box>
       </Box>
 
       {/* Tile layout — mode switches based on terminal height. */}
