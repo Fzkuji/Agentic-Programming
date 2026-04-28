@@ -890,9 +890,34 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             setPickerKind('channel_qr_wait');
             return;
           }
-          // Existing-account path: continue to binding-mode picker.
-          setChosenAccount(it.value);
-          setPickerKind('channel_action');
+          // Existing account: bind the current TUI conversation as a
+          // catch-all in one keypress. Same default the wechat
+          // QR-login `done` envelope picks. To change a binding mode
+          // (per-peer / list / delete) the user runs /bindings.
+          if (!conversationId) {
+            pushSystem(
+              'No active conversation. Send a message first, ' +
+              'then /channel will bind to it.',
+            );
+            setPickerKind(null);
+            setChosenChannel(undefined);
+            return;
+          }
+          client.send({
+            action: 'attach_session',
+            session_id: conversationId,
+            channel: chosenChannel,
+            account_id: it.value,
+            peer_kind: 'direct',
+            peer_id: '*',
+          } as never);
+          pushSystem(
+            `✅ Bound this conversation to ${chosenChannel}:${it.value}. ` +
+            `Every inbound message lands here. Tweak via /bindings.`,
+          );
+          setPickerKind(null);
+          setChosenChannel(undefined);
+          setChosenAccount(undefined);
         }}
         onCancel={() => {
           setPickerKind('channel');
@@ -1061,6 +1086,29 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             account_id: registerForm.accountId,
             token: t,
           });
+          // Same one-step semantics as wechat QR done: token saved
+          // → bind the current TUI conversation as catch-all so the
+          // user goes from "I want to add a telegram bot" to
+          // "messages flow into my chat" in one keystroke.
+          if (conversationId && registerForm.channel && registerForm.accountId) {
+            client.send({
+              action: 'attach_session',
+              session_id: conversationId,
+              channel: registerForm.channel,
+              account_id: registerForm.accountId,
+              peer_kind: 'direct',
+              peer_id: '*',
+            } as never);
+            pushSystem(
+              `✅ Registered ${registerForm.channel}:${registerForm.accountId} ` +
+              `and bound this conversation to receive inbound messages.`,
+            );
+          } else {
+            pushSystem(
+              `✅ Registered ${registerForm.channel}:${registerForm.accountId}. ` +
+              `Open a chat and run /channel to bind.`,
+            );
+          }
           setPickerKind(null);
           setRegisterForm({});
           setChosenChannel(undefined);
