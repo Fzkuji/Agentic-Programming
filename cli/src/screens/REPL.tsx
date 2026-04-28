@@ -88,7 +88,15 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [bellEnabled, setBellEnabled] = useState(true);
   const [modelsList, setModelsList] = useState<string[]>([]);
   const [pastConversations, setPastConversations] = useState<
-    Array<{ id?: string; title?: string; created_at?: number }>
+    Array<{
+      id?: string;
+      title?: string;
+      created_at?: number;
+      /** Channel name for channel-bound sessions ("wechat", "telegram", …). */
+      source?: string;
+      /** Display name for the bound peer (e.g. WeChat nickname). */
+      peer_display?: string;
+    }>
   >([]);
   const [pickerKind, setPickerKind] = useState<
     null
@@ -128,6 +136,8 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     const t = setInterval(() => setTick((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, [activity]);
+
+
 
   const pushSystem = (text: string) =>
     setCommitted((m) => [
@@ -370,15 +380,40 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           pushSystem(`Failed to add account: ${data?.error ?? 'unknown error'}`);
         }
       } else if (ev.type === 'history_list') {
+        // Initial snapshot at WS connect — only in-memory webui sessions.
+        // /resume sends list_conversations to refresh with disk-based
+        // (channel-bound) sessions too.
         setPastConversations(ev.data ?? []);
       } else if (ev.type === 'conversations_list') {
-        const data = ev.data ?? [];
-        const lines = data.length === 0
-          ? ['(no past sessions)']
-          : data.slice(0, 20).map((c: { id?: string; title?: string }) =>
-              `  ${c.id?.slice(0, 18) ?? '?'}  ${c.title ?? ''}`,
-            );
-        pushSystem(`Sessions:\n${lines.join('\n')}`);
+        // Richer list including channel-bound sessions on disk. Each
+        // entry may carry `source` ("wechat"/"telegram"/…) and
+        // `peer_display` (the WeChat nickname etc.) so /resume can tag
+        // the picker rows.
+        setPastConversations(ev.data ?? []);
+      } else if (ev.type === 'search_results') {
+        // SessionDB FTS5 hits — render each as a system note so the
+        // user can pick a session_id to /resume from. Picker
+        // integration (open with these as items) is a follow-up;
+        // for now the inline list is enough to find what you typed
+        // /search for.
+        const data = ev.data ?? { query: '', results: [], total: 0 };
+        if (!data.total) {
+          pushSystem(`No matches for "${data.query}".`);
+        } else {
+          const lines = [`Search "${data.query}" — ${data.total} result(s):`];
+          for (const r of data.results.slice(0, 20)) {
+            const titleStr = r.session_title ?? r.session_id ?? '?';
+            const sourceTag = r.session_source ? ` [${r.session_source}]` : '';
+            const roleTag = r.role === 'user' ? '👤' : '🤖';
+            lines.push(`  ${roleTag} ${titleStr}${sourceTag}`);
+            lines.push(`     ${r.preview}`);
+            lines.push(`     /resume ${r.session_id}`);
+          }
+          if (data.total > 20) {
+            lines.push(`  … and ${data.total - 20} more (refine your query)`);
+          }
+          pushSystem(lines.join('\n'));
+        }
       } else if (ev.type === 'channel_bindings') {
         const data = ev.data ?? [];
         const lines = data.length === 0
@@ -438,6 +473,30 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           client.send({ action: 'list_agents' });
           client.send({ action: 'stats' });
         }
+      } else if (ev.type === 'channel_turn') {
+        // Live wechat / telegram inbound. Channels worker just persisted
+        // a user message + assistant reply for some session; if the TUI
+        // is currently viewing that session, append both turns to the
+        // transcript so the chat updates without a /resume refresh.
+        const d = ev.data;
+        if (d.conv_id !== conversationId) return;
+        const newTurns: Turn[] = [];
+        if (d.user?.text) {
+          const tag = d.user.peer_display ? `[${d.user.source ?? 'channel'}:${d.user.peer_display}] ` : '';
+          newTurns.push({
+            id: d.user.id ?? `cu-${Date.now()}`,
+            role: 'user',
+            text: tag + d.user.text,
+          });
+        }
+        if (d.assistant?.text) {
+          newTurns.push({
+            id: d.assistant.id ?? `ca-${Date.now()}`,
+            role: 'assistant',
+            text: d.assistant.text,
+          });
+        }
+        if (newTurns.length > 0) setCommitted((m) => [...m, ...newTurns]);
       } else if (ev.type === 'error') {
         const data = (ev as { data?: { message?: string } }).data;
         const msg = data?.message ?? 'unknown error';
@@ -506,6 +565,15 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   const onSubmit = (text: string) => {
     if (!text.trim()) return;
+    // Save EVERY submitted line — chat messages and slash commands —
+    // to up-arrow history. Previously only non-slash-handled inputs
+    // landed in history; slash commands like `/channel` would
+    // disappear after submit and ↑ wouldn't bring them back.
+    setHistory((h) => {
+      if (h[h.length - 1] === text) return h;
+      appendHistory(text);
+      return [...h, text].slice(-500);
+    });
     if (text.startsWith('/')) {
       const handled = handleSlash(text, {
         client,
@@ -602,11 +670,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       // Mirror server-side behaviour: first user message becomes the title.
       setConversationTitle(text.slice(0, 50) + (text.length > 50 ? '…' : ''));
     }
-    setHistory((h) => {
-      if (h[h.length - 1] === text) return h;
-      appendHistory(text);
-      return [...h, text].slice(-500);
-    });
     startTurn('Thinking');
     client.send({
       action: 'chat',
@@ -819,19 +882,34 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       />
     );
   } else if (pickerKind === 'resume') {
-    const items: PickerItem<string>[] = pastConversations
+    // Channel-bound sessions (source="wechat"/"telegram"/…) bubble to
+    // the top with a [channel:peer] tag prefix so users can pick a
+    // wechat conversation directly without scanning random IDs.
+    const sorted = [...pastConversations].sort((a, b) => {
+      const aChan = a.source ? 0 : 1;
+      const bChan = b.source ? 0 : 1;
+      if (aChan !== bChan) return aChan - bChan;
+      return (b.created_at ?? 0) - (a.created_at ?? 0);
+    });
+    const items: PickerItem<string>[] = sorted
       .filter((c) => c.id)
-      .map((c) => ({
-        label: (c.title || c.id || '').slice(0, 60),
-        description: `${c.id ?? ''} · ${tsToDate(c.created_at)}`,
-        value: c.id!,
-      }));
+      .map((c) => {
+        const tag = c.source
+          ? `[${c.source}${c.peer_display ? `:${c.peer_display}` : ''}] `
+          : '';
+        const title = c.title || c.id || '';
+        return {
+          label: (tag + title).slice(0, 60),
+          description: `${c.id ?? ''} · ${tsToDate(c.created_at)}`,
+          value: c.id!,
+        };
+      });
     pickerNode = (
       <Picker
         title="Resume a session"
         items={items}
         onSelect={(it) => {
-          client.send({ action: 'load_conversation', id: it.value });
+          client.send({ action: 'load_conversation', conv_id: it.value });
           setConversationId(it.value);
           setCommitted([]);
           setStreaming(null);
@@ -842,12 +920,20 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     );
   }
 
+  // Layout — main-buffer (no alt-screen). Each render appends at the
+  // terminal cursor; old renders scroll into terminal scrollback
+  // where the user's native ⌘↑ / wheel picks them up. No ScrollBox,
+  // no overflow tricks, no flex-shrink — content takes natural
+  // height. Welcome shows on a fresh empty session only; once the
+  // transcript has anything in it (resume, first reply), Welcome
+  // disappears so it doesn't re-print every render and cycle into
+  // scrollback redundantly.
   return (
     <Box flexDirection="column">
       <Messages
         committed={committed}
         streaming={streaming}
-        welcome={stats ? stats : undefined}
+        welcome={pickerNode ? undefined : (stats ?? undefined)}
       />
       {activity ? (
         <Spinner
@@ -872,20 +958,20 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         />
       )}
       <BottomBar
-        agent={agent}
-        model={model}
-        conversationId={conversationId}
-        conversationTitle={conversationTitle}
-        busy={!!activity}
-        slashMode={slashMode}
-        tokens={conversationId ? tokensByConv[conversationId] : undefined}
-        toolsOn={toolsOn}
-        permissionMode={permissionMode}
-        thinkingEffort={thinkingEffort}
-        connState={connState}
-        contextWindow={conversationId ? windowByConv[conversationId] : undefined}
-        exitPending={exitPending}
-      />
+          agent={agent}
+          model={model}
+          conversationId={conversationId}
+          conversationTitle={conversationTitle}
+          busy={!!activity}
+          slashMode={slashMode}
+          tokens={conversationId ? tokensByConv[conversationId] : undefined}
+          toolsOn={toolsOn}
+          permissionMode={permissionMode}
+          thinkingEffort={thinkingEffort}
+          connState={connState}
+          contextWindow={conversationId ? windowByConv[conversationId] : undefined}
+          exitPending={exitPending}
+        />
     </Box>
   );
 };

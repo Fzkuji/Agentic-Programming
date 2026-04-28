@@ -22,7 +22,7 @@ export type WsRequest =
   | { action: 'delete_agent'; id: string }
   | { action: 'set_default_agent'; id: string }
   | { action: 'list_conversations' }
-  | { action: 'load_conversation'; id: string }
+  | { action: 'load_conversation'; conv_id: string }
   | { action: 'delete_conversation'; id: string }
   | { action: 'list_channel_accounts' }
   | { action: 'add_channel_account'; channel: string; account_id: string; token: string }
@@ -137,6 +137,44 @@ export interface ErrorEnvelope {
   data?: { message?: string };
 }
 
+/**
+ * A complete inbound channel turn (user message + assistant reply) just
+ * landed for some session. Emitted by the channels worker after it
+ * persists the turn so any TUI / web client viewing that conv_id can
+ * append both messages to its transcript live, no /resume refresh.
+ */
+export interface ChannelTurnEnvelope {
+  type: 'channel_turn';
+  data: {
+    conv_id: string;
+    agent_id?: string;
+    user: { id?: string; text?: string; peer_display?: string; source?: string };
+    assistant: { id?: string; text?: string; source?: string };
+  };
+}
+
+/**
+ * SessionDB FTS5 search results. Sent by the server in response to a
+ * ``search_messages`` action; the TUI's /search command consumes these
+ * to render a picker of matched messages with their session context.
+ */
+export interface SearchResultsEnvelope {
+  type: 'search_results';
+  data: {
+    query: string;
+    total: number;
+    results: Array<{
+      session_id: string;
+      session_title?: string;
+      session_source?: string;
+      message_id: string;
+      role: string;
+      preview: string;
+      timestamp?: number;
+    }>;
+  };
+}
+
 export type WsEnvelope =
   | ChatAck
   | ChatResponse
@@ -153,6 +191,8 @@ export type WsEnvelope =
   | ChannelAccountsEnvelope
   | ChannelAccountAddedEnvelope
   | BrowserResultEnvelope
+  | ChannelTurnEnvelope
+  | SearchResultsEnvelope
   | ErrorEnvelope
   | { type: 'pong' };
 

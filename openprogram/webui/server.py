@@ -2394,6 +2394,51 @@ async def _handle_ws_command(ws, cmd: dict):
         if fq is not None:
             fq.put(answer)
 
+    elif action == "search_messages":
+        # FTS-backed search across past sessions. Frontend (TUI /search,
+        # webui search bar) sends the query; we hit SessionDB.search_messages
+        # and return the matched rows joined with their session title /
+        # source so each hit can show "from <session>".
+        query = (cmd.get("query") or "").strip()
+        agent_id_filter = cmd.get("agent_id") or None
+        limit = int(cmd.get("limit") or 50)
+        if not query:
+            await ws.send_text(json.dumps({
+                "type": "search_results",
+                "data": {"query": query, "results": [], "total": 0},
+            }, default=str))
+        else:
+            try:
+                from openprogram.agent.session_db import default_db
+                hits = default_db().search_messages(
+                    query, agent_id=agent_id_filter, limit=limit,
+                )
+            except Exception as e:
+                _log(f"[search] failed: {e}")
+                hits = []
+            results = []
+            for h in hits:
+                # Trim content for the picker preview; full content is
+                # available via load_conversation when the user picks one.
+                content = h.get("content") or ""
+                preview = content.strip().replace("\n", " ")
+                if len(preview) > 120:
+                    preview = preview[:117] + "…"
+                results.append({
+                    "session_id": h.get("session_id"),
+                    "session_title": h.get("session_title"),
+                    "session_source": h.get("session_source"),
+                    "message_id": h.get("id"),
+                    "role": h.get("role"),
+                    "preview": preview,
+                    "timestamp": h.get("timestamp"),
+                })
+            await ws.send_text(json.dumps({
+                "type": "search_results",
+                "data": {"query": query, "results": results,
+                          "total": len(results)},
+            }, default=str))
+
     elif action == "list_conversations":
         # Snapshot the webui's own conversations (local REPL sessions)
         # plus per-agent sessions on disk (channel-bound chats live

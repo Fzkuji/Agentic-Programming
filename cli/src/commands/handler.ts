@@ -204,15 +204,39 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     }
 
     case 'resume': {
+      // Refresh the conversation list before opening the picker — the
+      // server's list_conversations action returns BOTH in-memory webui
+      // sessions AND on-disk per-agent sessions (where channel-bound
+      // chats live). Without this refresh the picker only shows the
+      // history_list snapshot from connect time, which omits any
+      // wechat / telegram sessions started by the channels worker.
+      ctx.client.send({ action: 'list_conversations' });
       ctx.openPicker('resume');
       return true;
     }
 
     case 'search': {
-      // Same picker as /resume — Picker has a built-in filter, so user can
-      // type to narrow titles. Different name on purpose so it shows up
-      // distinctly in the slash menu.
-      ctx.openPicker('resume');
+      // Two modes:
+      //   /search                 → falls back to the resume picker (title
+      //                              filter only — kept for muscle-memory)
+      //   /search <query…>        → SessionDB FTS5 across every session's
+      //                              messages; results land via WS as a
+      //                              ``search_results`` envelope and the
+      //                              picker is opened with those rows
+      const query = args.join(' ').trim();
+      if (!query) {
+        ctx.client.send({ action: 'list_conversations' });
+        ctx.openPicker('resume');
+        return true;
+      }
+      ctx.client.send({
+        action: 'search_messages',
+        query,
+        limit: 50,
+      } as never);
+      ctx.pushSystem(`Searching for "${query}"…`);
+      // Picker opens when the search_results envelope arrives — see
+      // ws/client.ts handler for that frame type.
       return true;
     }
 
