@@ -218,15 +218,17 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const PADDING_PER_TILE = 2;
   const innerPanel = Math.max(0, width - 6);
   // Each Column needs ~12 chars for "0 channels" + an item. 12 + 2
-  // padding = 14 per tile slot. Four across needs inner ≥ 4×14 + 1
-  // buffer = 57. Below that fall back to 2-col grid.
+  // padding = 14 per tile slot. Four across needs inner ≥ 4×14 + safety
+  // buffer. Below that fall back to 2-col grid.
   const minTileSlot = 14;
-  const fourAcross = innerPanel >= minTileSlot * 4 + 1;
+  // 4-col safety margin. Empirically buf=1 still triggers yoga blanking
+  // at some sizes (119×50 reproduced in the wild). 4 is enough for any
+  // size we care about and only costs 1-2 chars per tile.
+  const SAFETY_BUFFER = 4;
+  const fourAcross = innerPanel >= minTileSlot * 4 + SAFETY_BUFFER;
   const tilesPerRow = fourAcross ? 4 : 2;
-  // 1-col safety margin: keep total tile width strictly under
-  // innerPanel so equal-width yoga rounding never overflows.
   const rawTileWidth =
-    Math.floor((innerPanel - 1) / tilesPerRow) - PADDING_PER_TILE;
+    Math.floor((innerPanel - SAFETY_BUFFER) / tilesPerRow) - PADDING_PER_TILE;
   const tileWidth = Math.max(8, rawTileWidth);
   const twoSubCols = cols >= 130;
   // The 4 most useful tiles when only one row fits.
