@@ -940,7 +940,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         label: 'Bind ALL inbound to this conversation',
         description: conversationId
           ? `Every ${chosenChannel}:${chosenAccount} message → current chat`
-          : 'Send a message first to create a session',
+          : `Every ${chosenChannel}:${chosenAccount} message → a fresh chat (auto-created)`,
         value: '__catchall__',
       },
       {

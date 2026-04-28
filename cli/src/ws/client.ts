@@ -30,7 +30,21 @@ export type WsRequest =
   | { action: 'add_binding'; binding: Record<string, unknown> }
   | { action: 'remove_binding'; index: number }
   | { action: 'list_session_aliases' }
-  | { action: 'attach_session'; channel: string; account_id: string; peer: string; conversation_id: string }
+  | {
+      action: 'attach_session';
+      channel: string;
+      account_id: string;
+      // Mirrors server.py:attach_session — session_id + peer_kind +
+      // peer_id are the fields the handler actually reads. Older
+      // call sites passed `peer` / `conversation_id` which the
+      // server silently dropped.
+      session_id: string;
+      peer_kind?: 'direct' | 'group' | 'channel';
+      peer_id: string;
+      // Legacy fields kept optional so unmigrated callers compile.
+      peer?: string;
+      conversation_id?: string;
+    }
   | { action: 'detach_session'; channel: string; account_id: string; peer: string };
 
 export interface ChatAck {

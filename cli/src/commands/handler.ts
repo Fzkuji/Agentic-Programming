@@ -147,19 +147,24 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
         return true;
       }
       const [channel, account_id, peer] = args as [string, string, string];
-      if (!ctx.currentConversation) {
-        ctx.pushSystem('No current conversation. Send a message first to create one.');
-        return true;
-      }
+      // Server lazy-creates the SessionDB row when missing — see
+      // attach_session WS handler. So if currentConversation is
+      // unset, we send empty and the UI updates once a chat lands.
+      // Honest messaging without forcing a dummy turn first.
       ctx.client.send({
         action: 'attach_session',
         channel,
         account_id,
         peer,
-        conversation_id: ctx.currentConversation,
+        session_id: ctx.currentConversation ?? '',
+        peer_kind: 'direct',
+        peer_id: peer,
       });
       ctx.pushSystem(
-        `Attached ${channel}:${account_id}:${peer} → ${ctx.currentConversation}`,
+        ctx.currentConversation
+          ? `Attached ${channel}:${account_id}:${peer} → ${ctx.currentConversation}`
+          : `Attached ${channel}:${account_id}:${peer}. Open a chat or wait for ` +
+            `inbound — the session will materialize on first message.`,
       );
       return true;
     }
