@@ -1934,18 +1934,28 @@ async def _handle_ws_command(ws, cmd: dict):
         except Exception:
             top_sessions = []
 
-        # Default tools available to the agent.
+        # Default tools available to the agent. tools_count counts the
+        # full registry; top_tools is the truncated preview the Welcome
+        # banner shows.
         try:
-            from openprogram.tools import DEFAULT_TOOLS as _DT
+            from openprogram.tools import (
+                ALL_TOOLS as _ALL,
+                DEFAULT_TOOLS as _DT,
+            )
+            tools_count = len(_ALL)
             top_tools = list(_DT)[:8]
         except Exception:
+            tools_count = 0
             top_tools = []
 
         # Providers registered.
         try:
             from openprogram.providers import get_providers as _gp
-            top_providers = list(_gp())[:8]
+            providers_list = list(_gp())
+            providers_count = len(providers_list)
+            top_providers = providers_list[:8]
         except Exception:
+            providers_count = 0
             top_providers = []
 
         # Channel accounts logged in.
@@ -1958,8 +1968,10 @@ async def _handle_ws_command(ws, cmd: dict):
                         "channel": ch,
                         "id": getattr(acc, "id", None) or acc.account_id,
                     })
+            channels_count = len(top_channels)
             top_channels = top_channels[:6]
         except Exception:
+            channels_count = 0
             top_channels = []
 
         await ws.send_text(json.dumps({
@@ -1972,6 +1984,9 @@ async def _handle_ws_command(ws, cmd: dict):
                 "applications_count": len(applications_only),
                 "skills_count": skills_count,
                 "conversations_count": conversations_count,
+                "tools_count": tools_count,
+                "providers_count": providers_count,
+                "channels_count": channels_count,
                 "top_functions": top_functions,
                 "top_applications": top_applications,
                 "top_skills": top_skills,

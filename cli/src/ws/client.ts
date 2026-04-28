@@ -137,12 +137,29 @@ export interface StatsEnvelope {
   type: 'stats';
   data: {
     agent?: { id?: string; name?: string; model?: string } | null;
+    // Counts — every tile in Welcome's 8-grid wants one of these.
+    // Welcome falls back to top_*.length when the count is missing,
+    // so it's resilient to old servers, but fresh servers send all
+    // of these explicitly so 0 renders as '0' instead of '—'.
     agents_count?: number;
     programs_count?: number;
     skills_count?: number;
     conversations_count?: number;
+    functions_count?: number;
+    applications_count?: number;
+    tools_count?: number;
+    providers_count?: number;
+    channels_count?: number;
+    // Top-N preview lists — one entry per Welcome tile.
     top_programs?: Array<{ name?: string; category?: string }>;
+    top_functions?: Array<{ name?: string; category?: string }>;
+    top_applications?: Array<{ name?: string; category?: string }>;
     top_skills?: Array<{ name?: string; slug?: string }>;
+    top_agents?: Array<{ id?: string; name?: string }>;
+    top_sessions?: Array<{ id?: string; title?: string }>;
+    top_tools?: string[];
+    top_providers?: string[];
+    top_channels?: Array<{ channel?: string; id?: string }>;
   };
 }
 

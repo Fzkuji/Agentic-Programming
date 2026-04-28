@@ -5,10 +5,18 @@ import { useTerminalWidth, usePanelWidth, useTerminalHeight } from '../utils/use
 
 export interface WelcomeStats {
   agent?: { id?: string; name?: string; model?: string } | null;
+  // Total counts — server sends these so 0 is reachable. Welcome
+  // falls back to top_*.length when an old server omits the count.
   agents_count?: number;
   programs_count?: number;
   skills_count?: number;
   conversations_count?: number;
+  functions_count?: number;
+  applications_count?: number;
+  tools_count?: number;
+  providers_count?: number;
+  channels_count?: number;
+  // Top-N preview lists.
   top_programs?: Array<{ name?: string; category?: string }>;
   top_functions?: Array<{ name?: string; category?: string }>;
   top_applications?: Array<{ name?: string; category?: string }>;
@@ -18,9 +26,6 @@ export interface WelcomeStats {
   top_tools?: string[];
   top_providers?: string[];
   top_channels?: Array<{ channel?: string; id?: string }>;
-  // Counts for the split-out tiles. If absent, derived from top_*.length.
-  functions_count?: number;
-  applications_count?: number;
 }
 
 export interface WelcomeProps {
@@ -37,21 +42,15 @@ interface ColumnSpec {
 
 const Column: React.FC<{
   spec: ColumnSpec;
+  width: number;
   /** When true, items wrap into 2 sub-columns inside the column. */
   twoCols: boolean;
   /** Cap on number of item rows shown (truncates with "+N more"). */
   maxRows: number;
-}> = ({ spec, twoCols, maxRows }) => {
+}> = ({ spec, width, twoCols, maxRows }) => {
   const colors = useColors();
-  // No explicit pixel widths anywhere in Column — every cell uses
-  // flex distribution. Why: explicit widths combined with paddingX
-  // and equal-distribution rounding repeatedly tripped yoga's
-  // invalid-dimension path (ink renderer.ts:55-72) at boundary
-  // sizes (107×41, 119×50, 110×36 — every fix moved the failure
-  // to a new size because each fix only tightened ONE rounding
-  // edge). flex={1} with flexBasis=0 lets yoga distribute the
-  // available width however it wants without needing pixel-perfect
-  // arithmetic from us.
+  const innerWidth = Math.max(8, width - 2);
+  const subWidth = twoCols ? Math.floor(innerWidth / 2) : innerWidth;
   const limitedItems = spec.items.slice(0, twoCols ? maxRows * 2 : maxRows);
   const overflow = spec.items.length - limitedItems.length;
   const rows: Array<[string, string | undefined]> = [];
@@ -64,7 +63,11 @@ const Column: React.FC<{
     for (const it of limitedItems) rows.push([it, undefined]);
   }
   return (
-    <Box flexDirection="column" flexGrow={1} flexShrink={1} flexBasis={0} paddingX={1}>
+    <Box flexDirection="column" width={width} paddingX={1}>
+      {/* Count + label flush-left with the items below — uniform vertical
+          alignment is easier to scan than centered headers over ragged
+          lists. Count in primary orange, label in bold white so the
+          section header reads distinct from the dim-gray items. */}
       <Box>
         <Text bold color={colors.primary}>
           {spec.count}
@@ -73,13 +76,13 @@ const Column: React.FC<{
       </Box>
       {rows.map(([a, b], i) => (
         <Box key={i}>
-          <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+          <Box width={subWidth}>
             <Text color={colors.muted} wrap="truncate-end">
               {a}
             </Text>
           </Box>
           {twoCols && b ? (
-            <Box flexGrow={1} flexShrink={1} flexBasis={0}>
+            <Box width={subWidth}>
               <Text color={colors.muted} wrap="truncate-end">
                 {b}
               </Text>
@@ -102,72 +105,79 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
   const agentName = stats?.agent?.name ?? stats?.agent?.id ?? '—';
   const model = stats?.agent?.model ?? '—';
 
+  // pickCount: prefer the explicit total count from the server. Fall
+  // back to the preview-list length when the server is older. Returns
+  // a number so fmt(0) renders as '0' instead of '—'. The previous
+  // logic mixed undefined and 0 in a way that produced em-dash even
+  // when the server sent valid zeros.
+  const pickCount = (
+    explicit: number | undefined,
+    listLen: number | undefined,
+  ): number | undefined => {
+    if (typeof explicit === 'number') return explicit;
+    if (typeof listLen === 'number') return listLen;
+    return undefined;
+  };
+
   const skills: ColumnSpec = {
-    count: fmt(stats?.skills_count),
+    count: fmt(pickCount(stats?.skills_count, stats?.top_skills?.length)),
     label: 'skills',
     items: (stats?.top_skills ?? [])
       .map((s) => s.name)
       .filter((s): s is string => !!s),
   };
   const agentsCol: ColumnSpec = {
-    count: fmt(stats?.agents_count),
+    count: fmt(pickCount(stats?.agents_count, stats?.top_agents?.length)),
     label: 'agents',
     items: (stats?.top_agents ?? [])
       .map((a) => a.name ?? a.id)
       .filter((s): s is string => !!s),
   };
   const sessionsCol: ColumnSpec = {
-    count: fmt(stats?.conversations_count),
+    count: fmt(pickCount(stats?.conversations_count, stats?.top_sessions?.length)),
     label: 'sessions',
     items: (stats?.top_sessions ?? [])
       .map((s) => s.title ?? s.id)
       .filter((s): s is string => !!s),
   };
   const tools: ColumnSpec = {
-    count: fmt(stats?.top_tools?.length),
+    count: fmt(pickCount(stats?.tools_count, stats?.top_tools?.length)),
     label: 'tools',
     items: stats?.top_tools ?? [],
   };
   const providers: ColumnSpec = {
-    count: fmt(stats?.top_providers?.length),
+    count: fmt(pickCount(stats?.providers_count, stats?.top_providers?.length)),
     label: 'providers',
     items: stats?.top_providers ?? [],
   };
   const channels: ColumnSpec = {
-    count: fmt(stats?.top_channels?.length),
+    count: fmt(pickCount(stats?.channels_count, stats?.top_channels?.length)),
     label: 'channels',
     items: (stats?.top_channels ?? []).map((c) =>
       c.channel && c.id ? `${c.channel}:${c.id}` : c.channel ?? c.id ?? '',
     ),
   };
-  // Programs are split into "functions" (meta/builtin/external runtime
-  // helpers) and "applications" (the app/ subdir projects). Fall back to
-  // top_programs when the server hasn't been updated yet.
+  // Programs split: "functions" = meta/builtin/external runtime helpers,
+  // "applications" = the app/ subdir projects. When server doesn't
+  // ship the split lists yet, derive them from top_programs by
+  // category. Crucially, count and items now derive from the SAME
+  // source — no more "1 functions" while listing 6 names.
   const fallbackPrograms = stats?.top_programs ?? [];
   const fnFromFallback = fallbackPrograms.filter(
     (p) => p.category && p.category !== 'app',
   );
   const appFromFallback = fallbackPrograms.filter((p) => p.category === 'app');
+  const fnItems = stats?.top_functions ?? fnFromFallback;
+  const appItems = stats?.top_applications ?? appFromFallback;
   const functions: ColumnSpec = {
-    count: fmt(
-      stats?.functions_count
-        ?? (stats?.top_functions?.length
-          ?? (fnFromFallback.length || stats?.programs_count)),
-    ),
+    count: fmt(pickCount(stats?.functions_count, fnItems.length)),
     label: 'functions',
-    items: (stats?.top_functions ?? fnFromFallback)
-      .map((p) => p.name)
-      .filter((s): s is string => !!s),
+    items: fnItems.map((p) => p.name).filter((s): s is string => !!s),
   };
   const applications: ColumnSpec = {
-    count: fmt(
-      stats?.applications_count
-        ?? (stats?.top_applications?.length ?? appFromFallback.length),
-    ),
+    count: fmt(pickCount(stats?.applications_count, appItems.length)),
     label: 'applications',
-    items: (stats?.top_applications ?? appFromFallback)
-      .map((p) => p.name)
-      .filter((s): s is string => !!s),
+    items: appItems.map((p) => p.name).filter((s): s is string => !!s),
   };
 
   // Always 4×2 grid (8 tiles). Layout order:
@@ -205,25 +215,14 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
     mode = 'none';
   }
 
-  // Welcome panel chrome: round border (1+1=2) + paddingX={2} (2+2=4).
-  // Total = 6 cols of overhead, content area = width - 6.
-  //
-  // Tile layout uses pure flex distribution — no explicit pixel
-  // widths anywhere — so yoga's invalid-dimension path can never
-  // fire (tracked back through user reports at 107×41 / 119×50 /
-  // 110×36 to ink renderer.ts:55-72 returning a height=0 screen
-  // when computed dims are NaN; explicit-width arithmetic kept
-  // tripping that path at boundary sizes).
-  //
-  // The threshold below decides 4-across vs 2-across based on
-  // available content width. Each column needs ~12 cols for the
-  // "0 channels" + item text plus 2 col paddingX = 14 per slot.
-  // Four across wants 4×14=56; add 4 col margin to avoid layouts
-  // that look squished.
-  const innerPanel = Math.max(0, width - 6);
-  const minTileSlot = 14;
-  const fourAcrossMin = minTileSlot * 4 + 4;
-  const fourAcross = innerPanel >= fourAcrossMin;
+  // Width per tile. Always 4 columns when cols >= 50; below that fall back
+  // to a 2-col grid (4 rows of 2 tiles). Clamp to a minimum so a sudden
+  // resize down to ~10 cols doesn't produce negative widths and crash Ink.
+  const fourAcross = cols >= 50;
+  const rawTileWidth = fourAcross
+    ? Math.floor((width - 4) / 4)
+    : Math.floor((width - 4) / 2);
+  const tileWidth = Math.max(8, rawTileWidth);
   const twoSubCols = cols >= 130;
   // The 4 most useful tiles when only one row fits.
   const oneRowSubset = [skills, agentsCol, sessionsCol, tools];
@@ -261,9 +260,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
           width (border 2 + paddingX*2 = 4) — without an explicit width
           on this row Yoga sizes it to content and space-between has
           no extra space to distribute. */}
-      {/* width-7 (not width-6) so the row is strictly narrower than the
-          panel inner area; eliminates another exact-fit yoga edge. */}
-      <Box justifyContent="space-between" width={Math.max(20, width - 7)}>
+      <Box justifyContent="space-between" width={Math.max(20, width - 6)}>
         <Box flexShrink={1}>
           <Text bold color={colors.error} wrap="truncate-end">
             OpenProgram
@@ -284,6 +281,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
               <Column
                 key={c.label}
                 spec={c}
+                width={tileWidth}
                 twoCols={twoSubCols}
                 maxRows={itemsPerTile}
               />
@@ -294,6 +292,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
               <Column
                 key={c.label}
                 spec={c}
+                width={tileWidth}
                 twoCols={twoSubCols}
                 maxRows={itemsPerTile}
               />
@@ -307,6 +306,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
               <Column
                 key={c.label}
                 spec={c}
+                width={tileWidth}
                 twoCols={false}
                 maxRows={0}
               />
@@ -317,6 +317,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
               <Column
                 key={c.label}
                 spec={c}
+                width={tileWidth}
                 twoCols={false}
                 maxRows={0}
               />
@@ -329,13 +330,14 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
             <Column
               key={c.label}
               spec={c}
+              width={tileWidth}
               twoCols={false}
               maxRows={0}
             />
           ))}
         </Box>
       ) : (
-        // Narrow (<minTileSlot*2+SAFETY_BUFFER cols) fallback: 2-across grid.
+        // Narrow (<50 cols) fallback: 2-across grid, drop items if tight.
         <Box flexDirection="column" marginTop={1}>
           {Array.from({ length: Math.ceil(rowAll.length / 2) }).map((_, r) => (
             <Box key={r}>
@@ -343,6 +345,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats }) => {
                 <Column
                   key={c.label}
                   spec={c}
+                  width={tileWidth}
                   twoCols={false}
                   maxRows={mode === 'two-rows-items' ? Math.max(0, itemsPerTile - 1) : 0}
                 />
