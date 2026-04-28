@@ -1,59 +1,40 @@
 """bash tool — run a shell command, return stdout/stderr/exit code.
 
-Layout mirrors Claude Code's src/tools/BashTool/. Protocol pieces split
-across files to stay close to the reference:
-    prompt.py   — the description the LLM sees
-    bash.py     — SPEC + execute()
-    __init__.py — exports the tool record for the registry
+Single source of truth: the @tool decorator builds an AgentTool from
+this function's signature + docstring. Legacy exports (NAME/SPEC/TOOL/
+execute) are derived from the AgentTool so old call sites keep
+working during the migration.
 """
 
 from __future__ import annotations
 
-from typing import Any
-
 from openprogram.backend import get_active_backend
+from openprogram.tools._runtime import to_dict_tool, tool
 
 from .prompt import DEFAULT_MAX_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, DESCRIPTION
 
 
-NAME = "bash"
+# Bash output can be huge (find /, full log dump). 30K matches Claude
+# Code's BashTool default. persist_full=True saves the complete output
+# to disk so the LLM can re-read with the read tool when the truncated
+# view doesn't suffice.
+@tool(
+    name="bash",
+    description=DESCRIPTION,
+    max_result_chars=30_000,
+    persist_full=True,
+    toolset=["core"],
+    unsafe_in=["wechat", "telegram"],   # destructive in public channels
+)
+def bash(command: str,
+        timeout: float | None = None,
+        description: str | None = None) -> str:
+    """Run a shell command via the active backend (local / docker / ssh).
 
-SPEC: dict[str, Any] = {
-    "name": NAME,
-    "description": DESCRIPTION,
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "command": {
-                "type": "string",
-                "description": "The shell command to execute.",
-            },
-            "timeout": {
-                "type": "number",
-                "description": (
-                    f"Optional timeout in milliseconds "
-                    f"(default {DEFAULT_TIMEOUT_MS}, max {DEFAULT_MAX_TIMEOUT_MS})."
-                ),
-            },
-            "description": {
-                "type": "string",
-                "description": (
-                    "Short active-voice description of what the command does "
-                    "(e.g. 'List files in cwd'). For display only."
-                ),
-            },
-        },
-        "required": ["command"],
-    },
-}
-
-
-def execute(command: str, timeout: float | None = None, description: str | None = None, **_ignored: Any) -> str:
-    """Run `command` via the active backend, return a plain-text result.
-
-    Backend is resolved per-call (local / docker / ssh) so switching
-    via `openprogram config backend` takes effect immediately, and
-    --profile isolation flows through correctly.
+    Args:
+        command: The shell command to execute.
+        timeout: Optional timeout in milliseconds (default 30000, max 600000).
+        description: Short active-voice description shown in UI (display only).
     """
     timeout_ms = min(timeout or DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TIMEOUT_MS)
     timeout_sec = timeout_ms / 1000.0
@@ -76,3 +57,13 @@ def execute(command: str, timeout: float | None = None, description: str | None 
     if result.stderr:
         parts.append(f"--- stderr ---\n{result.stderr.rstrip()}")
     return "\n".join(parts)
+
+
+# Legacy exports — derived from BASH so the dict and the AgentTool
+# can never drift. Old callers (`from openprogram.tools.bash import
+# SPEC, execute`) keep working until they migrate.
+BASH = bash
+NAME = BASH.name
+_LEGACY = to_dict_tool(BASH)
+SPEC = _LEGACY["spec"]
+execute = _LEGACY["execute"]

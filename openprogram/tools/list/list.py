@@ -3,38 +3,18 @@
 from __future__ import annotations
 
 import os
-from typing import Any
+
+from openprogram.tools._runtime import to_dict_tool, tool
 
 
-NAME = "list"
-
-DESCRIPTION = (
+_DESCRIPTION = (
     "List the contents of a directory. Returns entries one per line, with a "
     "trailing `/` on directories, plus a terse size column for files.\n"
     "\n"
     "- Path MUST be absolute.\n"
     "- Hidden entries (starting with `.`) are omitted unless show_hidden=true.\n"
-    "- For content search use `grep`; for pattern-based file discovery use `glob`.\n"
+    "- For content search use `grep`; for pattern-based file discovery use `glob`."
 )
-
-SPEC: dict[str, Any] = {
-    "name": NAME,
-    "description": DESCRIPTION,
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "path": {
-                "type": "string",
-                "description": "Absolute path of the directory to list.",
-            },
-            "show_hidden": {
-                "type": "boolean",
-                "description": "Include dotfiles and dot-directories. Default false.",
-            },
-        },
-        "required": ["path"],
-    },
-}
 
 
 def _fmt_size(n: int) -> str:
@@ -45,7 +25,18 @@ def _fmt_size(n: int) -> str:
     return f"{n}T"
 
 
-def execute(path: str, show_hidden: bool = False, **_: Any) -> str:
+@tool(
+    name="list",
+    description=_DESCRIPTION,
+    toolset=["core", "research"],
+)
+def list_dir(path: str, show_hidden: bool = False) -> str:
+    """List the contents of a directory.
+
+    Args:
+        path: Absolute path of the directory to list.
+        show_hidden: Include dotfiles and dot-directories. Default false.
+    """
     if not os.path.isabs(path):
         return f"Error: path must be absolute, got {path!r}"
     if not os.path.isdir(path):
@@ -73,3 +64,11 @@ def execute(path: str, show_hidden: bool = False, **_: Any) -> str:
     if not rows:
         return f"(empty{' — pass show_hidden=true to include dotfiles' if not show_hidden else ''})"
     return "\n".join(rows)
+
+
+LIST = list_dir
+NAME = LIST.name
+DESCRIPTION = _DESCRIPTION
+_LEGACY = to_dict_tool(LIST)
+SPEC = _LEGACY["spec"]
+execute = _LEGACY["execute"]

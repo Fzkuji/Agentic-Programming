@@ -6,55 +6,23 @@ import os
 import re
 import shutil
 import subprocess
-from typing import Any
+
+from openprogram.tools._runtime import to_dict_tool, tool
 
 
-NAME = "grep"
-
-DESCRIPTION = (
+_DESCRIPTION = (
     "Search file contents for a regular expression. Uses ripgrep when "
     "available, falls back to a Python regex walker otherwise.\n"
     "\n"
     "- Pattern is a standard regex (ripgrep flavor when rg is available).\n"
     "- `path` defaults to cwd; absolute paths recommended.\n"
     "- Output modes: files_with_matches (default), content, count.\n"
-    "- Use `glob` for pure filename matching.\n"
+    "- Use `glob` for pure filename matching."
 )
 
-SPEC: dict[str, Any] = {
-    "name": NAME,
-    "description": DESCRIPTION,
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "pattern": {
-                "type": "string",
-                "description": "Regex pattern to search for.",
-            },
-            "path": {
-                "type": "string",
-                "description": "Directory or file to search. Defaults to cwd.",
-            },
-            "glob": {
-                "type": "string",
-                "description": "Optional glob filter (e.g. \"*.py\").",
-            },
-            "output_mode": {
-                "type": "string",
-                "enum": ["files_with_matches", "content", "count"],
-                "description": "Output format. Default files_with_matches.",
-            },
-            "case_insensitive": {
-                "type": "boolean",
-                "description": "Case-insensitive match. Default false.",
-            },
-        },
-        "required": ["pattern"],
-    },
-}
 
-
-def _run_rg(pattern: str, path: str, glob: str | None, output_mode: str, case_insensitive: bool) -> str:
+def _run_rg(pattern: str, path: str, glob: str | None,
+            output_mode: str, case_insensitive: bool) -> str:
     cmd = ["rg", "--no-heading"]
     if case_insensitive:
         cmd.append("-i")
@@ -68,14 +36,14 @@ def _run_rg(pattern: str, path: str, glob: str | None, output_mode: str, case_in
         cmd.extend(["--glob", glob])
     cmd.extend(["--", pattern, path])
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    # rg exits 1 when no matches — that's not an error for us
     if proc.returncode not in (0, 1):
         return f"Error: rg exited {proc.returncode}: {proc.stderr.strip()}"
     out = proc.stdout.rstrip()
     return out or "No matches"
 
 
-def _run_python_fallback(pattern: str, path: str, glob: str | None, output_mode: str, case_insensitive: bool) -> str:
+def _run_python_fallback(pattern: str, path: str, glob: str | None,
+                         output_mode: str, case_insensitive: bool) -> str:
     import fnmatch
 
     flags = re.IGNORECASE if case_insensitive else 0
@@ -128,12 +96,37 @@ def _run_python_fallback(pattern: str, path: str, glob: str | None, output_mode:
     return "\n".join(files_with_matches[:500])
 
 
-def execute(pattern: str, path: str | None = None, glob: str | None = None,
-            output_mode: str = "files_with_matches", case_insensitive: bool = False,
-            **_: Any) -> str:
+@tool(
+    name="grep",
+    description=_DESCRIPTION,
+    max_result_chars=20_000,    # Claude Code default for grep
+    toolset=["core", "research"],
+)
+def grep(pattern: str,
+         path: str | None = None,
+         glob: str | None = None,
+         output_mode: str = "files_with_matches",
+         case_insensitive: bool = False) -> str:
+    """Search file contents for a regex.
+
+    Args:
+        pattern: Regex pattern to search for.
+        path: Directory or file to search. Defaults to cwd.
+        glob: Optional glob filter (e.g. "*.py").
+        output_mode: Output format: "files_with_matches", "content", or "count".
+        case_insensitive: Case-insensitive match. Default false.
+    """
     root = path or os.getcwd()
     if not os.path.exists(root):
         return f"Error: path not found: {root}"
     if shutil.which("rg"):
         return _run_rg(pattern, root, glob, output_mode, case_insensitive)
     return _run_python_fallback(pattern, root, glob, output_mode, case_insensitive)
+
+
+GREP = grep
+NAME = GREP.name
+DESCRIPTION = _DESCRIPTION
+_LEGACY = to_dict_tool(GREP)
+SPEC = _LEGACY["spec"]
+execute = _LEGACY["execute"]

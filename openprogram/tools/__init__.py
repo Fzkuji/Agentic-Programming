@@ -1,14 +1,22 @@
 """Tool registry.
 
-Each tool lives under ``openprogram/tools/<name>/`` with at minimum:
+Tools live under ``openprogram/tools/<name>/``. There are two formats:
 
-    <name>/__init__.py exporting
-        TOOL = {
-            "spec": {"name", "description", "parameters"},
-            "execute": callable | async callable,
-        }
+1. New ``@tool``-decorated tools (preferred). Author writes a typed
+   Python function with a Google-style docstring and decorates it.
+   Schema, char cap, persist-to-disk, error wrap, sync→async are all
+   handled by ``openprogram.tools._runtime``. The tool auto-registers
+   into the AgentTool registry on module import.
 
-Optional metadata keys on the TOOL dict (all have safe defaults):
+2. Legacy dict tools, exporting:
+       TOOL = {
+           "spec": {"name", "description", "parameters"},
+           "execute": callable | async callable,
+       }
+   These get auto-wrapped via ``wrap_legacy_tool`` when this module
+   loads, so they end up in the same AgentTool registry.
+
+Optional metadata keys on the TOOL dict (legacy format):
 
     "check_fn":             () -> bool      gate availability at runtime
     "requires_env":         list[str]       env vars required for the tool
@@ -17,8 +25,10 @@ Optional metadata keys on the TOOL dict (all have safe defaults):
                                              when any are missing
     "max_result_size_chars": int             advisory truncation budget
 
-Registration stays lazy — import only the tools you pass to
-``runtime.exec(..., tools=...)`` or pick via ``get_many(toolset=...)``.
+Both formats coexist during the migration. New code should consume
+``agent_tools()`` (returns ``list[AgentTool]``) for the dispatcher
+path; ``ALL_TOOLS`` and ``get_many`` remain for the legacy
+``runtime.exec(tools=[...])`` path until those callers are migrated.
 """
 
 from __future__ import annotations
@@ -26,11 +36,17 @@ from __future__ import annotations
 from typing import Any
 
 from ._helpers import is_available as _is_available
-
-# Use builtin list/dict/etc. by aliasing them before importing the
-# ``list`` submodule — otherwise ``list(...)`` below would call the
-# module. Same concern isn't there for other submodule names.
-_builtin_list = list
+from ._runtime import (
+    AgentTool,
+    ToolReturn,
+    all_tools as _all_agent_tools,
+    filter_for as _filter_agent_tools,
+    get as _get_agent_tool,
+    register as _register_agent_tool,
+    tool,
+    tool_requires_approval,
+    wrap_legacy_tool as _wrap_legacy_tool,
+)
 
 from .agent_browser import TOOL as AGENT_BROWSER
 from .apply_patch import TOOL as APPLY_PATCH
@@ -102,6 +118,55 @@ DEFAULT_TOOLS: list[str] = [
     "todo_write",
 ]
 
+# Per-name metadata used when auto-wrapping legacy dict tools into
+# AgentTool. Migrated tools (bash/read/write/edit/list/glob/grep)
+# already declared their own toolset/unsafe_in/persist_full via
+# ``@tool(...)``, so they're absent from this map.
+_LEGACY_TOOL_META: dict[str, dict[str, Any]] = {
+    "apply_patch":        {"toolsets": ["core"]},
+    "process":            {"toolsets": ["core"], "unsafe_in": ["wechat", "telegram"]},
+    "todo_read":          {"toolsets": ["core"]},
+    "todo_write":         {"toolsets": ["core"]},
+    "web_fetch":          {"toolsets": ["core", "research"], "max_result_chars": 30_000, "persist_full": True},
+    "web_search":         {"toolsets": ["core", "research"]},
+    "image_generate":     {"toolsets": ["core"]},
+    "image_analyze":      {"toolsets": ["core", "research"]},
+    "pdf":                {"toolsets": ["research"], "max_result_chars": 50_000, "persist_full": True},
+    "spawn_program":      {"toolsets": ["core"]},
+    "memory":             {"toolsets": ["core"]},
+    "clarify":            {"toolsets": ["core"]},
+    "execute_code":       {"toolsets": ["core"], "unsafe_in": ["wechat", "telegram"]},
+    "mixture_of_agents":  {"toolsets": ["research"]},
+    "canvas":             {"toolsets": ["core"]},
+    "cron":               {"toolsets": ["core"]},
+    "playwright_browser": {"toolsets": ["core"], "unsafe_in": ["wechat", "telegram"]},
+    "agent_browser":      {"toolsets": ["core"], "unsafe_in": ["wechat", "telegram"]},
+}
+
+
+def _autoload_agent_registry() -> None:
+    """Wrap every legacy-format tool in ALL_TOOLS so they appear in
+    the AgentTool registry alongside @tool-decorated tools.
+
+    Migrated tools are already registered (their @tool side-effects
+    fired during the import block above). ``wrap_legacy_tool`` itself
+    short-circuits when the name already exists, so this loop is a
+    no-op for already-migrated names.
+    """
+    for name, record in ALL_TOOLS.items():
+        if _get_agent_tool(name) is not None:
+            continue
+        meta = _LEGACY_TOOL_META.get(name, {})
+        try:
+            _wrap_legacy_tool(record, **meta)
+        except Exception:
+            # Don't crash the registry import if one tool's spec is
+            # malformed — surface the issue when the tool is selected.
+            pass
+
+
+_autoload_agent_registry()
+
 # Named toolset presets. Pass the name to ``get_many(toolset=...)`` instead
 # of curating a list inline. The preset machinery stays here for future
 # role-based curation, but for now we treat every tool as generic — no
@@ -112,7 +177,7 @@ DEFAULT_TOOLS: list[str] = [
 # "full"    — every registered tool. Mostly for debugging / listing.
 TOOLSETS: dict[str, list[str]] = {
     "default": DEFAULT_TOOLS,
-    "full": _builtin_list(ALL_TOOLS.keys()),
+    "full": [*ALL_TOOLS],
 }
 
 
@@ -178,7 +243,9 @@ def register_tool(name: str, tool: dict[str, Any], *, toolsets: list[str] | None
 
     Used by tools that get added after the initial import (e.g. third-party
     extensions). Idempotent — re-registering the same name overwrites the
-    previous entry. Updates ``TOOLSETS["full"]`` automatically.
+    previous entry. Updates ``TOOLSETS["full"]`` automatically. Also
+    auto-wraps the dict into an AgentTool so it shows up in the
+    chat-side registry.
     """
     ALL_TOOLS[name] = tool
     if name not in TOOLSETS["full"]:
@@ -187,12 +254,63 @@ def register_tool(name: str, tool: dict[str, Any], *, toolsets: list[str] | None
         bucket = TOOLSETS.setdefault(preset, [])
         if name not in bucket:
             bucket.append(name)
+    # Mirror into AgentTool registry for new dispatcher consumers.
+    try:
+        _wrap_legacy_tool(tool, toolsets=toolsets or [])
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# AgentTool-side API — preferred for dispatcher / agent_loop callers
+# ---------------------------------------------------------------------------
+
+def agent_tools(
+    names: list[str] | None = None,
+    *,
+    toolset: str | None = None,
+    source: str | None = None,
+    only_available: bool = False,
+) -> list[AgentTool]:
+    """Return AgentTool instances. Mirrors ``get_many`` semantics but
+    returns the unified AgentTool shape consumed by ``agent_loop``.
+
+    - ``source`` (e.g. "wechat") drops tools flagged unsafe_in that channel.
+    - ``only_available`` reuses the legacy ``check_fn`` / ``requires_env``
+      gating so the LLM doesn't see tools without their API keys.
+    """
+    if names is not None and toolset is not None:
+        raise ValueError("Pass either `names` or `toolset`, not both.")
+    if names is None and toolset is None:
+        names = DEFAULT_TOOLS
+    picked = _filter_agent_tools(names=names, toolset=toolset, source=source)
+    if only_available:
+        # Cross-reference with the legacy dict for gating signals
+        gated = []
+        for t in picked:
+            record = ALL_TOOLS.get(t.name)
+            if record is None or _is_available(record):
+                gated.append(t)
+        picked = gated
+    return picked
+
+
+def get_agent_tool(name: str) -> AgentTool | None:
+    """Look up a single AgentTool by name from the unified registry."""
+    return _get_agent_tool(name)
+
+
+def list_registered_agent_tools() -> list[str]:
+    """Names of every tool present in the AgentTool registry."""
+    return [t.name for t in _all_agent_tools()]
 
 
 __all__ = [
     "ALL_TOOLS",
     "DEFAULT_TOOLS",
     "TOOLSETS",
+    "AgentTool",
+    "ToolReturn",
     "APPLY_PATCH",
     "BASH",
     "READ",
@@ -216,8 +334,13 @@ __all__ = [
     "MIXTURE_OF_AGENTS",
     "CANVAS",
     "CRON",
+    "agent_tools",
     "get",
+    "get_agent_tool",
     "get_many",
     "list_available",
+    "list_registered_agent_tools",
     "register_tool",
+    "tool",
+    "tool_requires_approval",
 ]

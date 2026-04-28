@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import os
-from typing import Any
 
+from openprogram.tools._runtime import to_dict_tool, tool
 
-NAME = "read"
 
 MAX_LINES_DEFAULT = 2000
 MAX_LINE_LENGTH = 2000
 
-DESCRIPTION = (
+_DESCRIPTION = (
     "Read a file from disk and return its contents as text, with line numbers "
     "in `cat -n` style (1-based).\n"
     "\n"
@@ -19,34 +18,29 @@ DESCRIPTION = (
     "- By default reads up to 2000 lines from the top. Use `offset` and `limit` "
     "to page through larger files.\n"
     "- Individual lines longer than 2000 characters are truncated with an ellipsis.\n"
-    "- Binary files are not supported — use bash if you need hex dumps.\n"
+    "- Binary files are not supported — use bash if you need hex dumps."
 )
 
-SPEC: dict[str, Any] = {
-    "name": NAME,
-    "description": DESCRIPTION,
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "file_path": {
-                "type": "string",
-                "description": "Absolute path of the file to read.",
-            },
-            "offset": {
-                "type": "integer",
-                "description": "Line number to start reading from (1-based). Default 1.",
-            },
-            "limit": {
-                "type": "integer",
-                "description": f"Maximum number of lines to return. Default {MAX_LINES_DEFAULT}.",
-            },
-        },
-        "required": ["file_path"],
-    },
-}
 
+@tool(
+    name="read",
+    description=_DESCRIPTION,
+    # The tool already self-bounds via offset/limit, so we don't need
+    # framework persist-to-disk on top — the LLM controls page size.
+    max_result_chars=200_000,
+    persist_full=False,
+    toolset=["core", "research"],
+)
+def read(file_path: str,
+         offset: int = 1,
+         limit: int = MAX_LINES_DEFAULT) -> str:
+    """Read a file and return its contents with line numbers.
 
-def execute(file_path: str, offset: int = 1, limit: int = MAX_LINES_DEFAULT, **_: Any) -> str:
+    Args:
+        file_path: Absolute path of the file to read.
+        offset: Line number to start reading from (1-based). Default 1.
+        limit: Maximum number of lines to return. Default 2000.
+    """
     if not os.path.isabs(file_path):
         return f"Error: file_path must be absolute, got {file_path!r}"
     if not os.path.exists(file_path):
@@ -76,3 +70,11 @@ def execute(file_path: str, offset: int = 1, limit: int = MAX_LINES_DEFAULT, **_
     if not out_lines:
         return header + "\n(empty range)"
     return header + "\n" + "\n".join(out_lines)
+
+
+READ = read
+NAME = READ.name
+DESCRIPTION = _DESCRIPTION
+_LEGACY = to_dict_tool(READ)
+SPEC = _LEGACY["spec"]
+execute = _LEGACY["execute"]

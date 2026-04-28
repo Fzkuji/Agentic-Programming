@@ -1,7 +1,7 @@
 """write tool."""
 
-from .write import NAME, SPEC, execute
+from .write import WRITE, NAME, SPEC, execute
 
 TOOL = {"spec": SPEC, "execute": execute}
 
-__all__ = ["NAME", "SPEC", "TOOL", "execute"]
+__all__ = ["WRITE", "NAME", "SPEC", "TOOL", "execute"]
