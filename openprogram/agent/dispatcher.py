@@ -29,6 +29,17 @@ PermissionMode = Literal["ask", "auto", "bypass"]
 EventCallback = Callable[[dict], None]
 
 
+# Sentinel: "caller did not specify parent_id, dispatcher should pick"
+# vs explicit ``None`` which means "fork from root". The two cases need
+# different behavior — see TurnRequest.parent_id.
+class _InheritParent:
+    __slots__ = ()
+    def __repr__(self) -> str: return "<INHERIT>"
+
+
+INHERIT_PARENT: Any = _InheritParent()
+
+
 @dataclass
 class TurnRequest:
     conv_id: str
@@ -44,6 +55,25 @@ class TurnRequest:
     # configured tools. Channels can opt out of risky tools per turn
     # (e.g. wechat shouldn't ever hit destructive bash).
     tools_override: Optional[list[str]] = None
+    # Branching: parent_id of the user message we're about to write.
+    #   - INHERIT_PARENT (default) → dispatcher uses the active
+    #     branch's tail (head_id walk). Normal append.
+    #   - explicit string → fork sibling branch off that message.
+    #     Retry / edit flows pass the parent of the message being
+    #     replaced.
+    #   - explicit None → root-level fork (the very first turn of a
+    #     new conversation tree, or "retry the very first user
+    #     message" case from contextgit/dag.py).
+    # Mirrors Claude Code's parentUuid chain: append-only, no mutation
+    # of historical messages.
+    parent_id: Any = INHERIT_PARENT
+    # When the caller has already linearized "the branch the user
+    # currently sees" (e.g. webui has its in-memory active-branch
+    # walk), pass it here so the dispatcher uses it as the LLM
+    # context instead of re-querying SessionDB. Each entry is a row-
+    # shaped dict with role/content/timestamp/id at minimum. Passing
+    # None means "load history from SessionDB via get_branch".
+    history_override: Optional[list[dict]] = None
 
 
 @dataclass
@@ -145,7 +175,9 @@ def process_user_turn(
     from openprogram.agent.session_db import default_db
     db = default_db()
 
-    # 1. Ensure session exists, load history.
+    # 1. Ensure session exists. Load history along the *active branch*
+    #    (parent-walked from head_id) instead of the full append log,
+    #    so retried / forked branches don't pollute the LLM context.
     session = db.get_session(req.conv_id)
     if session is None:
         db.create_session(
@@ -157,21 +189,48 @@ def process_user_turn(
             peer_id=req.peer_id,
         )
         session = db.get_session(req.conv_id) or {}
-    history = db.get_messages(req.conv_id)
+    if req.history_override is not None:
+        history = list(req.history_override)
+    elif isinstance(req.parent_id, _InheritParent):
+        # Normal append — walk the active branch.
+        history = db.get_branch(req.conv_id) or db.get_messages(req.conv_id)
+    elif req.parent_id is None:
+        # Root-level fork — LLM starts with empty history.
+        history = []
+    else:
+        # Sibling fork — history is the branch ending at the explicit
+        # parent. LLM sees what existed up to the fork point, not
+        # what's currently on the active branch.
+        history = db.get_branch(req.conv_id, req.parent_id)
 
     # 2. Persist user message immediately (so a crash mid-stream still
-    #    leaves the user's input recorded).
+    #    leaves the user's input recorded). Resolve parent_id:
+    #      INHERIT_PARENT → tail of active branch, or NULL if empty
+    #      explicit None  → NULL (root-level fork)
+    #      explicit str   → that string (sibling fork)
+    if isinstance(req.parent_id, _InheritParent):
+        if history:
+            user_parent_id = history[-1].get("id")
+        else:
+            user_parent_id = session.get("head_id")
+    else:
+        user_parent_id = req.parent_id
     user_msg = {
         "id": user_msg_id,
         "role": "user",
         "content": req.user_text,
         "timestamp": time.time(),
-        "parent_id": history[-1]["id"] if history else None,
+        "parent_id": user_parent_id,
         "source": req.source,
         "peer_display": req.peer_display,
         "peer_id": req.peer_id,
     }
     db.append_message(req.conv_id, user_msg)
+    # Advance head to the user message. Crucial for branching: if the
+    # caller passed parent_id pointing at an older message, we're now
+    # on a NEW leaf and head must reflect that — otherwise the next
+    # get_branch call would still walk down the old branch.
+    db.set_head(req.conv_id, user_msg_id)
     on_event({
         "type": "chat_ack",
         "data": {"conv_id": req.conv_id, "msg_id": user_msg_id},

@@ -271,6 +271,115 @@ def test_real_loop_history_replay(tmp_db: SessionDB, captured, collector) -> Non
     assert seen_message_count[0] >= 3
 
 
+def test_parent_id_forks_sibling_branch(
+    tmp_db: SessionDB, captured, collector,
+) -> None:
+    """User retries an old turn → dispatcher forks a sibling branch off
+    the original parent. Old messages stay in the DB; the active branch
+    (head_id walked back) only includes the new fork.
+
+    This is the contract that retry / edit flows in webui rely on."""
+    orig = D._run_loop_blocking
+
+    # Turn 1: first message → reply "alpha"
+    s1 = make_text_stream_fn(["alpha"])
+    def _w1(*, req, history, on_event, cancel_event, stream_fn=None):
+        return orig(req=req, history=history, on_event=on_event,
+                    cancel_event=cancel_event, stream_fn=s1)
+    with patch.object(D, "_run_loop_blocking", _w1):
+        r1 = D.process_user_turn(
+            D.TurnRequest(conv_id="c1", user_text="ask one", agent_id="main", source="tui"),
+        )
+
+    # Turn 2: branch-fork from BEFORE turn 1's user message
+    # (parent_id=None recreates the root-level fork case — matches
+    # contextgit/dag.py's "first-turn retry" semantics where the
+    # forked branch shares the conversation root, not turn 1's user).
+    s2 = make_text_stream_fn(["beta"])
+    def _w2(*, req, history, on_event, cancel_event, stream_fn=None):
+        return orig(req=req, history=history, on_event=on_event,
+                    cancel_event=cancel_event, stream_fn=s2)
+    with patch.object(D, "_run_loop_blocking", _w2):
+        r2 = D.process_user_turn(
+            D.TurnRequest(conv_id="c1", user_text="ask one (retry)",
+                          agent_id="main", source="tui",
+                          parent_id=None),  # root-level fork
+        )
+
+    # Storage layer keeps both branches (4 messages total)
+    all_msgs = tmp_db.get_messages("c1")
+    assert len(all_msgs) == 4
+
+    # Active branch (head walked back) should only contain the SECOND
+    # turn — head moved to its assistant message after turn 2.
+    active = tmp_db.get_branch("c1")
+    active_ids = [m["id"] for m in active]
+    assert active_ids == [r2.user_msg_id, r2.assistant_msg_id]
+
+    # Turn 1's user/assistant messages still findable via get_messages
+    # but not on the active branch.
+    by_id = {m["id"]: m for m in all_msgs}
+    assert r1.user_msg_id in by_id
+    assert r1.assistant_msg_id in by_id
+
+
+def test_history_override_skips_session_db_walk(
+    tmp_db: SessionDB, captured, collector,
+) -> None:
+    """When ``history_override`` is given, dispatcher should NOT pull
+    history from SessionDB. Webui's branch-walk lives in memory, this
+    is the seam it uses to inject it."""
+    seen_messages: list = []
+
+    async def _capturing(model, ctx, opts):
+        seen_messages.append(list(ctx.messages))
+        yield EventStart(partial=_build_partial(""))
+        yield EventDone(reason="stop", message=_build_final("done"))
+
+    orig = D._run_loop_blocking
+
+    def _w(*, req, history, on_event, cancel_event, stream_fn=None):
+        return orig(req=req, history=history, on_event=on_event,
+                    cancel_event=cancel_event, stream_fn=_capturing)
+
+    # Pre-seed SessionDB with a "wrong" history that the override
+    # should bypass.
+    tmp_db.create_session("c1", "main", title="t")
+    tmp_db.append_message("c1", {
+        "id": "x1", "role": "user", "content": "should NOT appear",
+        "timestamp": 1.0, "parent_id": None,
+    })
+    tmp_db.set_head("c1", "x1")
+
+    fake_history = [
+        {"id": "ov1", "role": "user", "content": "from override",
+         "timestamp": 100.0},
+        {"id": "ov2", "role": "assistant", "content": "ack",
+         "timestamp": 101.0},
+    ]
+    with patch.object(D, "_run_loop_blocking", _w):
+        D.process_user_turn(
+            D.TurnRequest(conv_id="c1", user_text="next",
+                          agent_id="main", source="tui",
+                          history_override=fake_history),
+        )
+
+    # context.messages = override + the new prompt
+    assert seen_messages
+    contents = []
+    for m in seen_messages[0]:
+        c = getattr(m, "content", None)
+        if isinstance(c, list):
+            for blk in c:
+                t = getattr(blk, "text", None)
+                if t:
+                    contents.append(t)
+    # "should NOT appear" is the SessionDB row — must be absent
+    assert not any("should NOT appear" in c for c in contents)
+    # "from override" is the injected history — must be present
+    assert any("from override" in c for c in contents)
+
+
 def test_provider_error_persists_as_system_message(
     tmp_db: SessionDB, captured, collector,
 ) -> None:

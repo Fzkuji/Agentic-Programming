@@ -36,11 +36,14 @@ for them. Read with ``json.loads(row["extra_meta"] or "{}")``.
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, TypeVar
+
+_T = TypeVar("_T")
 
 
 SCHEMA = """
@@ -137,15 +140,34 @@ def _default_db_path() -> Path:
 
 
 class SessionDB:
+    # ── Write-contention tuning (learned from hermes-agent) ──
+    # When multiple OS processes share one sqlite file (gunicorn web
+    # workers + channels worker + tui), SQLite's built-in busy handler
+    # uses a deterministic backoff that creates convoy-style stalls
+    # under contention. Short connection timeout + application-level
+    # retry with random jitter staggers competing writers naturally.
+    _WRITE_MAX_RETRIES = 15
+    _WRITE_RETRY_MIN_S = 0.020
+    _WRITE_RETRY_MAX_S = 0.150
+    # Periodic best-effort PASSIVE checkpoint — keeps WAL from growing
+    # unbounded on long-lived workers.
+    _CHECKPOINT_EVERY_N_WRITES = 50
+
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.db_path = db_path or _default_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: webui's asyncio loop and channel
-        # threads share the connection. The lock below serializes
-        # writes; SQLite WAL handles reader concurrency.
+        # threads share the connection. The write lock below serializes
+        # in-process writes; the BEGIN IMMEDIATE + retry loop in
+        # _execute_write handles cross-process WAL contention.
         self.conn = sqlite3.connect(
             self.db_path,
-            timeout=15,
+            # Short timeout — we retry at the application layer with
+            # jitter so SQLite's built-in convoy backoff doesn't kick in.
+            timeout=1.0,
+            # None = manual transaction mode; lets us BEGIN IMMEDIATE
+            # explicitly to grab the WAL write lock at txn start, not
+            # at first write (which surfaces contention sooner).
             isolation_level=None,
             check_same_thread=False,
         )
@@ -154,12 +176,73 @@ class SessionDB:
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self._write_lock = threading.Lock()
+        self._write_count = 0
         self._migrate()
 
     def _migrate(self) -> None:
+        # Schema + triggers live outside _execute_write because
+        # CREATE statements implicitly commit and don't play well
+        # with our explicit BEGIN IMMEDIATE.
         with self._write_lock:
             self.conn.executescript(SCHEMA)
             self.conn.executescript(TRIGGERS)
+
+    def _execute_write(self, fn: Callable[[sqlite3.Connection], _T]) -> _T:
+        """Run *fn(conn)* inside a BEGIN IMMEDIATE transaction with
+        jitter retry on lock/busy errors.
+
+        Why this helper:
+          - BEGIN IMMEDIATE acquires the write lock at txn start, so
+            contention surfaces here instead of at COMMIT (where
+            partial writes complicate retry).
+          - Random backoff (20–150ms) staggers competing writers and
+            avoids the deterministic-backoff convoy that bites
+            multi-process deployments.
+          - Periodic PASSIVE checkpoint keeps the WAL bounded for
+            long-running workers.
+
+        ``fn`` receives the connection and is expected to perform its
+        own INSERT/UPDATE/DELETE statements. Do NOT call ``commit()``
+        inside fn — this helper commits on success and rolls back on
+        exception.
+        """
+        last_err: Optional[Exception] = None
+        for attempt in range(self._WRITE_MAX_RETRIES):
+            try:
+                with self._write_lock:
+                    self.conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        result = fn(self.conn)
+                        self.conn.execute("COMMIT")
+                    except BaseException:
+                        try:
+                            self.conn.execute("ROLLBACK")
+                        except Exception:
+                            pass
+                        raise
+                self._write_count += 1
+                if self._write_count % self._CHECKPOINT_EVERY_N_WRITES == 0:
+                    self._try_wal_checkpoint()
+                return result
+            except sqlite3.OperationalError as exc:
+                msg = str(exc).lower()
+                if "locked" in msg or "busy" in msg:
+                    last_err = exc
+                    if attempt < self._WRITE_MAX_RETRIES - 1:
+                        time.sleep(random.uniform(
+                            self._WRITE_RETRY_MIN_S,
+                            self._WRITE_RETRY_MAX_S,
+                        ))
+                        continue
+                raise
+        raise last_err or sqlite3.OperationalError("write retries exhausted")
+
+    def _try_wal_checkpoint(self) -> None:
+        try:
+            with self._write_lock:
+                self.conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except Exception:
+            pass
 
     # -- session CRUD ------------------------------------------------------
 
@@ -189,12 +272,10 @@ class SessionDB:
 
         cols = list(row.keys())
         placeholders = ",".join("?" for _ in cols)
-        with self._write_lock:
-            self.conn.execute(
-                f"INSERT OR REPLACE INTO sessions ({','.join(cols)}) "
-                f"VALUES ({placeholders})",
-                [row[c] for c in cols],
-            )
+        sql = (f"INSERT OR REPLACE INTO sessions ({','.join(cols)}) "
+               f"VALUES ({placeholders})")
+        params = [row[c] for c in cols]
+        self._execute_write(lambda conn: conn.execute(sql, params))
 
     def update_session(self, session_id: str, **fields: Any) -> None:
         if not fields:
@@ -225,12 +306,10 @@ class SessionDB:
             sets["context_tree"] = json.dumps(sets["context_tree"], default=str)
         sets.setdefault("updated_at", time.time())
         cols = list(sets.keys())
-        with self._write_lock:
-            self.conn.execute(
-                f"UPDATE sessions SET {','.join(c + '=?' for c in cols)} "
-                f"WHERE id=?",
-                [sets[c] for c in cols] + [session_id],
-            )
+        sql = (f"UPDATE sessions SET {','.join(c + '=?' for c in cols)} "
+               f"WHERE id=?")
+        params = [sets[c] for c in cols] + [session_id]
+        self._execute_write(lambda conn: conn.execute(sql, params))
 
     def get_session(self, session_id: str) -> Optional[dict[str, Any]]:
         cur = self.conn.execute(
@@ -258,9 +337,10 @@ class SessionDB:
         return [_row_to_session(r) for r in cur.fetchall()]
 
     def delete_session(self, session_id: str) -> None:
-        with self._write_lock:
-            self.conn.execute("DELETE FROM sessions WHERE id=?",
-                              (session_id,))
+        self._execute_write(
+            lambda conn: conn.execute("DELETE FROM sessions WHERE id=?",
+                                       (session_id,))
+        )
 
     # -- message CRUD ------------------------------------------------------
 
@@ -284,17 +364,20 @@ class SessionDB:
                 + ",".join(sorted(msg.keys())))
         cols = list(row.keys())
         placeholders = ",".join("?" for _ in cols)
-        with self._write_lock:
-            self.conn.execute(
-                f"INSERT OR REPLACE INTO messages ({','.join(cols)}) "
-                f"VALUES ({placeholders})",
-                [row[c] for c in cols],
-            )
+        sql = (f"INSERT OR REPLACE INTO messages ({','.join(cols)}) "
+               f"VALUES ({placeholders})")
+        params = [row[c] for c in cols]
+        ts = row["timestamp"]
+
+        def _do(conn: sqlite3.Connection) -> None:
+            conn.execute(sql, params)
             # Bump session.updated_at so /resume picker re-sorts.
-            self.conn.execute(
+            conn.execute(
                 "UPDATE sessions SET updated_at=? WHERE id=?",
-                (row["timestamp"], session_id),
+                (ts, session_id),
             )
+
+        self._execute_write(_do)
 
     def get_messages(self, session_id: str, *,
                      limit: Optional[int] = None) -> list[dict[str, Any]]:
@@ -306,6 +389,137 @@ class SessionDB:
             args.append(limit)
         cur = self.conn.execute(sql, args)
         return [_row_to_message(r) for r in cur.fetchall()]
+
+    # -- branching (DAG walking) -----------------------------------------
+    #
+    # OpenProgram messages form an append-only DAG: every row carries
+    # ``parent_id`` (NULL at the root). The "current view" of a session
+    # is the linear chain from the session's ``head_id`` walking parent
+    # links back to root. New writes append a child of the current
+    # head; retry / edit appends a child of an *older* message, which
+    # creates a sibling — no rewrite, no delete. The chain still walks
+    # cleanly because each leaf's parent path is single-parent.
+    #
+    # This is the same model Claude Code uses on its JSONL transcripts
+    # (``parentUuid`` chain), but in SQLite so we get index-backed walk
+    # and FTS for free. Hermes / OpenClaw do session-level fork instead
+    # — strictly less expressive than message-level DAG.
+
+    def get_branch(self, session_id: str,
+                   head_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Return the linear branch ending at ``head_id`` (or the
+        session's current head when omitted), oldest first.
+
+        Walks ``parent_id`` from head back to root via a recursive CTE,
+        then returns rows in chronological order. Cheap because of
+        ``idx_messages_parent``. Used by every read path that wants the
+        "what the user currently sees" slice — webui bootstrap, /resume,
+        dispatcher's history load.
+
+        Empty list if ``head_id`` is missing or doesn't belong to the
+        session — never raises. The dispatcher needs the empty path to
+        bootstrap the very first turn (no head yet) without ceremony.
+        """
+        if head_id is None:
+            sess = self.get_session(session_id)
+            if sess is None:
+                return []
+            head_id = sess.get("head_id")
+        if not head_id:
+            return []
+        cur = self.conn.execute(
+            "WITH RECURSIVE branch(id, session_id, parent_id, role, content, "
+            "  timestamp, source, peer_display, peer_id, display, function, extra) AS ("
+            "  SELECT id, session_id, parent_id, role, content, timestamp, "
+            "    source, peer_display, peer_id, display, function, extra "
+            "    FROM messages WHERE id=? AND session_id=?"
+            "  UNION ALL"
+            "  SELECT m.id, m.session_id, m.parent_id, m.role, m.content, m.timestamp, "
+            "    m.source, m.peer_display, m.peer_id, m.display, m.function, m.extra "
+            "    FROM messages m JOIN branch b ON m.id = b.parent_id "
+            "    WHERE m.session_id = ?"
+            ") SELECT * FROM branch ORDER BY timestamp ASC",
+            (head_id, session_id, session_id),
+        )
+        return [_row_to_message(r) for r in cur.fetchall()]
+
+    def set_head(self, session_id: str, head_id: Optional[str]) -> None:
+        """Switch a session's head_id. Used by retry / edit / branch
+        navigation in the UI. Pass ``None`` to clear (e.g. /clear).
+
+        After ``set_head``, the next ``append_message`` whose parent_id
+        is unset will chain off whatever the caller computes from
+        ``get_branch`` — typically the new head itself. Note that
+        ``append_message`` does NOT auto-update head_id, so callers
+        that want "advance head to the new message" must call
+        ``set_head`` after ``append_message``.
+        """
+        self._execute_write(
+            lambda conn: conn.execute(
+                "UPDATE sessions SET head_id=?, updated_at=? WHERE id=?",
+                (head_id, time.time(), session_id),
+            )
+        )
+
+    def get_descendants(self, session_id: str,
+                        root_id: str) -> list[dict[str, Any]]:
+        """All messages in the subtree rooted at ``root_id`` (inclusive).
+        Used to find sibling branches when the user asks "show me the
+        other forks of this turn"."""
+        cur = self.conn.execute(
+            "WITH RECURSIVE descendants(id, session_id, parent_id, role, content, "
+            "  timestamp, source, peer_display, peer_id, display, function, extra) AS ("
+            "  SELECT id, session_id, parent_id, role, content, timestamp, "
+            "    source, peer_display, peer_id, display, function, extra "
+            "    FROM messages WHERE id=? AND session_id=?"
+            "  UNION ALL"
+            "  SELECT m.id, m.session_id, m.parent_id, m.role, m.content, m.timestamp, "
+            "    m.source, m.peer_display, m.peer_id, m.display, m.function, m.extra "
+            "    FROM messages m JOIN descendants d ON m.parent_id = d.id "
+            "    WHERE m.session_id = ?"
+            ") SELECT * FROM descendants ORDER BY timestamp ASC",
+            (root_id, session_id, session_id),
+        )
+        return [_row_to_message(r) for r in cur.fetchall()]
+
+    def get_deepest_leaf(self, session_id: str,
+                          root_id: str) -> Optional[str]:
+        """Find the leaf (message with no child) under ``root_id`` with
+        the latest timestamp. When the user clicks an old message in
+        the sidebar, we jump head to the deepest descendant on that
+        sub-tree — same UX as ``contextgit/dag.py:deepest_leaf`` but
+        in SQL so it's O(branch_size) not O(all messages).
+
+        Returns the leaf's id, or ``root_id`` if it has no descendants,
+        or ``None`` if ``root_id`` doesn't exist in this session.
+        """
+        # First confirm root exists. We need this so callers can
+        # distinguish "leaf is root" from "no such root".
+        chk = self.conn.execute(
+            "SELECT id FROM messages WHERE id=? AND session_id=?",
+            (root_id, session_id),
+        ).fetchone()
+        if chk is None:
+            return None
+        cur = self.conn.execute(
+            "WITH RECURSIVE descendants(id, parent_id, timestamp) AS ("
+            "  SELECT id, parent_id, timestamp FROM messages "
+            "    WHERE id=? AND session_id=?"
+            "  UNION ALL"
+            "  SELECT m.id, m.parent_id, m.timestamp FROM messages m "
+            "    JOIN descendants d ON m.parent_id = d.id "
+            "    WHERE m.session_id = ?"
+            ") "
+            # Leaves: descendants whose id is no other row's parent_id.
+            "SELECT d.id FROM descendants d "
+            "WHERE NOT EXISTS ("
+            "  SELECT 1 FROM messages c "
+            "  WHERE c.parent_id = d.id AND c.session_id = ?"
+            ") ORDER BY d.timestamp DESC LIMIT 1",
+            (root_id, session_id, session_id, session_id),
+        )
+        row = cur.fetchone()
+        return row["id"] if row else root_id
 
     def search_messages(self, query: str, *,
                         agent_id: Optional[str] = None,
@@ -354,38 +568,35 @@ class SessionDB:
         msgs = list(msgs)
         if not msgs:
             return
-        with self._write_lock:
-            self.conn.execute("BEGIN")
-            try:
-                for m in msgs:
-                    row: dict[str, Any] = {
-                        "session_id": session_id,
-                        "timestamp": m.get("timestamp") or time.time(),
-                    }
-                    extra: dict[str, Any] = {}
-                    for k, v in m.items():
-                        if k in _MESSAGE_COLS:
-                            row[k] = v
-                        else:
-                            extra[k] = v
-                    if extra:
-                        row["extra"] = json.dumps(extra, default=str)
-                    if "id" not in row or "role" not in row or "content" not in row:
-                        continue
-                    cols = list(row.keys())
-                    self.conn.execute(
-                        f"INSERT OR REPLACE INTO messages ({','.join(cols)}) "
-                        f"VALUES ({','.join('?' for _ in cols)})",
-                        [row[c] for c in cols],
-                    )
-                self.conn.execute(
-                    "UPDATE sessions SET updated_at=? WHERE id=?",
-                    (msgs[-1].get("timestamp") or time.time(), session_id),
+
+        def _do(conn: sqlite3.Connection) -> None:
+            for m in msgs:
+                row: dict[str, Any] = {
+                    "session_id": session_id,
+                    "timestamp": m.get("timestamp") or time.time(),
+                }
+                extra: dict[str, Any] = {}
+                for k, v in m.items():
+                    if k in _MESSAGE_COLS:
+                        row[k] = v
+                    else:
+                        extra[k] = v
+                if extra:
+                    row["extra"] = json.dumps(extra, default=str)
+                if "id" not in row or "role" not in row or "content" not in row:
+                    continue
+                cols = list(row.keys())
+                conn.execute(
+                    f"INSERT OR REPLACE INTO messages ({','.join(cols)}) "
+                    f"VALUES ({','.join('?' for _ in cols)})",
+                    [row[c] for c in cols],
                 )
-                self.conn.execute("COMMIT")
-            except Exception:
-                self.conn.execute("ROLLBACK")
-                raise
+            conn.execute(
+                "UPDATE sessions SET updated_at=? WHERE id=?",
+                (msgs[-1].get("timestamp") or time.time(), session_id),
+            )
+
+        self._execute_write(_do)
 
     def close(self) -> None:
         try:
