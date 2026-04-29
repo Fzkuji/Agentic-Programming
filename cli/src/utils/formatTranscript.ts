@@ -1,5 +1,6 @@
 import type { Turn, ToolCall, TurnBlock } from '../components/Turn.js';
 import type { WelcomeStats } from '../components/Welcome.js';
+import { stringWidth } from '../runtime/index.js';
 
 const RESET = '\x1b[0m';
 const DIM = '\x1b[2m';
@@ -16,6 +17,35 @@ const truncate = (s: string, n = 80): string =>
   s.length > n ? s.slice(0, n - 1) + '...' : s;
 
 const linesOf = (text: string): string[] => text.split('\n');
+
+const truncateWidth = (text: string, width: number): string => {
+  if (stringWidth(text) <= width) return text;
+  const suffix = '...';
+  const suffixWidth = stringWidth(suffix);
+  let out = '';
+  let used = 0;
+  for (const ch of text) {
+    const w = stringWidth(ch);
+    if (used + w + suffixWidth > width) break;
+    out += ch;
+    used += w;
+  }
+  return out + suffix;
+};
+
+const ansiWidth = (text: string): number =>
+  stringWidth(text.replace(/\x1b\[[0-9;]*m/g, ''));
+
+const padAnsi = (text: string, width: number): string => {
+  const missing = Math.max(0, width - ansiWidth(text));
+  return text + ' '.repeat(missing);
+};
+
+const boxLine = (content: string, width: number): string =>
+  `${FG_ORANGE}│${RESET} ${padAnsi(content, width)} ${FG_ORANGE}│${RESET}`;
+
+const joinCells = (cells: string[], width: number, gap: number): string =>
+  cells.map((cell) => padAnsi(cell, width)).join(' '.repeat(gap));
 
 const formatToolCall = (call: ToolCall): string[] => {
   const marker =
@@ -164,17 +194,47 @@ export function formatWelcomeText(stats: WelcomeStats): string {
     ),
   ];
 
-  const out: string[] = [];
-  out.push(`${BOLD}${FG_ORANGE}OpenProgram${RESET} ${DIM}· ${agentName} · ${model}${RESET}`);
-  out.push('');
-  for (const item of sections) {
-    out.push(`${BOLD}${FG_ORANGE}${item.count}${RESET} ${BOLD}${item.label}${RESET}`);
-    if (item.items.length === 0) {
-      out.push(`  ${FG_GRAY}(empty)${RESET}`);
-    } else {
-      for (const name of item.items) out.push(`  ${FG_GRAY}${truncate(name, 72)}${RESET}`);
+  const fullWidth = Math.max(48, Math.min(process.stdout.columns ?? 80, 100));
+  const contentWidth = fullWidth - 4;
+  const columns = contentWidth >= 76 ? 4 : 2;
+  const gap = 2;
+  const colWidth = Math.max(10, Math.floor((contentWidth - gap * (columns - 1)) / columns));
+  const top = `${FG_ORANGE}╭${'─'.repeat(fullWidth - 2)}╮${RESET}`;
+  const bottom = `${FG_ORANGE}╰${'─'.repeat(fullWidth - 2)}╯${RESET}`;
+  const out: string[] = [top];
+
+  out.push(boxLine(`${BOLD}${FG_ORANGE}OpenProgram${RESET} ${DIM}· ${agentName} · ${model}${RESET}`, contentWidth));
+  out.push(boxLine('', contentWidth));
+
+  for (let offset = 0; offset < sections.length; offset += columns) {
+    const row = sections.slice(offset, offset + columns);
+    while (row.length < columns) {
+      row.push({ label: '', count: '', items: [] });
     }
-    out.push('');
+
+    const headers = row.map((item) =>
+      item.label
+        ? `${BOLD}${FG_ORANGE}${item.count}${RESET} ${BOLD}${item.label}${RESET}`
+        : '',
+    );
+    out.push(boxLine(joinCells(headers, colWidth, gap), contentWidth));
+
+    const maxItems = Math.max(1, ...row.map((item) => item.items.length || 1));
+    for (let itemIndex = 0; itemIndex < maxItems; itemIndex++) {
+      const cells = row.map((item) => {
+        if (!item.label) return '';
+        const value = item.items[itemIndex] ?? (itemIndex === 0 ? '(empty)' : '');
+        return value ? `${FG_GRAY}${truncateWidth(value, colWidth)}${RESET}` : '';
+      });
+      out.push(boxLine(joinCells(cells, colWidth, gap), contentWidth));
+    }
+
+    if (offset + columns < sections.length) {
+      out.push(boxLine('', contentWidth));
+    }
   }
+
+  out.push(bottom);
+  out.push('');
   return out.join('\n');
 }
