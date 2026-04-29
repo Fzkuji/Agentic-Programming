@@ -149,11 +149,18 @@ def list_for_session(session_id: str) -> list[dict[str, Any]]:
 
 def attach(*, channel: str, account_id: str, peer_kind: str,
            peer_id: str, agent_id: str,
-           session_id: str) -> dict[str, Any]:
-    """Create or replace an alias. If a row already exists for the
-    same (channel, account_id, peer), it's rewritten — so
-    re-attaching the same peer to a different session is a single
-    atomic move, not a duplicate row.
+           session_id: str) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """Create or replace an alias.
+
+    Returns ``(new_row, replaced_row)``:
+
+    * ``new_row`` — the alias just written.
+    * ``replaced_row`` — the previous alias that lived under the same
+      ``(channel, account_id, peer)`` key, or ``None`` if there wasn't
+      one. Surfacing it forces every caller to **decide what to do
+      about overwrites** — show a "replaced X" hint, prompt for
+      confirmation, etc. — instead of silently discarding the
+      previous binding.
 
     Also stamps the target session's meta.json with the binding so
     the Web UI outbound path (``_load_agent_session_meta`` in
@@ -171,12 +178,24 @@ def attach(*, channel: str, account_id: str, peer_kind: str,
     }
     with _lock:
         rows = _read()
-        rows = [r for r in rows
-                if not _match(r, channel, account_id or "default", peer)]
-        rows.append(row)
-        _write(rows)
+        replaced: Optional[dict[str, Any]] = None
+        kept: list[dict[str, Any]] = []
+        for r in rows:
+            if replaced is None and _match(r, channel,
+                                           account_id or "default", peer):
+                replaced = r
+                continue
+            kept.append(r)
+        kept.append(row)
+        _write(kept)
     _stamp_session_meta(agent_id, session_id, row)
-    return row
+    # Self-replacement (re-binding the same peer to the same session)
+    # isn't really an overwrite — drop the replaced flag in that case
+    # so callers don't display a misleading "replaced X" hint.
+    if replaced is not None and replaced.get("session_id") == session_id \
+            and replaced.get("agent_id") == agent_id:
+        replaced = None
+    return row, replaced
 
 
 def detach(*, channel: str, account_id: str, peer_kind: str,

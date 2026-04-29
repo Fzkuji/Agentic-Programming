@@ -89,13 +89,44 @@ export interface ChannelBindingsEnvelope {
 
 export interface SessionAliasesEnvelope {
   type: 'session_aliases';
+  // Server returns rows verbatim from session_aliases.json — peer is
+  // the nested ``{kind, id}`` object, not a flat string. Older code
+  // assumed a string and string-coerced the dict to "[object Object]"
+  // when rendering, which silently broke the alias listing. Type the
+  // shape the server actually emits so the TUI matches reality.
   data: Array<{
     channel?: string;
     account_id?: string;
-    peer?: string;
+    peer?: { kind?: string; id?: string };
     agent_id?: string;
-    conversation_id?: string;
+    session_id?: string;
+    created_at?: number;
   }>;
+}
+
+export interface SessionAliasRow {
+  channel?: string;
+  account_id?: string;
+  peer?: { kind?: string; id?: string };
+  agent_id?: string;
+  session_id?: string;
+  created_at?: number;
+}
+
+/**
+ * Server-pushed notification that a session alias mutation just
+ * landed (attach / detach). ``replaced`` carries the previous row
+ * when ``attach_session`` overwrites an existing (channel, account,
+ * peer) binding — letting the TUI tell the user "you just replaced
+ * X" instead of treating attach as a silent destructive op.
+ */
+export interface SessionAliasChangedEnvelope {
+  type: 'session_alias_changed';
+  data: {
+    action: 'attached' | 'detached';
+    alias: SessionAliasRow;
+    replaced?: SessionAliasRow | null;
+  };
 }
 
 export interface ChannelAccountsEnvelope {
@@ -240,6 +271,7 @@ export type WsEnvelope =
   | HistoryListEnvelope
   | ChannelBindingsEnvelope
   | SessionAliasesEnvelope
+  | SessionAliasChangedEnvelope
   | ChannelAccountsEnvelope
   | ChannelAccountAddedEnvelope
   | BrowserResultEnvelope

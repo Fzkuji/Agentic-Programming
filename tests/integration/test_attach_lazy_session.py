@@ -31,6 +31,14 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                         lambda: 1)   # pretend worker already up
     monkeypatch.setattr("openprogram.channels.worker.spawn_detached",
                         lambda: 0)
+    # session_aliases reads/writes ~/.agentic/session_aliases.json by
+    # default — without this redirect, attach_session would clobber
+    # the developer's real binding file. Module re-imports
+    # ``get_state_dir`` on every call, so a top-level patch is enough.
+    state_root = tmp_path / "state"
+    state_root.mkdir(exist_ok=True)
+    monkeypatch.setattr("openprogram.paths.get_state_dir",
+                        lambda: state_root)
     app = create_app()
     with TestClient(app) as c:
         yield c, db
@@ -112,6 +120,50 @@ def test_attach_does_not_disturb_existing_session(env) -> None:
     assert sess["title"] == "My investigation"
     assert sess["source"] == "web"
     assert sess["agent_id"] == "research-bot"
+
+
+def test_attach_reports_replaced_binding(env) -> None:
+    """Re-attaching the same (channel, account, peer) to a different
+    session must surface the previous binding via ``replaced``,
+    instead of silently dropping it."""
+    client, db = env
+    db.create_session("conv-a", "main", title="A", source="tui")
+    db.create_session("conv-b", "main", title="B", source="tui")
+
+    with client.websocket_connect("/ws") as ws:
+        _drain_bootstrap(ws)
+        # First attach: peer=* → conv-a. No replaced.
+        ws.send_text(json.dumps({
+            "action": "attach_session",
+            "session_id": "conv-a",
+            "channel": "wechat",
+            "account_id": "default",
+            "peer_kind": "direct",
+            "peer_id": "*",
+        }))
+        for _ in range(10):
+            env_msg = json.loads(ws.receive_text())
+            if env_msg.get("type") == "session_alias_changed":
+                assert env_msg["data"].get("replaced") is None
+                break
+
+        # Second attach: same key → conv-b. ``replaced`` must point at
+        # conv-a so the UI can warn the user.
+        ws.send_text(json.dumps({
+            "action": "attach_session",
+            "session_id": "conv-b",
+            "channel": "wechat",
+            "account_id": "default",
+            "peer_kind": "direct",
+            "peer_id": "*",
+        }))
+        for _ in range(10):
+            env_msg = json.loads(ws.receive_text())
+            if env_msg.get("type") == "session_alias_changed":
+                replaced = env_msg["data"].get("replaced")
+                assert replaced is not None
+                assert replaced["session_id"] == "conv-a"
+                break
 
 
 def test_attach_rejects_empty_session_id(env) -> None:

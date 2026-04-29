@@ -717,7 +717,7 @@ def _handle_attach(args: list[str], console, agent, conv_id: str) -> bool:
         from openprogram.channels.worker import (
             current_worker_pid, spawn_detached,
         )
-        _sa.attach(
+        _row, replaced = _sa.attach(
             channel=channel, account_id=account_id,
             peer_kind=peer_kind, peer_id=peer,
             agent_id=agent.id, session_id=conv_id,
@@ -726,6 +726,12 @@ def _handle_attach(args: list[str], console, agent, conv_id: str) -> bool:
             f"[green]Attached[/] {channel}:{account_id}:"
             f"{peer_kind}:{peer} → session {conv_id}"
         )
+        if replaced is not None:
+            console.print(
+                f"[yellow]Replaced[/] previous binding "
+                f"{channel}:{account_id}:{peer_kind}:{peer} "
+                f"→ session {replaced.get('session_id')}"
+            )
         if current_worker_pid() is None:
             console.print(
                 "[dim]Starting channels worker in the background so "

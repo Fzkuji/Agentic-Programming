@@ -54,6 +54,46 @@ const randomLocalId = (): string => {
   return out.slice(0, 10);
 };
 
+/**
+ * Look up the session_id currently bound to (channel, account, peer)
+ * in the cached alias list. Returns ``undefined`` when no row matches
+ * — i.e. attach would be a fresh write, not an overwrite.
+ *
+ * The server returns rows verbatim from session_aliases.json, so
+ * ``peer`` is the nested ``{kind, id}`` object, not a flat string.
+ * Always go through this helper instead of inlining the match —
+ * keeping the channel/account/peer matching in one place ensures all
+ * three call sites (channel_account, channel_action, peer_input)
+ * detect the same overwrite cases the server's _match does.
+ */
+const findExistingAlias = (
+  aliases: Array<{
+    channel?: string;
+    account_id?: string;
+    // Server sends the raw row — peer is a nested dict, not a string.
+    peer?: { kind?: string; id?: string } | string;
+    agent_id?: string;
+    session_id?: string;
+    conversation_id?: string;
+  }>,
+  channel: string,
+  account_id: string,
+  peerId: string,
+  peerKind: 'direct' | 'group' | 'channel' = 'direct',
+): string | undefined => {
+  for (const a of aliases) {
+    if (a.channel !== channel) continue;
+    if ((a.account_id ?? 'default') !== (account_id || 'default')) continue;
+    const peer = typeof a.peer === 'object' && a.peer !== null
+      ? { kind: a.peer.kind ?? 'direct', id: a.peer.id ?? '' }
+      : { kind: 'direct', id: '' };
+    if (peer.id !== peerId) continue;
+    if (peer.kind !== peerKind) continue;
+    return a.session_id ?? a.conversation_id;
+  }
+  return undefined;
+};
+
 const renderModel = (m: AgentInfo['model']): string | undefined => {
   if (!m) return undefined;
   if (typeof m === 'string') return m;
@@ -126,8 +166,27 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     //   - channel_peer_input: prompt for peer_id (e.g. wxid_xxx).
     //   - channel_qr_wait: show ASCII QR + status while wechat
     //     login is in progress.
+    //   - channel_overwrite_confirm: a previous alias would be
+    //     replaced — make the user explicitly opt in instead of
+    //     silently overwriting.
     | 'channel_action' | 'channel_peer_input' | 'channel_qr_wait'
+    | 'channel_overwrite_confirm'
   >(null);
+  // Pending attach payload paused in front of an overwrite confirm.
+  // The picker reads this to render "you're about to replace X" and
+  // sends the actual attach_session when the user picks "yes".
+  const [pendingAttach, setPendingAttach] = useState<{
+    channel: string;
+    account_id: string;
+    peer_kind: 'direct' | 'group' | 'channel';
+    peer_id: string;
+    session_id: string;
+    existingSessionId: string;
+    // Done-message lines pushSystem'd after attach lands. Captured at
+    // confirm-time so the surface text matches whatever flow opened
+    // the confirm (catch-all / peer / etc.).
+    successMessage: string;
+  } | null>(null);
   const [registerForm, setRegisterForm] = useState<{
     channel?: string;
     accountId?: string;
@@ -157,6 +216,23 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   // frame, so changing useColors() context just re-renders the entire
   // tree with the new palette — no Static remount or nonce needed.
   const lastThemeRef = useRef<string>(currentTheme);
+  // Cache of the last list_session_aliases response. The /channel
+  // picker reads this to render "you'll overwrite X" hints in option
+  // descriptions without firing a fresh round-trip. Default empty so
+  // the picker degrades to "no overwrite info" if alias data hasn't
+  // landed yet.
+  const sessionAliasesRef = useRef<Array<{
+    channel?: string;
+    account_id?: string;
+    peer?: { kind?: string; id?: string };
+    agent_id?: string;
+    session_id?: string;
+  }>>([]);
+  // True ⇔ the next session_aliases envelope should be echoed to the
+  // system area. /aliases sets this; picker pre-fetches do not. This
+  // splits "load cache" from "show user the list" so both can use the
+  // same WS action without one path dumping output into the other.
+  const sessionAliasesPrintRef = useRef<boolean>(false);
   useEffect(() => {
     if (lastThemeRef.current !== currentTheme) {
       lastThemeRef.current = currentTheme;
@@ -512,12 +588,43 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         pushSystem(`Channel bindings:\n${lines.join('\n')}`);
       } else if (ev.type === 'session_aliases') {
         const data = ev.data ?? [];
-        const lines = data.length === 0
-          ? ['(no session aliases)']
-          : data.map((a: { channel?: string; account_id?: string; peer?: string; agent_id?: string; conversation_id?: string }) =>
-              `  ${a.channel ?? '?'}:${a.account_id ?? '?'}:${a.peer ?? '?'} → ${a.agent_id ?? '?'}/${a.conversation_id ?? '?'}`,
-            );
-        pushSystem(`Session aliases:\n${lines.join('\n')}`);
+        // Cache the raw rows so the channel-binding picker can show
+        // "you'll overwrite X" hints without re-fetching. Also drives
+        // the on-demand `(no session aliases)` summary below.
+        sessionAliasesRef.current = data;
+        if (sessionAliasesPrintRef.current) {
+          sessionAliasesPrintRef.current = false;
+          const lines = data.length === 0
+            ? ['(no session aliases)']
+            : data.map((a) => {
+                const peerStr = a.peer
+                  ? `${a.peer.kind ?? 'direct'}:${a.peer.id ?? '?'}`
+                  : '?';
+                return (
+                  `  ${a.channel ?? '?'}:` +
+                  `${a.account_id ?? '?'}:${peerStr} → ` +
+                  `${a.agent_id ?? '?'}/${a.session_id ?? '?'}`
+                );
+              });
+          pushSystem(`Session aliases:\n${lines.join('\n')}`);
+        }
+      } else if (ev.type === 'session_alias_changed') {
+        const d = ev.data;
+        // Server kicks one of these on every successful attach /
+        // detach. The replaced field is the carrier for "you just
+        // overwrote X" awareness — the whole point of this refactor.
+        if (d?.action === 'attached' && d.replaced) {
+          const r = d.replaced;
+          pushSystem(
+            `⚠️  Replaced previous binding ` +
+            `${r.channel ?? '?'}:${r.account_id ?? '?'}:` +
+            `${r.peer?.id ?? '?'} → ${r.session_id ?? '?'}. ` +
+            `Use /aliases to inspect.`,
+          );
+        }
+        // Refresh the cache so subsequent picker descriptions stay
+        // accurate. Server doesn't push the full list on attach.
+        client.send({ action: 'list_session_aliases' } as never);
       } else if (ev.type === 'conversation_loaded') {
         const data = ev.data as {
           id?: string;
@@ -595,6 +702,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     const offState = client.onState((s) => setConnState(s));
     client.send({ action: 'stats' });
     client.send({ action: 'list_agents' });
+    // Boot-time prefetch of alias rows into sessionAliasesRef. Silent
+    // (sessionAliasesPrintRef stays false) — purely so the channel
+    // picker can render "you'll overwrite X" hints without latency
+    // when /channel is opened later.
+    client.send({ action: 'list_session_aliases' });
     trimHistoryFile();
     return () => {
       off();
@@ -760,6 +872,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           setThemeSetting(name);
           return true;
         },
+        requestAliasesPrint: () => { sessionAliasesPrintRef.current = true; },
       });
       if (handled) return;
     }
@@ -862,11 +975,24 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     );
   } else if (pickerKind === 'channel_account') {
     const filtered = channelAccounts.filter((a) => a.channel === chosenChannel);
-    const accountItems: PickerItem<string>[] = filtered.map((a) => ({
-      label: a.account_id ?? '',
-      description: a.configured ? 'logged in' : 'not configured',
-      value: a.account_id ?? '',
-    }));
+    const accountItems: PickerItem<string>[] = filtered.map((a) => {
+      // Surface the current catch-all binding (if any) right in the
+      // account row, so the user sees "selecting this will overwrite
+      // X" before they ever press Enter — the confirm picker is the
+      // safety net, this is the front-page warning.
+      const bound = findExistingAlias(
+        sessionAliasesRef.current,
+        chosenChannel ?? '', a.account_id ?? '', '*',
+      );
+      const status = a.configured ? 'logged in' : 'not configured';
+      return {
+        label: a.account_id ?? '',
+        description: bound
+          ? `${status} · already bound → ${bound}`
+          : status,
+        value: a.account_id ?? '',
+      };
+    });
     const isTokenChannel =
       chosenChannel === 'discord' || chosenChannel === 'telegram' || chosenChannel === 'slack';
     const items: PickerItem<string>[] = [
@@ -907,9 +1033,33 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           // server-side attach_session will lazy-create the empty
           // SessionDB row.
           const targetConvId = conversationId ?? `local_${randomLocalId()}`;
-          if (!conversationId) {
-            setConversationId(targetConvId);
+          const okMsg =
+            `✅ Bound this conversation to ${chosenChannel}:${it.value}. ` +
+            `Every inbound message lands here. Tweak via /bindings.`;
+          // Detect overwrite ahead of time. Server's attach() does
+          // return ``replaced`` so we *would* learn about it post-hoc
+          // — but the user has zero chance to say no at that point.
+          // Surfacing it pre-attach turns a silent destructive op
+          // into an explicit choice.
+          const existing = findExistingAlias(
+            sessionAliasesRef.current,
+            chosenChannel ?? '', it.value, '*',
+          );
+          if (existing && existing !== targetConvId) {
+            if (!conversationId) setConversationId(targetConvId);
+            setPendingAttach({
+              channel: chosenChannel ?? '',
+              account_id: it.value,
+              peer_kind: 'direct',
+              peer_id: '*',
+              session_id: targetConvId,
+              existingSessionId: existing,
+              successMessage: okMsg,
+            });
+            setPickerKind('channel_overwrite_confirm');
+            return;
           }
+          if (!conversationId) setConversationId(targetConvId);
           client.send({
             action: 'attach_session',
             session_id: targetConvId,
@@ -918,10 +1068,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             peer_kind: 'direct',
             peer_id: '*',
           } as never);
-          pushSystem(
-            `✅ Bound this conversation to ${chosenChannel}:${it.value}. ` +
-            `Every inbound message lands here. Tweak via /bindings.`,
-          );
+          pushSystem(okMsg);
           setPickerKind(null);
           setChosenChannel(undefined);
           setChosenAccount(undefined);
@@ -976,9 +1123,28 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             // yet — server-side attach_session backs it with an
             // empty SessionDB row.
             const targetConvId = conversationId ?? `local_${randomLocalId()}`;
-            if (!conversationId) {
-              setConversationId(targetConvId);
+            const okMsg =
+              `✅ Bound ${chosenChannel}:${chosenAccount} (catch-all) → current conversation. ` +
+              `Channel worker will route every inbound message here.`;
+            const existing = findExistingAlias(
+              sessionAliasesRef.current,
+              chosenChannel ?? '', chosenAccount ?? '', '*',
+            );
+            if (existing && existing !== targetConvId) {
+              if (!conversationId) setConversationId(targetConvId);
+              setPendingAttach({
+                channel: chosenChannel ?? '',
+                account_id: chosenAccount ?? '',
+                peer_kind: 'direct',
+                peer_id: '*',
+                session_id: targetConvId,
+                existingSessionId: existing,
+                successMessage: okMsg,
+              });
+              setPickerKind('channel_overwrite_confirm');
+              return;
             }
+            if (!conversationId) setConversationId(targetConvId);
             client.send({
               action: 'attach_session',
               session_id: targetConvId,
@@ -987,10 +1153,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
               peer_kind: 'direct',
               peer_id: '*',
             } as never);
-            pushSystem(
-              `✅ Bound ${chosenChannel}:${chosenAccount} (catch-all) → current conversation. ` +
-              `Channel worker will route every inbound message here.`,
-            );
+            pushSystem(okMsg);
             setPickerKind(null);
             setChosenChannel(undefined);
             setChosenAccount(undefined);
@@ -1016,9 +1179,27 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             return;
           }
           const targetConvId = conversationId ?? `local_${randomLocalId()}`;
-          if (!conversationId) {
-            setConversationId(targetConvId);
+          const okMsg =
+            `✅ Bound ${chosenChannel}:${chosenAccount}:${peerId} → current conversation.`;
+          const existing = findExistingAlias(
+            sessionAliasesRef.current,
+            chosenChannel ?? '', chosenAccount ?? '', peerId,
+          );
+          if (existing && existing !== targetConvId) {
+            if (!conversationId) setConversationId(targetConvId);
+            setPendingAttach({
+              channel: chosenChannel ?? '',
+              account_id: chosenAccount ?? '',
+              peer_kind: 'direct',
+              peer_id: peerId,
+              session_id: targetConvId,
+              existingSessionId: existing,
+              successMessage: okMsg,
+            });
+            setPickerKind('channel_overwrite_confirm');
+            return;
           }
+          if (!conversationId) setConversationId(targetConvId);
           client.send({
             action: 'attach_session',
             session_id: targetConvId,
@@ -1027,7 +1208,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             peer_kind: 'direct',
             peer_id: peerId,
           } as never);
-          pushSystem(`✅ Bound ${chosenChannel}:${chosenAccount}:${peerId} → current conversation.`);
+          pushSystem(okMsg);
           setPickerKind(null);
           setChosenChannel(undefined);
           setChosenAccount(undefined);
@@ -1035,6 +1216,64 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         onCancel={() => setPickerKind('channel_action')}
       />
     );
+  } else if (pickerKind === 'channel_overwrite_confirm') {
+    // Two-option confirm: replace the existing alias, or back out.
+    // Putting the actual session ids in the title makes the
+    // destructive op visible — same model Linear uses for "delete
+    // issue X" prompts.
+    const p = pendingAttach;
+    pickerNode = p ? (
+      <Picker
+        title={
+          `${p.channel}:${p.account_id}:${p.peer_id} is already bound to ` +
+          `${p.existingSessionId}. Replace with ${p.session_id}?`
+        }
+        items={[
+          {
+            label: 'Replace existing binding',
+            description: `${p.existingSessionId} → ${p.session_id}`,
+            value: '__yes__',
+          },
+          {
+            label: 'Cancel',
+            description: 'Keep the existing binding, do nothing',
+            value: '__no__',
+          },
+        ]}
+        onSelect={(it) => {
+          if (it.value === '__yes__') {
+            client.send({
+              action: 'attach_session',
+              session_id: p.session_id,
+              channel: p.channel,
+              account_id: p.account_id,
+              peer_kind: p.peer_kind,
+              peer_id: p.peer_id,
+            } as never);
+            pushSystem(p.successMessage);
+          } else {
+            pushSystem(
+              `Cancelled. ${p.channel}:${p.account_id}:${p.peer_id} ` +
+              `still bound to ${p.existingSessionId}.`,
+            );
+          }
+          setPendingAttach(null);
+          setPickerKind(null);
+          setChosenChannel(undefined);
+          setChosenAccount(undefined);
+        }}
+        onCancel={() => {
+          pushSystem(
+            `Cancelled. ${p.channel}:${p.account_id}:${p.peer_id} ` +
+            `still bound to ${p.existingSessionId}.`,
+          );
+          setPendingAttach(null);
+          setPickerKind(null);
+          setChosenChannel(undefined);
+          setChosenAccount(undefined);
+        }}
+      />
+    ) : null;
   } else if (pickerKind === 'channel_qr_wait') {
     // Read-only "picker" — no input, just renders the QR + status
     // until the qr_login envelope handler advances us out.

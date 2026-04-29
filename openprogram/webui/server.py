@@ -2765,7 +2765,7 @@ async def _handle_ws_command(ws, cmd: dict):
                         # meta and would surface the underlying error
                         # if it really mattered.
                         pass
-                row = _sa.attach(
+                row, replaced = _sa.attach(
                     channel=cmd.get("channel") or "",
                     account_id=cmd.get("account_id") or "default",
                     peer_kind=cmd.get("peer_kind") or "direct",
@@ -2777,7 +2777,14 @@ async def _handle_ws_command(ws, cmd: dict):
                     spawn_detached()
                 _broadcast(json.dumps({
                     "type": "session_alias_changed",
-                    "data": {"action": "attached", "alias": row},
+                    "data": {
+                        "action": "attached",
+                        "alias": row,
+                        # ``replaced`` lets the TUI surface "you just
+                        # overwrote X" so attach is no longer a silent
+                        # destructive op.
+                        "replaced": replaced,
+                    },
                 }, default=str))
         except Exception as e:  # noqa: BLE001
             await ws.send_text(json.dumps({

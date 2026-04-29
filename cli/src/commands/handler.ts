@@ -29,6 +29,13 @@ export interface SlashContext {
   currentAgent?: string;
   currentModel?: string;
   currentConversation?: string;
+  /**
+   * Tell the REPL that the *next* ``session_aliases`` envelope should
+   * be printed to the system area. Used by /aliases — picker
+   * pre-fetches stay silent, so opening /channel doesn't dump a long
+   * alias list into the transcript.
+   */
+  requestAliasesPrint?: () => void;
 }
 
 const helpText = (): string => {
@@ -133,6 +140,9 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
     case 'aliases':
     case 'sessions': {
       // slash commands run silently — no user echo
+      if (cmd === 'aliases') {
+        ctx.requestAliasesPrint?.();
+      }
       ctx.client.send({
         action: cmd === 'aliases' ? 'list_session_aliases' : 'list_conversations',
       });

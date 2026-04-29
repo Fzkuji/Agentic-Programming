@@ -486,7 +486,7 @@ def main():
             from openprogram.channels.worker import (
                 current_worker_pid, spawn_detached,
             )
-            _a.attach(
+            _row, replaced = _a.attach(
                 channel=args.channel, account_id=args.account,
                 peer_kind=args.peer_kind, peer_id=args.peer,
                 agent_id=owner, session_id=args.session_id,
@@ -494,6 +494,9 @@ def main():
             print(f"Attached {args.channel}:{args.account}:"
                   f"{args.peer_kind}:{args.peer} → agent={owner}, "
                   f"session={args.session_id}")
+            if replaced is not None:
+                print(f"  (replaced previous binding "
+                      f"→ session {replaced.get('session_id')})")
             if current_worker_pid() is None:
                 print("Starting channels worker in the background...")
                 spawn_detached()
