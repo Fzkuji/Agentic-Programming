@@ -8,8 +8,10 @@ describe('REPL layout contract', () => {
     const source = read('src/screens/REPL.tsx');
 
     expect(source).toContain('<Shell mouseTracking mode="alt">');
-    expect(source).toContain('<TranscriptViewport stickyBottom scrollRef={transcriptScrollRef}>');
+    expect(source).toContain('<TranscriptViewport');
+    expect(source).toContain('scrollRef={transcriptScrollRef}');
     expect(source).toContain('<Messages');
+    expect(source).toContain('showScrollbar={committed.length > 0 || streaming !== null}');
     expect(source).not.toContain('onTranscriptScroll');
   });
 
@@ -40,6 +42,8 @@ describe('REPL layout contract', () => {
 
     expect(source).toContain('ScrollBox');
     expect(source).toContain('TranscriptScrollbar');
+    expect(source).toContain("prependListener('input'");
+    expect(source).toContain('position="absolute"');
     expect(source).toContain('stopImmediatePropagation');
   });
 });

@@ -387,7 +387,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   return (
     <Shell mouseTracking mode="alt">
-      <TranscriptViewport stickyBottom scrollRef={transcriptScrollRef}>
+      <TranscriptViewport
+        stickyBottom
+        scrollRef={transcriptScrollRef}
+        showScrollbar={committed.length > 0 || streaming !== null}
+      >
         <Messages
           committed={committed}
           streaming={streaming}

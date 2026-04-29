@@ -2,6 +2,7 @@ import React, {
   type MutableRefObject,
   type ReactNode,
   useCallback,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -12,7 +13,7 @@ import {
   ScrollBox,
   Text,
   type ScrollBoxHandle,
-  useInput,
+  useStdin,
   useTerminalSize,
 } from '../runtime/index.js';
 import { useColors } from '../theme/ThemeProvider.js';
@@ -46,8 +47,23 @@ export function computeScrollbarCells(
 export interface TranscriptViewportProps {
   children: ReactNode;
   scrollRef?: MutableRefObject<ScrollBoxHandle | null>;
+  showScrollbar?: boolean;
   stickyBottom?: boolean;
 }
+
+type InputEventLike = {
+  input: string;
+  key: {
+    wheelUp: boolean;
+    wheelDown: boolean;
+    pageUp: boolean;
+    pageDown: boolean;
+    home: boolean;
+    end: boolean;
+    ctrl: boolean;
+  };
+  stopImmediatePropagation: () => void;
+};
 
 const getSnapshot = (scroll: ScrollBoxHandle | null): string => {
   if (!scroll) return '0:0:0';
@@ -79,7 +95,7 @@ const TranscriptScrollbar: React.FC<{
   }
 
   return (
-    <NoSelect width={1} flexShrink={0} marginLeft={1}>
+    <NoSelect width={1} flexShrink={0} position="absolute" top={0} right={1}>
       <Box flexDirection="column" flexShrink={0}>
         {cells.map((cell, index) => (
           <Text
@@ -97,10 +113,12 @@ const TranscriptScrollbar: React.FC<{
 export const TranscriptViewport: React.FC<TranscriptViewportProps> = ({
   children,
   scrollRef,
+  showScrollbar = true,
   stickyBottom = false,
 }) => {
   const localRef = useRef<ScrollBoxHandle | null>(null);
   const [scrollHandle, setScrollHandle] = useState<ScrollBoxHandle | null>(null);
+  const { inputEmitter, setRawMode } = useStdin();
   const { rows } = useTerminalSize();
 
   const setRef = useCallback((handle: ScrollBoxHandle | null) => {
@@ -119,7 +137,8 @@ export const TranscriptViewport: React.FC<TranscriptViewportProps> = ({
     event.stopImmediatePropagation();
   };
 
-  useInput((input, key, event) => {
+  const handleScrollInput = useCallback((event: InputEventLike) => {
+    const { input, key } = event;
     const scroll = localRef.current;
     if (!scroll) return;
 
@@ -155,10 +174,22 @@ export const TranscriptViewport: React.FC<TranscriptViewportProps> = ({
     if (key.end || (key.ctrl && input === 'G')) {
       runScroll((s) => s.scrollToBottom(), event);
     }
-  });
+  }, [rows]);
+
+  useLayoutEffect(() => {
+    setRawMode(true);
+    return () => setRawMode(false);
+  }, [setRawMode]);
+
+  useLayoutEffect(() => {
+    inputEmitter.prependListener('input', handleScrollInput);
+    return () => {
+      inputEmitter.removeListener('input', handleScrollInput);
+    };
+  }, [handleScrollInput, inputEmitter]);
 
   return (
-    <Box flexDirection="row" flexGrow={1} flexShrink={1}>
+    <Box flexDirection="column" flexGrow={1} flexShrink={1} position="relative">
       <ScrollBox
         ref={setRef}
         flexDirection="column"
@@ -168,7 +199,7 @@ export const TranscriptViewport: React.FC<TranscriptViewportProps> = ({
       >
         {children}
       </ScrollBox>
-      <TranscriptScrollbar scroll={scrollHandle} />
+      {showScrollbar ? <TranscriptScrollbar scroll={scrollHandle} /> : null}
     </Box>
   );
 };
