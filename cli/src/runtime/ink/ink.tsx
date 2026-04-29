@@ -457,22 +457,10 @@ export default class Ink {
       this.resetFramesForAltScreen()
       this.needsEraseBeforePaint = true
     } else if (!this.isPaused && this.options.stdout.isTTY) {
-      // Main-screen resize: log-update's `previousOutput` was wrapped at
-      // the OLD terminal width, so its relative cursor moves land in the
-      // wrong cells once the column count changes (visible as left-shift
-      // residue and "│" right-border carry-over). Wipe the visible
-      // screen and clear log-update's memo so the next render (queued
-      // below in the microtask) writes a full frame from (0,0) at the
-      // new width.
-      //
-      // CRITICAL: only clear visible cells (CSI H + CSI J), NEVER write
-      // CSI 3J. The user's scrollback — their shell history before we
-      // started, plus any content we pushed via emitToScrollback — must
-      // survive every resize. Wiping it on each window drag is what
-      // made the inline-flow REPL "lose everything" when the user
-      // resized; the welcome banner and committed turns disappeared
-      // even though they should have stayed in scrollback.
-      this.options.stdout.write('\x1b[H\x1b[J')
+      // Main-screen resize must not clear visible cells. Inline REPL
+      // history lives in terminal scrollback and may currently occupy the
+      // viewport; CSI J/2J erases that visible copy and leaves a blank
+      // screen until the user scrolls. Reset diff memo only.
       this.log.reset()
     }
 

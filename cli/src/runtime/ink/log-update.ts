@@ -141,15 +141,16 @@ export class LogUpdate {
     const startTime = performance.now()
     const stylePool = this.options.stylePool
 
-    // Since we assume the cursor is at the bottom on the screen, we only need
-    // to clear when the viewport gets shorter (i.e. the cursor position drifts)
-    // or when it gets thinner (and text wraps). We _could_ figure out how to
-    // not reset here but that would involve predicting the current layout
-    // _after_ the viewport change which means calcuating text wrapping.
-    // Resizing is a rare enough event that it's not practically a big issue.
+    // In alt-screen, a viewport resize can leave stale wrapped cells, so a
+    // full reset is acceptable. In main-screen inline flow, terminal
+    // scrollback is the transcript; clearTerminal would erase the visible
+    // copy of that transcript on every window drag.
     if (
-      next.viewport.height < prev.viewport.height ||
-      (prev.viewport.width !== 0 && next.viewport.width !== prev.viewport.width)
+      altScreen &&
+      (
+        next.viewport.height < prev.viewport.height ||
+        (prev.viewport.width !== 0 && next.viewport.width !== prev.viewport.width)
+      )
     ) {
       return fullResetSequence_CAUSES_FLICKER(next, 'resize', stylePool)
     }
