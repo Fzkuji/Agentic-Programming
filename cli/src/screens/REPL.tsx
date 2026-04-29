@@ -53,7 +53,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [windowByConv, setWindowByConv] = useState<Record<string, number>>({});
   const [history, setHistory] = useState<string[]>(() => loadHistory());
   const [conversationTitle, setConversationTitle] = useState<string | undefined>(undefined);
-  const [scrollToBottomKey, setScrollToBottomKey] = useState(0);
   const [promptDraft, setPromptDraft] = useState<string | undefined>(undefined);
   const [searchBaseDraft, setSearchBaseDraft] = useState('');
   const [contextSearchQuery, setContextSearchQuery] = useState('');
@@ -221,7 +220,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   const onSubmit = (text: string) => {
     if (!text.trim()) return;
-    setScrollToBottomKey((n) => n + 1);
     // Save EVERY submitted line — chat messages and slash commands —
     // to up-arrow history. Previously only non-slash-handled inputs
     // landed in history; slash commands like `/channel` would
@@ -383,20 +381,10 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     setContextSearchQuery, setSearchResults, setPromptDraft,
     sessionAliasesRef,
   });
-  const scrollFollowKey = [
-    conversationId ?? 'new',
-    committed.length,
-    streaming?.id ?? '',
-    streaming?.text.length ?? 0,
-    streaming?.tools?.length ?? 0,
-    pickerNode ? 'picker' : 'messages',
-    stats ? 'stats' : 'no-stats',
-  ].join(':');
-  const forceBottomKey = `${conversationId ?? 'new'}:${scrollToBottomKey}`;
 
   return (
     <Shell mouseTracking mode="alt">
-      <ScrollView stickyBottom followKey={scrollFollowKey} forceBottomKey={forceBottomKey}>
+      <ScrollView stickyBottom>
         <Messages
           committed={committed}
           streaming={streaming}
