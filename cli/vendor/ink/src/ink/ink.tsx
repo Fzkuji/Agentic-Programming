@@ -202,7 +202,6 @@ export default class Ink {
   // Fired alongside the terminal repaint whenever the selection mutates
   // so UI (e.g. footer hints) can react to selection appearing/clearing.
   private readonly selectionListeners = new Set<() => void>()
-  private selectionWasActive = false
   // DOM nodes currently under the pointer (mode-1003 motion). Held here
   // so App.tsx's handleMouseEvent is stateless — dispatchHover diffs
   // against this set and mutates it in place.
@@ -456,6 +455,18 @@ export default class Ink {
 
       this.resetFramesForAltScreen()
       this.needsEraseBeforePaint = true
+    } else if (!this.isPaused && this.options.stdout.isTTY) {
+      // Main-screen resize: log-update's `previousOutput` was wrapped at
+      // the OLD terminal width, so its relative cursor moves land in the
+      // wrong cells once the column count changes (visible as left-shift
+      // residue and "│" right-border carry-over). Wipe the visible
+      // screen + scrollback and clear log-update's memo. The next render
+      // (queued below in the microtask) writes a full frame from (0,0)
+      // at the new width — every component (Welcome, Messages turns,
+      // PromptInput, BottomBar) re-flows naturally because Yoga
+      // recomputes layout at the new terminalColumns.
+      this.options.stdout.write('\x1b[2J\x1b[3J\x1b[H')
+      this.log.reset()
     }
 
     // Already queued: later events in this burst updated dims/alt-screen
@@ -1028,6 +1039,66 @@ export default class Ink {
   }
 
   /**
+   * Push a chunk of text into the terminal's native scrollback so it sits
+   * ABOVE the live Ink frame, then redraw the frame fresh in the new
+   * cursor position. Use this for "transcript turns that won't reflow"
+   * (chat history, completed log lines) — the OS scrollback owns history,
+   * the Ink frame stays small (only the live strip).
+   *
+   * Mechanics on main-screen mode:
+   *   1. Move the cursor up over the current frame (relative to where it
+   *      was last parked) and clear from there to the bottom of the
+   *      screen. Visual frame is wiped, scrollback intact.
+   *   2. Write ``text`` to stdout — terminal scrolls naturally, text
+   *      lands in scrollback.
+   *   3. ``repaint()`` resets prevFrame + displayCursor so the next
+   *      render plans its layout from the fresh cursor position
+   *      instead of trying a relative move from the old park spot.
+   *   4. ``onRender()`` immediately to redraw the Ink frame in the new
+   *      position — no flicker between scrollback emit and live strip.
+   *
+   * Alt-screen has no scrollback, so the call degrades to a plain
+   * ``stdout.write`` — callers can use the same hook unconditionally.
+   *
+   * Why a method on Ink and not a free function: needs ``frontFrame``,
+   * ``displayCursor``, ``repaint`` and ``onRender``. All private.
+   */
+  emitToScrollback(text: string): void {
+    if (!this.options.stdout.isTTY || this.isUnmounted || this.isPaused) {
+      this.options.stdout.write(text)
+      return
+    }
+    if (this.altScreenActive) {
+      this.options.stdout.write(text)
+      return
+    }
+
+    // The cursor was last parked at displayCursor (or the frame's own
+    // cursor if no parking declaration is active). Move it up to
+    // (col 0, frame top) and clear from there to the bottom of the
+    // screen. ``\x1b[J`` from cursor clears below — exactly the
+    // current frame's footprint.
+    const parked = this.displayCursor
+    const baseY = parked ? parked.y : this.frontFrame.cursor.y
+    if (baseY > 0) {
+      this.options.stdout.write('\r\x1b[' + baseY + 'A\x1b[J')
+    } else {
+      this.options.stdout.write('\r\x1b[J')
+    }
+
+    this.options.stdout.write(text)
+    if (text.length > 0 && !text.endsWith('\n')) {
+      this.options.stdout.write('\n')
+    }
+
+    // Reset frame state so the next plan starts from the fresh cursor
+    // position — repaint() clears displayCursor + both frame buffers.
+    this.repaint()
+    this.prevFrameContaminated = true
+    this.onRender()
+  }
+
+  /**
    * Clear the physical terminal and force a full redraw.
    *
    * The traditional readline ctrl+l — clears the visible screen and
@@ -1554,15 +1625,14 @@ export default class Ink {
   }
   private notifySelectionChange(): void {
     this.scheduleRender()
-
-    const active = hasSelection(this.selection)
-
-    if (active !== this.selectionWasActive) {
-      this.selectionWasActive = active
-
-      for (const cb of this.selectionListeners) {
-        cb()
-      }
+    // Fire unconditionally on every selection mutation — start, update,
+    // finish, clear. Edge-triggering on hasSelection() flips would skip
+    // the mouse-up notification (anchor+focus still set, isDragging just
+    // went false), which is exactly the moment copy-on-select needs.
+    // useHasSelection / useSyncExternalStore consumers de-dupe via
+    // snapshot equality, so extra fires don't cause extra renders.
+    for (const cb of this.selectionListeners) {
+      cb()
     }
   }
 

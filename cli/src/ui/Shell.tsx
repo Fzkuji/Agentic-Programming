@@ -1,31 +1,25 @@
 /**
  * <Shell> — root component for OpenProgram TUI screens.
  *
- * Wraps AlternateScreen and applies the global flex root so children
- * can use ``flexGrow`` to fill available height. Provides the
- * outermost <Box> that everything else lives inside, plus the
- * standard ``height={rows}`` so child <ScrollView> components have a
- * concrete height to grow into (without it, ScrollBox falls back to
- * children's intrinsic height and overflow:scroll never kicks in).
+ * Two render modes:
  *
- * Use it like this:
+ *  - ``mode="inline"`` (default) — main-buffer flow. The Shell renders
+ *    a small dynamic strip (input + status + any in-flight modals).
+ *    Caller is responsible for shoveling already-committed turns to
+ *    ``stdout`` via ``console.log`` so the terminal's native
+ *    scrollback owns history. This is the layout REPL uses: history
+ *    scrolls up naturally, only the bottom strip redraws.
  *
- *     <Shell>
- *       <ScrollView>
- *         {messages.map(m => <MessageRow ...>)}
- *       </ScrollView>
- *       <PromptInput />
- *       <BottomBar />
- *     </Shell>
+ *  - ``mode="alt"`` — alt-screen flow. Wraps in <AlternateScreen> and
+ *    pins height to terminal rows so flexbox children can fill the
+ *    viewport. Used by ``--demo`` and any future fullscreen views
+ *    (browser overlay, transcript modal). Don't use this for the
+ *    chat REPL: alt-screen + a growing message list reflows the
+ *    whole frame on every turn and squeezes content (the bug that
+ *    motivated this refactor).
  *
- * The Shell takes care of:
- *   - entering AlternateScreen (so output doesn't pollute scrollback)
- *   - sizing root to terminal rows×cols (so flex math works)
- *   - reactive resize via useTerminalSize (drives everything in tree)
- *   - mouse tracking opt-in (off by default — old terminals trip on it)
- *
- * The Shell DOES NOT provide modal/toast contexts yet; phase 2 adds
- * <UIProviders> which wraps Shell with those.
+ * Both modes provide ToastProvider + ModalProvider + esc handler so
+ * picker / form code is mode-agnostic.
  */
 import React, { type ReactNode } from 'react';
 import { AlternateScreen, Box, useInput, useTerminalSize } from '@openprogram/ink';
@@ -38,6 +32,8 @@ export interface ShellProps {
    * older terminals (Apple Terminal) and SSH-via-tmux setups don't
    * play nicely. Off keeps the keyboard-only path bulletproof. */
   mouseTracking?: boolean;
+  /** Render mode — see component doc. Default ``"inline"``. */
+  mode?: 'inline' | 'alt';
 }
 
 /**
@@ -59,26 +55,55 @@ const ModalEscHandler: React.FC = () => {
   return null;
 };
 
-const ShellInner: React.FC<{ children: ReactNode }> = ({ children }) => {
+/**
+ * Alt-screen body — fixed height, full width. Children flex inside
+ * the rows×cols box so ScrollView and Co. have a height to grow into.
+ */
+const AltShellInner: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { columns, rows } = useTerminalSize();
   return (
-    <Box
-      flexDirection="column"
-      width={columns}
-      height={rows}
-    >
+    <Box flexDirection="column" width={columns} height={rows}>
       {children}
     </Box>
   );
 };
 
-export const Shell: React.FC<ShellProps> = ({ children, mouseTracking = false }) => (
-  <AlternateScreen mouseTracking={mouseTracking}>
+/**
+ * Inline body — dynamic height. ink redraws this strip in place via
+ * cursor-up; no fixed height because we want the strip to be exactly
+ * as tall as its current children (1 line when idle, more when a
+ * picker / form is open). Width is unconstrained so wrap honors the
+ * terminal width itself.
+ */
+const InlineShellInner: React.FC<{ children: ReactNode }> = ({ children }) => (
+  <Box flexDirection="column">
+    {children}
+  </Box>
+);
+
+export const Shell: React.FC<ShellProps> = ({
+  children,
+  mouseTracking = false,
+  mode = 'inline',
+}) => {
+  if (mode === 'alt') {
+    return (
+      <AlternateScreen mouseTracking={mouseTracking}>
+        <ToastProvider>
+          <ModalProvider>
+            <ModalEscHandler />
+            <AltShellInner>{children}</AltShellInner>
+          </ModalProvider>
+        </ToastProvider>
+      </AlternateScreen>
+    );
+  }
+  return (
     <ToastProvider>
       <ModalProvider>
         <ModalEscHandler />
-        <ShellInner>{children}</ShellInner>
+        <InlineShellInner>{children}</InlineShellInner>
       </ModalProvider>
     </ToastProvider>
-  </AlternateScreen>
-);
+  );
+};

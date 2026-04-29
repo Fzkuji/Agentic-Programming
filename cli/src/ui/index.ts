@@ -74,3 +74,7 @@ export {
   useResponsive,
 } from './hooks.js';
 export type { TerminalSize, Breakpoint, ResponsiveValue } from './hooks.js';
+
+// Re-export the vendored-ink scrollback writer through the kit so
+// screen code never has to reach into the vendored package directly.
+export { useScrollbackWriter } from '@openprogram/ink';

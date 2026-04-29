@@ -2,10 +2,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { Box, Text, useApp, useInput } from '@openprogram/ink';
-import { Shell, ScrollView, ModalHost, ToastHost } from '../ui/index.js';
+import { Shell, ModalHost, ToastHost, useScrollbackWriter } from '../ui/index.js';
 import { BackendClient, WsEnvelope, StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
-import { Messages } from '../components/Messages.js';
+import { TurnRow } from '../components/Turn.js';
 import { Spinner } from '../components/Spinner.js';
 import { Picker, PickerItem } from '../components/Picker.js';
 import { LineInput } from '../components/LineInput.js';
@@ -17,6 +17,7 @@ import { copyToClipboard } from '../utils/clipboard.js';
 import { useTheme } from '../theme/ThemeProvider.js';
 import { isThemeSetting } from '../theme/themes.js';
 import { ThemePicker } from '../components/ThemePicker.js';
+import { formatTurnText, formatWelcomeText } from '../utils/formatTranscript.js';
 
 export interface REPLProps {
   client: BackendClient;
@@ -212,6 +213,17 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [thinkingEffort, setThinkingEffort] = useState<'off' | 'low' | 'medium' | 'high'>('medium');
   const [connState, setConnState] = useState<ConnectionState>(client.getState());
   const agentSetRef = useRef(false);
+  // Inline-flow scrollback bookkeeping. Both bumps are reset-safe so
+  // /clear (clearCommitted) restarts cleanly.
+  //   - welcomePrintedRef: only print Welcome the first time stats
+  //     arrive; subsequent stats updates would just duplicate the
+  //     banner in scrollback.
+  //   - lastWrittenIdxRef: index of the next ``committed`` entry that
+  //     hasn't yet been flushed to stdout. The effect downstream
+  //     formats every entry from this index up to committed.length
+  //     and resets the cursor.
+  const welcomePrintedRef = useRef(false);
+  const lastWrittenIdxRef = useRef(0);
   // Theme switch: with hermes-ink every render is a full cell-grid
   // frame, so changing useColors() context just re-renders the entire
   // tree with the new palette — no Static remount or nonce needed.
@@ -245,6 +257,31 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     const t = setInterval(() => setTick((x) => x + 1), 1000);
     return () => clearInterval(t);
   }, [activity]);
+
+  // Inline-flow: emit the Welcome banner into the terminal's
+  // scrollback the first time stats arrive, then never again.
+  // emitToScrollback redraws the live strip in the new cursor
+  // position so there's no flicker / overlap with the input box.
+  const emitScrollback = useScrollbackWriter();
+  useEffect(() => {
+    if (!stats || welcomePrintedRef.current) return;
+    welcomePrintedRef.current = true;
+    emitScrollback(formatWelcomeText(stats));
+  }, [stats, emitScrollback]);
+
+  // Inline-flow: each newly committed turn (user message, finished
+  // assistant reply, system note) emits into scrollback. The live
+  // strip below — input box + status — repaints in the new cursor
+  // position automatically. Diff against lastWrittenIdxRef so
+  // unrelated state changes don't re-emit already-emitted turns.
+  useEffect(() => {
+    const start = lastWrittenIdxRef.current;
+    if (start >= committed.length) return;
+    const slice = committed.slice(start);
+    const text = slice.map(formatTurnText).join('');
+    if (text) emitScrollback(text);
+    lastWrittenIdxRef.current = committed.length;
+  }, [committed, emitScrollback]);
 
 
 
@@ -645,6 +682,11 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
               | 'system',
             text: m.content ?? '',
           }));
+        // Switching conversations replaces the transcript — reset
+        // the inline-flush cursor so the loaded history flushes to
+        // stdout fresh, instead of relying on the diff against
+        // whatever the previous conversation's length was.
+        lastWrittenIdxRef.current = 0;
         setCommitted(turns);
         setStreaming(null);
       } else if (ev.type === 'model_switched') {
@@ -788,11 +830,19 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       const handled = handleSlash(text, {
         client,
         pushSystem,
-        clearCommitted: () => setCommitted([]),
+        clearCommitted: () => {
+          // /clear: drop the React-side log AND reset the inline
+          // flush cursor so a new welcome / new conversation prints
+          // freshly without trying to "catch up" on writes already
+          // in scrollback.
+          setCommitted([]);
+          lastWrittenIdxRef.current = 0;
+        },
         newSession: () => {
           setConversationId(undefined);
           setStreaming(null);
           setCommitted([]);
+          lastWrittenIdxRef.current = 0;
         },
         exit: () => app.exit(),
         openPicker: (kind) => setPickerKind(kind),
@@ -1404,6 +1454,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           client.send({ action: 'load_conversation', conv_id: it.value });
           setConversationId(it.value);
           setCommitted([]);
+          lastWrittenIdxRef.current = 0;
           setStreaming(null);
           setPickerKind(null);
         }}
@@ -1424,13 +1475,12 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   // residual content drift.
   return (
     <Shell mouseTracking={false}>
-      <ScrollView stickyBottom>
-        <Messages
-          committed={committed}
-          streaming={streaming}
-          welcome={pickerNode ? undefined : (stats ?? undefined)}
-        />
-      </ScrollView>
+      {/* Currently-streaming assistant turn lives in the dynamic
+          strip; ink redraws it in place as tokens stream. Once the
+          stream finishes, REPL pushes the turn into ``committed``
+          and the inline-flow effect flushes it to stdout — so it
+          ends up above the strip in scrollback, not duplicated. */}
+      {streaming ? <TurnRow turn={streaming} /> : null}
       {activity ? (
         <Spinner
           verb={activity.verb}

@@ -243,7 +243,7 @@ const DemoKeys: React.FC<{ onAction: (a: string) => void }> = ({ onAction }) => 
 };
 
 export const Demo: React.FC = () => (
-  <Shell>
+  <Shell mode="alt">
     <ScrollView>
       <DemoBody />
     </ScrollView>
