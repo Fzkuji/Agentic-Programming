@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { Box, Text, useApp, useInput } from '../runtime/index';
+import type { ScrollBoxHandle } from '../runtime/index';
 import { Shell, ScrollView, ModalHost, ToastHost } from '../ui/index.js';
 import { StatsEnvelope, ConnectionState } from '../ws/client.js';
 import { BottomBar } from '../components/BottomBar.js';
@@ -98,6 +99,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [thinkingEffort, setThinkingEffort] = useState<ThinkingEffort>('xhigh');
   const [connState, setConnState] = useState<ConnectionState>(client.getState());
   const agentSetRef = useRef(false);
+  const transcriptScrollRef = useRef<ScrollBoxHandle | null>(null);
   // Theme switch: with hermes-ink every render is a full cell-grid
   // frame, so changing useColors() context just re-renders the entire
   // tree with the new palette — no Static remount or nonce needed.
@@ -350,6 +352,33 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     pushSystem('Stopped.');
   };
 
+  const scrollTranscript = (
+    action:
+      | 'line-up'
+      | 'line-down'
+      | 'page-up'
+      | 'page-down'
+      | 'top'
+      | 'bottom',
+  ) => {
+    const scroll = transcriptScrollRef.current;
+    if (!scroll) return;
+    const vh = Math.max(1, scroll.getViewportHeight());
+    if (action === 'line-up') {
+      scroll.scrollBy(-3);
+    } else if (action === 'line-down') {
+      scroll.scrollBy(3);
+    } else if (action === 'page-up') {
+      scroll.scrollBy(-Math.max(1, vh - 2));
+    } else if (action === 'page-down') {
+      scroll.scrollBy(Math.max(1, vh - 2));
+    } else if (action === 'top') {
+      scroll.scrollTo(0);
+    } else {
+      scroll.scrollToBottom();
+    }
+  };
+
   const elapsed = activity ? (Date.now() - activity.startedAt) / 1000 : undefined;
   void tick; // depend on tick so elapsed re-renders every second
   const streamRate = (() => {
@@ -384,7 +413,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
 
   return (
     <Shell mouseTracking mode="alt">
-      <ScrollView stickyBottom>
+      <ScrollView stickyBottom scrollRef={transcriptScrollRef}>
         <Messages
           committed={committed}
           streaming={streaming}
@@ -428,6 +457,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
             setSearchResults([]);
             setPickerKind('context_search');
           }}
+          onTranscriptScroll={scrollTranscript}
         />
       )}
       <BottomBar

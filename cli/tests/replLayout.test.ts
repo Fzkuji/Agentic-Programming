@@ -8,8 +8,9 @@ describe('REPL layout contract', () => {
     const source = read('src/screens/REPL.tsx');
 
     expect(source).toContain('<Shell mouseTracking mode="alt">');
-    expect(source).toContain('<ScrollView stickyBottom>');
+    expect(source).toContain('<ScrollView stickyBottom scrollRef={transcriptScrollRef}>');
     expect(source).toContain('<Messages');
+    expect(source).toContain('onTranscriptScroll={scrollTranscript}');
   });
 
   it('does not write the REPL transcript into terminal scrollback', () => {

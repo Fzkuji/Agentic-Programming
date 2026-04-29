@@ -45,6 +45,8 @@ export interface ScrollViewProps {
    * screen needs PgUp/PgDn for its own purpose (e.g. paginated
    * picker) and the scroll view should stay passive. */
   disableKeys?: boolean;
+  /** Optional external handle for sibling controls such as PromptInput. */
+  scrollRef?: React.MutableRefObject<ScrollBoxHandle | null>;
 }
 
 export const ScrollView: React.FC<ScrollViewProps> = ({
@@ -52,56 +54,84 @@ export const ScrollView: React.FC<ScrollViewProps> = ({
   stickyBottom = false,
   flexGrow = 1,
   disableKeys = false,
+  scrollRef,
 }) => {
   const ref = useRef<ScrollBoxHandle | null>(null);
 
-  useInput((input, key) => {
+  const setRef = (handle: ScrollBoxHandle | null) => {
+    ref.current = handle;
+    if (scrollRef) {
+      scrollRef.current = handle;
+    }
+  };
+
+  const scrollBy = (dy: number, event: { stopImmediatePropagation: () => void }) => {
+    const s = ref.current;
+    if (!s) return;
+    s.scrollBy(dy);
+    event.stopImmediatePropagation();
+  };
+
+  const scrollTo = (y: number, event: { stopImmediatePropagation: () => void }) => {
+    const s = ref.current;
+    if (!s) return;
+    s.scrollTo(y);
+    event.stopImmediatePropagation();
+  };
+
+  const scrollToBottom = (event: { stopImmediatePropagation: () => void }) => {
+    const s = ref.current;
+    if (!s) return;
+    s.scrollToBottom();
+    event.stopImmediatePropagation();
+  };
+
+  useInput((input, key, event) => {
     if (disableKeys) return;
     const s = ref.current;
     if (!s) return;
     const vh = s.getViewportHeight();
     if (key.wheelUp) {
-      s.scrollBy(-3);
+      scrollBy(-3, event);
       return;
     }
     if (key.wheelDown) {
-      s.scrollBy(3);
+      scrollBy(3, event);
       return;
     }
     if (key.pageUp) {
-      s.scrollBy(-Math.max(1, vh - 2));
+      scrollBy(-Math.max(1, vh - 2), event);
       return;
     }
     if (key.pageDown) {
-      s.scrollBy(Math.max(1, vh - 2));
+      scrollBy(Math.max(1, vh - 2), event);
       return;
     }
     // Ctrl-U / Ctrl-D — half-page scroll, less-style. Standard among
     // less, tmux, vim — covers users with no PgUp key.
     if (key.ctrl && input === 'u') {
-      s.scrollBy(-Math.max(1, Math.floor(vh / 2)));
+      scrollBy(-Math.max(1, Math.floor(vh / 2)), event);
       return;
     }
     if (key.ctrl && input === 'd') {
-      s.scrollBy(Math.max(1, Math.floor(vh / 2)));
+      scrollBy(Math.max(1, Math.floor(vh / 2)), event);
       return;
     }
-    // Home / End — go to start / latest. Some terminals don't have
-    // dedicated Home/End keys; gg / G (vim style) is added by REPL
-    // when convenient.
-    if (key.ctrl && input === 'g') {
-      s.scrollTo(0);
+    // Home / End — go to start / latest. Ctrl-G / Ctrl-Shift-G are
+    // retained for terminals that do not send dedicated Home/End keys.
+    if (key.home || (key.ctrl && input === 'g')) {
+      scrollTo(0, event);
       return;
     }
-    if (key.ctrl && input === 'G') {
-      s.scrollToBottom();
+    if (key.end || (key.ctrl && input === 'G')) {
+      scrollToBottom(event);
       return;
     }
   });
 
   return (
     <ScrollBox
-      ref={ref}
+      ref={setRef}
       flexDirection="column"
       flexGrow={flexGrow}
       flexShrink={1}
