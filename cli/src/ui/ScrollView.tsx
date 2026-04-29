@@ -25,7 +25,7 @@
  *     a row container — ScrollBox doesn't propagate wheel/key events
  *     to row peers. Stick to column layouts for the screen frame.
  */
-import React, { type ReactNode, useRef } from 'react';
+import React, { type ReactNode, useLayoutEffect, useRef } from 'react';
 import {
   ScrollBox,
   type ScrollBoxHandle,
@@ -45,6 +45,10 @@ export interface ScrollViewProps {
    * screen needs PgUp/PgDn for its own purpose (e.g. paginated
    * picker) and the scroll view should stay passive. */
   disableKeys?: boolean;
+  /** Re-evaluate bottom following when transcript content changes. */
+  followKey?: string | number;
+  /** Force bottom pin when an owning screen submits or switches sessions. */
+  forceBottomKey?: string | number;
 }
 
 export const ScrollView: React.FC<ScrollViewProps> = ({
@@ -52,8 +56,27 @@ export const ScrollView: React.FC<ScrollViewProps> = ({
   stickyBottom = false,
   flexGrow = 1,
   disableKeys = false,
+  followKey,
+  forceBottomKey,
 }) => {
   const ref = useRef<ScrollBoxHandle | null>(null);
+  const didInitialPinRef = useRef(false);
+  const forceBottomKeyRef = useRef(forceBottomKey);
+
+  useLayoutEffect(() => {
+    if (!stickyBottom) return;
+    const s = ref.current;
+    if (!s) return;
+
+    const forceBottom = forceBottomKeyRef.current !== forceBottomKey;
+    forceBottomKeyRef.current = forceBottomKey;
+
+    if (!didInitialPinRef.current || forceBottom || s.isSticky()) {
+      s.scrollToBottom();
+    }
+
+    didInitialPinRef.current = true;
+  }, [stickyBottom, followKey, forceBottomKey]);
 
   useInput((input, key) => {
     if (disableKeys) return;
@@ -105,7 +128,6 @@ export const ScrollView: React.FC<ScrollViewProps> = ({
       flexDirection="column"
       flexGrow={flexGrow}
       flexShrink={1}
-      stickyScroll={stickyBottom}
     >
       {children}
     </ScrollBox>
