@@ -197,8 +197,9 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
       setPermissionMode((m) => (m === 'bypass' ? 'auto' : 'bypass'));
       return;
     }
-    // tab cycles thinking effort: off → minimal → low → medium → high → xhigh → off.
-    if (key.tab && !key.shift) {
+    // ctrl+t cycles thinking effort: off → minimal → low → medium → high → xhigh → off.
+    // Plain tab is reserved for prompt completion.
+    if (key.ctrl && input === 't') {
       setThinkingEffort((t) =>
         t === 'off' ? 'minimal'
         : t === 'minimal' ? 'low'

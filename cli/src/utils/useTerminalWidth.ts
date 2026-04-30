@@ -27,13 +27,13 @@ export function useTerminalWidth(): number {
 
 /**
  * Width every top-level panel uses so Welcome / input box / bottom bar
- * line up edge-to-edge. Uses the full terminal width (Claude Code's
- * approach) — no upper cap, just a floor so transient resizes don't
- * propagate negative widths into Ink.
+ * line up edge-to-edge. Keep one terminal column free on the right so
+ * bordered panels do not render into the terminal's last column, where
+ * some emulators clip or wrap the final border cell.
  */
 export function usePanelWidth(): number {
   const cols = useTerminalWidth();
-  return Math.max(MIN_PANEL_WIDTH, cols);
+  return Math.max(MIN_PANEL_WIDTH, cols - 1);
 }
 
 /** Returns the current terminal row count, re-renders on resize. */

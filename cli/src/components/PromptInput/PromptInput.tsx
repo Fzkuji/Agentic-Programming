@@ -4,7 +4,7 @@ import { PromptInputHelpMenu } from './PromptInputHelpMenu.js';
 import { FileMenu } from './FileMenu.js';
 import { SLASH_COMMANDS, SlashCommand } from '../../commands/registry.js';
 import { fileCompletions, findAtToken, FileMatch } from '../../utils/fileCompletions.js';
-import { usePanelWidth, useTerminalWidth } from '../../utils/useTerminalWidth.js';
+import { usePanelWidth } from '../../utils/useTerminalWidth.js';
 import { useColors } from '../../theme/ThemeProvider.js';
 import { stringWidth } from '../../runtime/ink/stringWidth.js';
 
@@ -125,7 +125,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   // -1 means we're not browsing history. 0..history.length-1 picks an entry.
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const width = usePanelWidth();
-  const cols = useTerminalWidth();
   const inSlashMode = value.startsWith('/');
   const matches = useMemo(() => (inSlashMode ? filterCommands(value) : []), [value, inSlashMode]);
 
@@ -348,7 +347,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     : suggestion ? '→ accept'
     : lineCount > 1 ? `${lineCount} lines`
     : null;
-  const showRightHint = rightHint !== null && cols >= 38;
+  const showRightHint = rightHint !== null && width >= 38;
   const placeholder =
     busy ? 'waiting for response'
     : 'message, /command, @file';
@@ -356,8 +355,9 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     busy ? colors.warning
     : inFileMode || inSlashMode ? colors.accent
     : colors.primary;
-  const rightHintWidth = showRightHint ? stringWidth(rightHint) + 3 : 0;
-  const inputAreaWidth = Math.max(8, cols - rightHintWidth - 8);
+  const innerWidth = Math.max(8, width - 4);
+  const rightHintWidth = showRightHint ? stringWidth(rightHint) + 2 : 0;
+  const inputAreaWidth = Math.max(8, innerWidth - rightHintWidth);
   const valueViewportWidth = Math.max(1, inputAreaWidth - 2);
   const inputViewport = buildInputViewport(value, cursor, valueViewportWidth);
   const inputViewportCells =
@@ -395,6 +395,7 @@ export const PromptInput: React.FC<PromptInputProps> = ({
         paddingX={1}
         justifyContent="space-between"
         flexShrink={0}
+        width={width}
       >
         <Box ref={cursorRef} flexShrink={0} width={inputAreaWidth}>
           <Text color={colors.primary}>{'> '}</Text>

@@ -38,14 +38,31 @@ describe('REPL layout contract', () => {
     expect(source).not.toContain('TranscriptScrollAction');
   });
 
+  it('keeps bordered top-level panels away from the terminal edge', () => {
+    const source = read('src/utils/useTerminalWidth.ts');
+
+    expect(source).toContain('cols - 1');
+  });
+
   it('parks the terminal cursor at the prompt caret for IME input', () => {
     const source = read('src/components/PromptInput/PromptInput.tsx');
 
     expect(source).toContain('useDeclaredCursor');
     expect(source).toContain('ref={cursorRef}');
+    expect(source).toContain('innerWidth = Math.max(8, width - 4)');
+    expect(source).toContain('width={width}');
     expect(source).toContain(': null;');
     expect(source).not.toContain(": 'enter';");
     expect(source).not.toContain('<Text inverse>{inputViewport.cursor}</Text>');
+  });
+
+  it('reserves tab for prompt completion instead of thinking effort', () => {
+    const repl = read('src/screens/REPL.tsx');
+    const bottomBar = read('src/components/BottomBar.tsx');
+
+    expect(repl).toContain("key.ctrl && input === 't'");
+    expect(repl).not.toContain('key.tab && !key.shift');
+    expect(bottomBar).toContain('ctrl+t thinking');
   });
 
   it('uses the native terminal cursor for declared prompt carets', () => {
