@@ -336,6 +336,20 @@ class SessionDB:
         )
         return [_row_to_session(r) for r in cur.fetchall()]
 
+    def count_sessions(self, *, agent_id: Optional[str] = None,
+                       source: Optional[str] = None) -> int:
+        clauses, args = [], []
+        if agent_id is not None:
+            clauses.append("agent_id=?")
+            args.append(agent_id)
+        if source is not None:
+            clauses.append("source=?")
+            args.append(source)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        cur = self.conn.execute(f"SELECT COUNT(*) FROM sessions{where}", args)
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+
     def delete_session(self, session_id: str) -> None:
         self._execute_write(
             lambda conn: conn.execute("DELETE FROM sessions WHERE id=?",

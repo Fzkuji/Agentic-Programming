@@ -1922,10 +1922,13 @@ async def _handle_ws_command(ws, cmd: dict):
 
         # Conversations on disk (across all agents).
         try:
-            from openprogram.webui import persistence as _persist
-            conversations_count = sum(1 for _ in _persist.list_conversations())
+            from openprogram.agent.session_db import default_db as _session_db
+            session_db = _session_db()
+            conversations_count = session_db.count_sessions()
+            session_rows = session_db.list_sessions(limit=WELCOME_STATS_PREVIEW_LIMIT)
         except Exception:
             conversations_count = 0
+            session_rows = []
 
         # Top skills by name (a few representative ones).
         try:
@@ -1950,19 +1953,10 @@ async def _handle_ws_command(ws, cmd: dict):
 
         # Top sessions by recency.
         try:
-            from openprogram.webui import persistence as _persist
-            convs = list(_persist.list_conversations())[:WELCOME_STATS_PREVIEW_LIMIT]
             top_sessions = []
-            for agent_id, conv_id in convs:
-                # Best-effort title — fall back to truncated conv_id if a
-                # meta reader isn't available on this branch.
-                title = conv_id
-                try:
-                    loaded = _persist.load_conversation(agent_id, conv_id)
-                    if isinstance(loaded, dict):
-                        title = loaded.get("title") or conv_id
-                except Exception:
-                    pass
+            for row in session_rows:
+                conv_id = row.get("id") or ""
+                title = row.get("title") or conv_id
                 top_sessions.append({
                     "id": conv_id,
                     "title": str(title)[:40],

@@ -382,7 +382,7 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         <Messages
           committed={committed}
           streaming={streaming}
-          welcome={pickerNode ? undefined : (stats ?? undefined)}
+          welcome={pickerNode ? undefined : (stats ?? {})}
           fillWelcome={committed.length === 0 && !streaming && !pickerNode}
         />
       </TranscriptViewport>

@@ -82,6 +82,16 @@ def test_list_sessions_filter_by_source(db: SessionDB) -> None:
     assert {r["id"] for r in rows} == {"a"}
 
 
+def test_count_sessions_uses_same_filters_as_list_sessions(db: SessionDB) -> None:
+    db.create_session("a", "main", source="wechat")
+    db.create_session("b", "main", source="telegram")
+    db.create_session("c", "other", source="wechat")
+    assert db.count_sessions() == 3
+    assert db.count_sessions(agent_id="main") == 2
+    assert db.count_sessions(source="wechat") == 2
+    assert db.count_sessions(agent_id="main", source="wechat") == 1
+
+
 def test_append_message_basic(db: SessionDB) -> None:
     db.create_session("c1", "main")
     db.append_message("c1", {

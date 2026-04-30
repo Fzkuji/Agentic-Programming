@@ -11,7 +11,7 @@ describe('REPL layout contract', () => {
     expect(source).toContain('<TranscriptViewport');
     expect(source).toContain('scrollRef={transcriptScrollRef}');
     expect(source).toContain('<Messages');
-    expect(source).toContain('welcome={pickerNode ? undefined : (stats ?? undefined)}');
+    expect(source).toContain('welcome={pickerNode ? undefined : (stats ?? {})}');
     expect(source).toContain('fillWelcome={committed.length === 0 && !streaming && !pickerNode}');
     expect(source).not.toContain('onTranscriptScroll');
   });

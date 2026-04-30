@@ -306,6 +306,7 @@ export class BackendClient {
   private retry = 0;
   private state: ConnectionState = 'connecting';
   private queue: WsRequest[] = [];
+  private hasConnected = false;
 
   constructor(url: string) {
     this.url = url;
@@ -326,6 +327,7 @@ export class BackendClient {
     this.ws = new WebSocket(this.url);
     this.ws.on('open', () => {
       this.setState('connected');
+      this.hasConnected = true;
       this.retry = 0;
       const q = this.queue.splice(0);
       for (const a of q) this.send(a);
@@ -342,7 +344,8 @@ export class BackendClient {
     });
     this.ws.on('close', () => {
       this.setState('disconnected');
-      const delay = Math.min(5000, 200 * Math.pow(2, this.retry++));
+      const baseDelay = this.hasConnected ? 200 : 50;
+      const delay = Math.min(5000, baseDelay * Math.pow(2, this.retry++));
       setTimeout(() => this.connect(), delay);
     });
     this.ws.on('error', () => {
