@@ -246,7 +246,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats, fillAvailable = false }
   if (mode === 'inline') {
     return (
       <Box paddingX={1} marginBottom={0}>
-        <Text color={colors.error} bold>
+        <Text color={colors.appTitle} bold>
           OpenProgram
         </Text>
         <Text color={colors.border}> · </Text>
@@ -277,7 +277,7 @@ export const Welcome: React.FC<WelcomeProps> = ({ stats, fillAvailable = false }
           no extra space to distribute. */}
       <Box justifyContent="space-between" width={Math.max(20, width - 6)}>
         <Box flexShrink={1}>
-          <Text bold color={colors.error} wrap="truncate-end">
+          <Text bold color={colors.appTitle} wrap="truncate-end">
             OpenProgram
           </Text>
         </Box>

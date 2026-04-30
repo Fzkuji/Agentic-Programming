@@ -1,7 +1,9 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
+import { useTerminalFocus } from '../runtime/index.js';
+import { queryTerminalBg } from './oscQuery.js';
 import { ColorTheme, getTheme, ThemeName, ThemeSetting } from './themes.js';
 import { loadThemeSetting, saveThemeSetting } from './persistence.js';
-import { getSystemThemeName, subscribeSystemTheme } from './systemTheme.js';
+import { getSystemThemeName, setCachedSystemTheme, subscribeSystemTheme } from './systemTheme.js';
 
 interface ThemeContextShape {
   /** Saved preference. May be 'auto'. */
@@ -31,6 +33,7 @@ const fallback: ThemeContextShape = {
 };
 
 const ThemeContext = createContext<ThemeContextShape | null>(null);
+const AUTO_THEME_REFRESH_MS = 5000;
 
 const resolve = (setting: ThemeSetting): ThemeName =>
   setting === 'auto' ? getSystemThemeName() : setting;
@@ -38,6 +41,7 @@ const resolve = (setting: ThemeSetting): ThemeName =>
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [themeSetting, setThemeSettingState] = useState<ThemeSetting>(() => loadThemeSetting());
   const [previewSetting, setPreviewSetting] = useState<ThemeSetting | null>(null);
+  const terminalFocused = useTerminalFocus();
   // Bumps when the cached system theme changes (e.g. OSC 11 reply lands).
   // Used so React re-resolves `auto` without us threading state through.
   const [, setSystemTick] = useState(0);
@@ -51,6 +55,32 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // cancel through the explicit save/cancel callbacks.
   const activeSetting = previewSetting ?? themeSetting;
   const currentTheme = resolve(activeSetting);
+
+  useEffect(() => {
+    if (activeSetting !== 'auto' || !terminalFocused) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const refresh = () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
+      queryTerminalBg(250)
+        .then((bg) => {
+          if (!cancelled && bg) setCachedSystemTheme(bg);
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+
+    refresh();
+    const timer = setInterval(refresh, AUTO_THEME_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeSetting, terminalFocused]);
 
   const setThemeSetting = useCallback((setting: ThemeSetting) => {
     setThemeSettingState(setting);

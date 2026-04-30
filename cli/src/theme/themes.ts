@@ -27,6 +27,7 @@ export interface ColorTheme {
   accent: Color;
   text: Color;
   border: Color;
+  appTitle: Color;
   welcomeTitle: Color;
 
   // Chat-turn roles
@@ -67,6 +68,7 @@ const dark: ColorTheme = {
   accent: '#38bdf8',
   text: '#e5e7eb',
   border: '#52525b',
+  appTitle: '#c2412d',
   welcomeTitle: 'ansi:cyanBright',
   user: { bg: '#2a211a', fg: '#f7efe7', glyph: '#f97316' },
   assistant: { bg: undefined, fg: '#e5e7eb', glyph: '#4ade80' },
@@ -84,6 +86,7 @@ const darkDim: ColorTheme = {
   accent: '#4aa3b8',
   text: '#d7dce2',
   border: '#3f4650',
+  appTitle: '#c2412d',
   welcomeTitle: 'ansi:cyanBright',
   user: { bg: '#221d19', fg: '#ded6cf', glyph: '#d08342' },
   assistant: { bg: undefined, fg: '#d7dce2', glyph: '#86a886' },
@@ -104,6 +107,7 @@ const light: ColorTheme = {
   accent: '#a13b13',
   text: '#1a1a1a',
   border: '#bdbdbd',
+  appTitle: '#c2412d',
   welcomeTitle: 'ansi:black',
   // Light cream tint for the user block so it reads as a quoted region
   // without going darker than the page itself.
@@ -123,6 +127,7 @@ const lightDim: ColorTheme = {
   accent: '#8a4a2a',
   text: '#262626',
   border: '#c8c8c8',
+  appTitle: '#c2412d',
   welcomeTitle: 'ansi:black',
   user: { bg: '#ecdfd1', fg: '#3a2418', glyph: '#9b4a2a' },
   assistant: { bg: undefined, fg: '#262626', glyph: '#436e48' },
