@@ -77,10 +77,10 @@ describe('handleSlash', () => {
     expect(setThinkingEffort).toHaveBeenCalledWith('minimal');
   });
 
-  it('/effort reports available values', () => {
+  it('/effort with no arg opens effort picker', () => {
     const ctx = makeCtx({ currentThinkingEffort: 'high', setThinkingEffort: vi.fn() });
     handleSlash('/effort', ctx);
-    expect(ctx.pushSystem).toHaveBeenCalledWith(expect.stringContaining('off|minimal|low|medium|high|xhigh'));
+    expect(ctx.openPicker).toHaveBeenCalledWith('effort');
   });
 
   it('/attach without args prints usage', () => {

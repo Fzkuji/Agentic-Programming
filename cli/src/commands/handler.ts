@@ -10,8 +10,8 @@ export interface SlashContext {
   clearCommitted: () => void;
   newSession: () => void;
   exit: () => void;
-  /** Open an interactive picker (model / resume / agent / channel / theme). */
-  openPicker: (kind: 'model' | 'resume' | 'agent' | 'channel' | 'theme') => void;
+  /** Open an interactive picker (model / resume / agent / channel / theme / effort). */
+  openPicker: (kind: 'model' | 'resume' | 'agent' | 'channel' | 'theme' | 'effort') => void;
   /** Apply a theme by name. Returns true on success, false on unknown name. */
   setTheme?: (name: string) => boolean;
   /** Toggle (or set) the "tools-on" flag passed with the next chat turn. */
@@ -241,10 +241,7 @@ export function handleSlash(line: string, ctx: SlashContext): boolean {
         return true;
       }
       if (args.length < 1) {
-        ctx.pushSystem(
-          `Thinking effort: ${ctx.currentThinkingEffort ?? 'xhigh'}\n` +
-          `Usage: /effort <${THINKING_EFFORTS.join('|')}>`,
-        );
+        ctx.openPicker('effort');
         return true;
       }
       const effort = normalizeThinkingEffort(args[0]!);

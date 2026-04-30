@@ -72,6 +72,28 @@ describe('REPL layout contract', () => {
     expect(bottomBar).not.toContain('ctrl+t');
   });
 
+  it('keeps slash command hints out of the persistent bottom bar', () => {
+    const repl = read('src/screens/REPL.tsx');
+    const bottomBar = read('src/components/BottomBar.tsx');
+
+    expect(repl).not.toContain('slashMode');
+    expect(bottomBar).not.toContain('slashMode');
+    expect(bottomBar).not.toContain('enter run');
+    expect(bottomBar).not.toContain('tab fill');
+    expect(bottomBar).not.toContain('esc cancel');
+  });
+
+  it('opens effort as an option picker', () => {
+    const handler = read('src/commands/handler.ts');
+    const router = read('src/screens/repl/pickerRouter.tsx');
+    const types = read('src/screens/repl/types.ts');
+
+    expect(handler).toContain("ctx.openPicker('effort')");
+    expect(types).toContain("'effort'");
+    expect(router).toContain("pickerKind === 'effort'");
+    expect(router).toContain('Set thinking effort');
+  });
+
   it('uses the native terminal cursor for declared prompt carets', () => {
     const source = read('src/runtime/ink/ink.tsx');
 

@@ -11,7 +11,6 @@ import { stringWidth } from '../../runtime/ink/stringWidth.js';
 export interface PromptInputProps {
   onSubmit: (text: string) => void;
   busy?: boolean;
-  onSlashModeChange?: (slashMode: boolean) => void;
   /** Called when the user hits esc while busy — REPL sends a stop. */
   onCancel?: () => void;
   /** Past submissions for ↑/↓ recall (newest last). */
@@ -111,7 +110,6 @@ const buildInputViewport = (
 export const PromptInput: React.FC<PromptInputProps> = ({
   onSubmit,
   busy,
-  onSlashModeChange,
   onCancel,
   history,
   initialDraft,
@@ -163,10 +161,6 @@ export const PromptInput: React.FC<PromptInputProps> = ({
   useEffect(() => {
     if (menuIndex >= matches.length) setMenuIndex(0);
   }, [matches.length, menuIndex]);
-
-  useEffect(() => {
-    onSlashModeChange?.(inSlashMode && matches.length > 0);
-  }, [inSlashMode, matches.length, onSlashModeChange]);
 
   useEffect(() => {
     if (initialDraft === undefined) return;

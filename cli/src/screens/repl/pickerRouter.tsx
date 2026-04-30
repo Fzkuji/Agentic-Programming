@@ -36,7 +36,10 @@ import type {
   RegisterForm,
   SearchResultRow,
   SessionAliasRow,
+  ThinkingEffort,
 } from './types.js';
+
+const THINKING_EFFORTS: ThinkingEffort[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
 
 export interface PickerCtx {
   client: BackendClient;
@@ -59,6 +62,7 @@ export interface PickerCtx {
   contextSearchQuery: string;
   searchResults: SearchResultRow[];
   searchBaseDraft: string;
+  thinkingEffort: ThinkingEffort;
 
   setPickerKind: React.Dispatch<React.SetStateAction<PickerKind>>;
   setPendingAttach: React.Dispatch<React.SetStateAction<PendingAttach | null>>;
@@ -74,6 +78,7 @@ export interface PickerCtx {
   setContextSearchQuery: React.Dispatch<React.SetStateAction<string>>;
   setSearchResults: React.Dispatch<React.SetStateAction<SearchResultRow[]>>;
   setPromptDraft: React.Dispatch<React.SetStateAction<string | undefined>>;
+  setThinkingEffort: React.Dispatch<React.SetStateAction<ThinkingEffort>>;
 
   sessionAliasesRef: React.MutableRefObject<SessionAliasRow[]>;
 }
@@ -85,11 +90,11 @@ export function buildPickerNode(ctx: PickerCtx): React.ReactElement | null {
     chosenChannel, chosenAccount, conversationId,
     modelsList, model, agentsList, channelAccounts,
     registerForm, qrAscii, qrStatus, pastConversations,
-    contextSearchQuery, searchResults, searchBaseDraft,
+    contextSearchQuery, searchResults, searchBaseDraft, thinkingEffort,
     setPickerKind, setPendingAttach,
     setChosenChannel, setChosenAccount, setConversationId, setAgent,
     setQrAscii, setQrStatus, setCommitted, setStreaming, setRegisterForm,
-    setContextSearchQuery, setSearchResults, setPromptDraft,
+    setContextSearchQuery, setSearchResults, setPromptDraft, setThinkingEffort,
     sessionAliasesRef,
   } = ctx;
 
@@ -129,6 +134,26 @@ export function buildPickerNode(ctx: PickerCtx): React.ReactElement | null {
         onSelect={(it) => {
           client.send({ action: 'set_default_agent', id: it.value });
           setAgent(it.value);
+          setPickerKind(null);
+        }}
+        onCancel={() => setPickerKind(null)}
+      />
+    );
+  }
+
+  if (pickerKind === 'effort') {
+    const items: PickerItem<ThinkingEffort>[] = THINKING_EFFORTS.map((effort) => ({
+      label: effort,
+      description: effort === thinkingEffort ? 'current' : undefined,
+      value: effort,
+    }));
+    return (
+      <Picker
+        title="Set thinking effort"
+        items={items}
+        onSelect={(it) => {
+          setThinkingEffort(it.value);
+          pushSystem(`Thinking effort set to ${it.value}.`);
           setPickerKind(null);
         }}
         onCancel={() => setPickerKind(null)}

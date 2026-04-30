@@ -10,8 +10,6 @@ export interface BottomBarProps {
   /** Retained for callers that already track titles; BottomBar shows ids. */
   conversationTitle?: string;
   busy?: boolean;
-  /** When true, the input is in slash-command mode. */
-  slashMode?: boolean;
   /** Last context stats (input/output tokens). */
   tokens?: { input?: number; output?: number };
   /** Tools available for next turn. */
@@ -51,7 +49,6 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   model,
   conversationId,
   busy,
-  slashMode,
   tokens,
   toolsOn,
   permissionMode,
@@ -64,22 +61,15 @@ export const BottomBar: React.FC<BottomBarProps> = ({
   const colors = useColors();
   const cols = useTerminalWidth();
 
-  // Bottom-bar left hint is now context-only (slash menu / busy / quit).
-  // The "type / for commands" placeholder lives inside the input box,
-  // and ↵ enter is rendered there too — no need to duplicate.
-  // exitPending overrides everything else with a confirm-to-quit
-  // prompt while the 800 ms double-press window is open.
+  // Bottom-bar left hint is context-only. Slash/file picker instructions
+  // live beside those pickers, not in the persistent bottom bar.
   const hintLong = exitPending
     ? 'press ctrl+c again to exit'
-    : slashMode
-    ? '↑↓ choose · enter run · tab fill · esc cancel'
     : busy
     ? 'esc to stop'
     : 'ctrl+r search context';
   const hintShort = exitPending
     ? 'ctrl+c again to exit'
-    : slashMode
-    ? '↑↓ enter tab esc'
     : busy
     ? 'esc stop'
     : 'ctrl+r search';

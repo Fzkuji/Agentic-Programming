@@ -45,7 +45,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
   const [activity, setActivity] = useState<Activity | null>(null);
   const [stats, setStats] = useState<StatsEnvelope['data'] | undefined>(undefined);
   const [tick, setTick] = useState(0);
-  const [slashMode, setSlashMode] = useState(false);
   // Per-conversation token + context-window tracking. We key by conv_id
   // so switching branches (resume / new / load_conversation) flips the
   // BottomBar indicator to that branch's own usage.
@@ -368,10 +367,12 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
     modelsList, model, agentsList, channelAccounts,
     registerForm, qrAscii, qrStatus, pastConversations,
     contextSearchQuery, searchResults, searchBaseDraft,
+    thinkingEffort,
     setPickerKind, setPendingAttach,
     setChosenChannel, setChosenAccount, setConversationId, setAgent,
     setQrAscii, setQrStatus, setCommitted, setStreaming, setRegisterForm,
     setContextSearchQuery, setSearchResults, setPromptDraft,
+    setThinkingEffort,
     sessionAliasesRef,
   });
 
@@ -410,7 +411,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
         <PromptInput
           onSubmit={onSubmit}
           busy={!!activity}
-          onSlashModeChange={setSlashMode}
           onCancel={onCancel}
           history={history}
           initialDraft={promptDraft}
@@ -429,7 +429,6 @@ export const REPL: React.FC<REPLProps> = ({ client, initialAgent, initialConvers
           conversationId={conversationId}
           conversationTitle={conversationTitle}
           busy={!!activity}
-          slashMode={slashMode}
           tokens={conversationId ? tokensByConv[conversationId] : undefined}
           toolsOn={toolsOn}
           permissionMode={permissionMode}
