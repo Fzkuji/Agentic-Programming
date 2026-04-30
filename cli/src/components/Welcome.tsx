@@ -99,15 +99,11 @@ const Column: React.FC<{
   }
   return (
     <Box flexDirection="column" width={width} paddingX={1}>
-      {/* Count + label flush-left with the items below — uniform vertical
-          alignment is easier to scan than centered headers over ragged
-          lists. Count in primary orange, label in bold white so the
-          section header reads distinct from the dim-gray items. */}
       <Box>
-        <Text bold color={colors.primary}>
+        <Text bold color={colors.welcomeTitle}>
           {spec.count}
         </Text>
-        <Text bold color={colors.text}>{` ${spec.label}`}</Text>
+        <Text bold color={colors.welcomeTitle}>{` ${spec.label}`}</Text>
       </Box>
       {rows.map(([a, b], i) => (
         <Box key={i}>

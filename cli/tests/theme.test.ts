@@ -8,11 +8,13 @@ describe('theme palettes', () => {
       primary: '#f97316',
       accent: '#38bdf8',
       text: '#e5e7eb',
+      welcomeTitle: '#bae6fd',
     });
     expect(getTheme('light')).toMatchObject({
       primary: '#8f2f0b',
       accent: '#2563eb',
       text: '#111827',
+      welcomeTitle: '#111827',
     });
   });
 
