@@ -43,6 +43,16 @@ describe('REPL layout contract', () => {
 
     expect(source).toContain('useDeclaredCursor');
     expect(source).toContain('ref={cursorRef}');
+    expect(source).toContain(': null;');
+    expect(source).not.toContain(": 'enter';");
+    expect(source).not.toContain('<Text inverse>{inputViewport.cursor}</Text>');
+  });
+
+  it('uses the native terminal cursor for declared prompt carets', () => {
+    const source = read('src/runtime/ink/ink.tsx');
+
+    expect(source).toContain('content: SHOW_CURSOR');
+    expect(source).toContain('content: HIDE_CURSOR');
   });
 
   it('owns transcript scroll controls without drawing an app scrollbar', () => {

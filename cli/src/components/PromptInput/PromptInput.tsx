@@ -347,8 +347,8 @@ export const PromptInput: React.FC<PromptInputProps> = ({
     : inSlashMode ? 'tab fill'
     : suggestion ? '→ accept'
     : lineCount > 1 ? `${lineCount} lines`
-    : 'enter';
-  const showRightHint = cols >= 38;
+    : null;
+  const showRightHint = rightHint !== null && cols >= 38;
   const placeholder =
     busy ? 'waiting for response'
     : 'message, /command, @file';
@@ -400,14 +400,14 @@ export const PromptInput: React.FC<PromptInputProps> = ({
           <Text color={colors.primary}>{'> '}</Text>
           {value.length === 0 ? (
             <>
-              <Text inverse>{' '}</Text>
+              <Text>{' '}</Text>
               <Text color={colors.muted} wrap="truncate-end">{placeholder}</Text>
             </>
           ) : (
             <>
               {inputViewport.prefix ? <Text color={colors.border}>…</Text> : null}
               <Text>{inputViewport.before}</Text>
-              <Text inverse>{inputViewport.cursor}</Text>
+              <Text>{inputViewport.cursor}</Text>
               <Text>{inputViewport.after}</Text>
               {inputViewport.suffix ? <Text color={colors.border}>…</Text> : null}
               {suggestionPreview ? (

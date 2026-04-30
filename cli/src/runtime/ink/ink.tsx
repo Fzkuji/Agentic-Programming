@@ -89,6 +89,7 @@ import {
   ENABLE_MOUSE_TRACKING,
   ENTER_ALT_SCREEN,
   EXIT_ALT_SCREEN,
+  HIDE_CURSOR,
   SHOW_CURSOR
 } from './termio/dec.js'
 import {
@@ -914,6 +915,10 @@ export default class Ink {
           }
         }
 
+        optimized.push({
+          type: 'stdout',
+          content: SHOW_CURSOR
+        })
         this.displayCursor = target
       } else {
         // Declaration cleared (input blur, unmount). Restore physical cursor
@@ -935,6 +940,10 @@ export default class Ink {
           }
         }
 
+        optimized.push({
+          type: 'stdout',
+          content: HIDE_CURSOR
+        })
         this.displayCursor = null
       }
     }
