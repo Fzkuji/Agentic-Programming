@@ -3,6 +3,10 @@ import { getWelcomeLayout } from '../src/components/Welcome.js';
 
 describe('Welcome layout height policy', () => {
   it('keeps the opening panel visible as terminal height decreases', () => {
+    expect(getWelcomeLayout(36, true)).toEqual({
+      mode: 'two-rows-items',
+      itemsPerTile: 12,
+    });
     expect(getWelcomeLayout(19, true)).toEqual({
       mode: 'two-rows-items',
       itemsPerTile: 4,

@@ -59,6 +59,11 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 # Module load timestamp — used by /healthz uptime calc.
 _SERVER_START_TIME = time.time()
 
+# Max preview rows sent to the CLI Welcome panel. The TUI still decides how
+# many rows fit for the current terminal size; this only prevents the server
+# from cutting useful data before layout runs.
+WELCOME_STATS_PREVIEW_LIMIT = 48
+
 # Conversation storage (in-memory). The conv dict still owns
 # runtime / root_context / function_trees / metadata, but the
 # ``messages`` array is now a derived view of SessionDB's active
@@ -1891,12 +1896,12 @@ async def _handle_ws_command(ws, cmd: dict):
             applications_only = [p for p in non_meta if p.get("category") == "app"]
             top_functions = [
                 {"name": p.get("name"), "category": p.get("category")}
-                for p in functions_only[:6]
+                for p in functions_only[:WELCOME_STATS_PREVIEW_LIMIT]
                 if p.get("name")
             ]
             top_applications = [
                 {"name": p.get("name"), "category": p.get("category")}
-                for p in applications_only[:6]
+                for p in applications_only[:WELCOME_STATS_PREVIEW_LIMIT]
                 if p.get("name")
             ]
         except Exception:
@@ -1929,7 +1934,7 @@ async def _handle_ws_command(ws, cmd: dict):
             )
             top_skills = [
                 {"name": s.name, "slug": s.slug}
-                for s in _ls(_ds())[:6]
+                for s in _ls(_ds())[:WELCOME_STATS_PREVIEW_LIMIT]
             ]
         except Exception:
             top_skills = []
@@ -1938,7 +1943,7 @@ async def _handle_ws_command(ws, cmd: dict):
         try:
             top_agents = [
                 {"name": a.to_dict().get("name") or a.id, "id": a.id}
-                for a in agents[:6]
+                for a in agents[:WELCOME_STATS_PREVIEW_LIMIT]
             ] if agents else []
         except Exception:
             top_agents = []
@@ -1946,7 +1951,7 @@ async def _handle_ws_command(ws, cmd: dict):
         # Top sessions by recency.
         try:
             from openprogram.webui import persistence as _persist
-            convs = list(_persist.list_conversations())[:6]
+            convs = list(_persist.list_conversations())[:WELCOME_STATS_PREVIEW_LIMIT]
             top_sessions = []
             for agent_id, conv_id in convs:
                 # Best-effort title — fall back to truncated conv_id if a
@@ -1974,7 +1979,7 @@ async def _handle_ws_command(ws, cmd: dict):
                 DEFAULT_TOOLS as _DT,
             )
             tools_count = len(_ALL)
-            top_tools = list(_DT)[:8]
+            top_tools = list(_DT)[:WELCOME_STATS_PREVIEW_LIMIT]
         except Exception:
             tools_count = 0
             top_tools = []
@@ -1984,7 +1989,7 @@ async def _handle_ws_command(ws, cmd: dict):
             from openprogram.providers import get_providers as _gp
             providers_list = list(_gp())
             providers_count = len(providers_list)
-            top_providers = providers_list[:8]
+            top_providers = providers_list[:WELCOME_STATS_PREVIEW_LIMIT]
         except Exception:
             providers_count = 0
             top_providers = []
@@ -2000,7 +2005,7 @@ async def _handle_ws_command(ws, cmd: dict):
                         "id": getattr(acc, "id", None) or acc.account_id,
                     })
             channels_count = len(top_channels)
-            top_channels = top_channels[:6]
+            top_channels = top_channels[:WELCOME_STATS_PREVIEW_LIMIT]
         except Exception:
             channels_count = 0
             top_channels = []

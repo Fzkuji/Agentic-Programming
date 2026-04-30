@@ -10,7 +10,7 @@ describe('theme palettes', () => {
       text: '#e5e7eb',
     });
     expect(getTheme('light')).toMatchObject({
-      primary: '#b45309',
+      primary: '#8f2f0b',
       accent: '#2563eb',
       text: '#111827',
     });

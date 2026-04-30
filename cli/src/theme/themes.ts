@@ -92,7 +92,7 @@ const light: ColorTheme = {
   // Black text on whatever the terminal's bg is (likely white-ish).
   // Accents pick up the warm orange so the brand still reads, but at a
   // saturation that contrasts cleanly with a bright background.
-  primary: '#b45309',
+  primary: '#8f2f0b',
   secondary: '#475569',
   success: '#15803d',
   warning: '#b7791f',
@@ -103,14 +103,14 @@ const light: ColorTheme = {
   border: '#94a3b8',
   // Light cream tint for the user block so it reads as a quoted region
   // without going darker than the page itself.
-  user: { bg: '#fff3e5', fg: '#3b2414', glyph: '#b45309' },
+  user: { bg: '#fff3e5', fg: '#3b2414', glyph: '#8f2f0b' },
   assistant: { bg: undefined, fg: '#111827', glyph: '#15803d' },
   system: { bg: undefined, fg: '#64748b', glyph: '#64748b' },
   tool: { running: '#b7791f', done: '#64748b', error: '#b91c1c' },
 };
 
 const lightDim: ColorTheme = {
-  primary: '#8a4b18',
+  primary: '#78350f',
   secondary: '#64748b',
   success: '#3f7f4f',
   warning: '#8a6a24',
@@ -119,7 +119,7 @@ const lightDim: ColorTheme = {
   accent: '#475569',
   text: '#1f2937',
   border: '#cbd5e1',
-  user: { bg: '#f3eadf', fg: '#3a2418', glyph: '#8a4b18' },
+  user: { bg: '#f3eadf', fg: '#3a2418', glyph: '#78350f' },
   assistant: { bg: undefined, fg: '#1f2937', glyph: '#3f7f4f' },
   system: { bg: undefined, fg: '#6b7280', glyph: '#6b7280' },
   tool: { running: '#8a6a24', done: '#6b7280', error: '#9f3a32' },
