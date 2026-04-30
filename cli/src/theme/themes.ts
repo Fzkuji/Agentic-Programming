@@ -50,79 +50,79 @@ export type ThemeSetting = (typeof THEME_SETTINGS)[number];
 
 export const THEME_LABELS: Record<ThemeSetting, string> = {
   auto: 'Auto — match the terminal background',
-  dark: 'Dark — warm orange-red on black',
-  'dark-dim': 'Dark dim — softer accents, less eye strain at night',
-  light: 'Light — black text, orange accent (daytime)',
-  'light-dim': 'Light dim — muted accents on a light terminal',
+  dark: 'Dark — high-contrast text with orange frame',
+  'dark-dim': 'Dark dim — lower saturation for dark terminals',
+  light: 'Light — crisp text with restrained orange',
+  'light-dim': 'Light dim — softer contrast for bright terminals',
 };
 
 const dark: ColorTheme = {
-  primary: '#ff7a45',
-  secondary: '#888888',
-  success: '#7ad17a',
-  warning: '#ffb86c',
-  error: '#e25c4d',
-  muted: '#9c9c9c',
-  accent: '#d76b3a',
-  text: '#f0f0f0',
-  border: '#5a5a5a',
-  user: { bg: '#3a2118', fg: '#f5e8da', glyph: '#ff7a45' },
-  assistant: { bg: undefined, fg: '#f0f0f0', glyph: '#7ad17a' },
-  system: { bg: undefined, fg: '#9c9c9c', glyph: '#9c9c9c' },
-  tool: { running: '#ffb86c', done: '#9c9c9c', error: '#e25c4d' },
+  primary: '#f97316',
+  secondary: '#94a3b8',
+  success: '#4ade80',
+  warning: '#fbbf24',
+  error: '#fb7185',
+  muted: '#a1a1aa',
+  accent: '#38bdf8',
+  text: '#e5e7eb',
+  border: '#52525b',
+  user: { bg: '#2a211a', fg: '#f7efe7', glyph: '#f97316' },
+  assistant: { bg: undefined, fg: '#e5e7eb', glyph: '#4ade80' },
+  system: { bg: undefined, fg: '#a1a1aa', glyph: '#a1a1aa' },
+  tool: { running: '#fbbf24', done: '#a1a1aa', error: '#fb7185' },
 };
 
 const darkDim: ColorTheme = {
-  primary: '#d68a5e',
-  secondary: '#7a7a7a',
-  success: '#7fb087',
-  warning: '#d6a96d',
-  error: '#c46e62',
-  muted: '#8a8a8a',
-  accent: '#b87a52',
-  text: '#dcdcdc',
-  border: '#4d4d4d',
-  user: { bg: '#2c1d18', fg: '#e8d9c8', glyph: '#d68a5e' },
-  assistant: { bg: undefined, fg: '#dcdcdc', glyph: '#7fb087' },
-  system: { bg: undefined, fg: '#8a8a8a', glyph: '#8a8a8a' },
-  tool: { running: '#d6a96d', done: '#8a8a8a', error: '#c46e62' },
+  primary: '#d08342',
+  secondary: '#8b949e',
+  success: '#86a886',
+  warning: '#c89642',
+  error: '#c76b6b',
+  muted: '#8a8f98',
+  accent: '#4aa3b8',
+  text: '#d7dce2',
+  border: '#3f4650',
+  user: { bg: '#221d19', fg: '#ded6cf', glyph: '#d08342' },
+  assistant: { bg: undefined, fg: '#d7dce2', glyph: '#86a886' },
+  system: { bg: undefined, fg: '#8a8f98', glyph: '#8a8f98' },
+  tool: { running: '#c89642', done: '#8a8f98', error: '#c76b6b' },
 };
 
 const light: ColorTheme = {
   // Black text on whatever the terminal's bg is (likely white-ish).
   // Accents pick up the warm orange so the brand still reads, but at a
   // saturation that contrasts cleanly with a bright background.
-  primary: '#c44a17',
-  secondary: '#5a5a5a',
-  success: '#2c7a36',
-  warning: '#a46500',
-  error: '#a8261b',
-  muted: '#5e5e5e',
-  accent: '#a13b13',
-  text: '#1a1a1a',
-  border: '#bdbdbd',
+  primary: '#b45309',
+  secondary: '#475569',
+  success: '#15803d',
+  warning: '#b7791f',
+  error: '#b91c1c',
+  muted: '#64748b',
+  accent: '#2563eb',
+  text: '#111827',
+  border: '#94a3b8',
   // Light cream tint for the user block so it reads as a quoted region
   // without going darker than the page itself.
-  user: { bg: '#f4e4d4', fg: '#3a1f12', glyph: '#c44a17' },
-  assistant: { bg: undefined, fg: '#1a1a1a', glyph: '#2c7a36' },
-  system: { bg: undefined, fg: '#5e5e5e', glyph: '#5e5e5e' },
-  tool: { running: '#a46500', done: '#5e5e5e', error: '#a8261b' },
+  user: { bg: '#fff3e5', fg: '#3b2414', glyph: '#b45309' },
+  assistant: { bg: undefined, fg: '#111827', glyph: '#15803d' },
+  system: { bg: undefined, fg: '#64748b', glyph: '#64748b' },
+  tool: { running: '#b7791f', done: '#64748b', error: '#b91c1c' },
 };
 
 const lightDim: ColorTheme = {
-  primary: '#9b4a2a',
-  secondary: '#6e6e6e',
-  success: '#436e48',
-  warning: '#8a6420',
-  error: '#8b3a32',
-  muted: '#6e6e6e',
-  accent: '#8a4a2a',
-  text: '#262626',
-  border: '#c8c8c8',
-  user: { bg: '#ecdfd1', fg: '#3a2418', glyph: '#9b4a2a' },
-  assistant: { bg: undefined, fg: '#262626', glyph: '#436e48' },
-  system: { bg: undefined, fg: '#6e6e6e', glyph: '#6e6e6e' },
-  tool: { running: '#8a6420', done: '#6e6e6e', error: '#8b3a32' },
+  primary: '#8a4b18',
+  secondary: '#64748b',
+  success: '#3f7f4f',
+  warning: '#8a6a24',
+  error: '#9f3a32',
+  muted: '#6b7280',
+  accent: '#475569',
+  text: '#1f2937',
+  border: '#cbd5e1',
+  user: { bg: '#f3eadf', fg: '#3a2418', glyph: '#8a4b18' },
+  assistant: { bg: undefined, fg: '#1f2937', glyph: '#3f7f4f' },
+  system: { bg: undefined, fg: '#6b7280', glyph: '#6b7280' },
+  tool: { running: '#8a6a24', done: '#6b7280', error: '#9f3a32' },
 };
 
 export const THEMES: Record<ThemeName, ColorTheme> = {
@@ -135,8 +135,8 @@ export const THEMES: Record<ThemeName, ColorTheme> = {
 export const DEFAULT_THEME: ThemeName = 'dark';
 /**
  * First-launch default. `auto` means we ask the terminal what its bg is
- * via OSC 11 and resolve to dark or light. Falls back to dark if the
- * terminal doesn't reply, so the worst case is the same as before.
+ * via OSC 11 and resolve to a concrete dark/light or dim variant. Falls
+ * back to dark if the terminal doesn't reply.
  */
 export const DEFAULT_SETTING: ThemeSetting = 'auto';
 

@@ -5,19 +5,22 @@
  * GNOME Terminal, Konsole, Windows Terminal) respond to `\x1b]11;?\x1b\\`
  * with their bg color via stdin in the form `\x1b]11;rgb:RRRR/GGGG/BBBB\x1b\\`.
  * We send the query at startup (before Ink takes over stdin), wait briefly
- * for the response, parse it, and decide light/dark by BT.709 luminance.
+ * for the response, parse it, and choose a concrete palette by BT.709
+ * luminance.
  *
  * If the terminal doesn't answer within the timeout (e.g. it's piped, or
  * doesn't support OSC 11), the promise resolves with undefined and the
  * caller falls back to $COLORFGBG / 'dark'.
  */
 
-export type SystemTheme = 'dark' | 'light';
+import type { ThemeName } from './themes.js';
+
+export type SystemTheme = ThemeName;
 
 const ST = '\x1b\\'; // String Terminator
 const OSC_BG_QUERY = `\x1b]11;?${ST}`;
 
-interface RGB { r: number; g: number; b: number }
+export interface RGB { r: number; g: number; b: number }
 
 /** Normalize a 1–4 digit hex component to [0, 1]. */
 const hexComponent = (hex: string): number => {
@@ -36,10 +39,14 @@ const parseOscRgb = (data: string): RGB | undefined => {
   };
 };
 
-const themeFromRgb = (rgb: RGB): SystemTheme => {
-  // BT.709 relative luminance. Above midpoint → light bg.
+export const themeFromRgb = (rgb: RGB): SystemTheme => {
+  // BT.709 relative luminance. Use dim palettes for non-extreme
+  // backgrounds so auto does not over-saturate tinted or gray terminals.
   const luminance = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
-  return luminance > 0.5 ? 'light' : 'dark';
+  if (luminance < 0.18) return 'dark';
+  if (luminance < 0.5) return 'dark-dim';
+  if (luminance > 0.86) return 'light';
+  return 'light-dim';
 };
 
 export async function queryTerminalBg(timeoutMs = 200): Promise<SystemTheme | undefined> {
