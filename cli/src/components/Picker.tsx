@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Box, useInput, RawAnsi } from '../runtime/index';
-import chalk from 'chalk';
 import { useColors } from '../theme/ThemeProvider.js';
+import { paint, paintBold } from '../theme/paint.js';
 import { usePanelWidth, useTerminalHeight } from '../utils/useTerminalWidth.js';
 
 export interface PickerItem<V> {
@@ -88,9 +88,10 @@ export function Picker<V>({
   const innerWidth = Math.max(20, panelWidth - 4);
   const labelWidth = Math.max(8, Math.min(28, Math.floor(innerWidth / 3)));
 
-  const cP = chalk.hex(colors.primary);
-  const cM = chalk.hex(colors.muted);
-  const cB = chalk.hex(colors.border);
+  const cP = paint(colors.primary);
+  const cPB = paintBold(colors.primary);
+  const cM = paint(colors.muted);
+  const cB = paint(colors.border);
 
   const indicator = filter
     ? `filter: ${filter} · ${filtered.length === 0 ? '(no matches)' : `${index + 1}/${filtered.length}`}`
@@ -98,7 +99,7 @@ export function Picker<V>({
   const pad = Math.max(1, innerWidth - title.length - indicator.length);
 
   const lines: string[] = [];
-  lines.push(`${cP.bold(title)}${' '.repeat(pad)}${cM(indicator)}`);
+  lines.push(`${cPB(title)}${' '.repeat(pad)}${cM(indicator)}`);
   if (layout.spacers) lines.push('');
   if (above > 0) lines.push(`  ${cB('↑')} ${cM(`${above} more`)}`);
   for (let i = 0; i < slice.length; i++) {
@@ -107,7 +108,7 @@ export function Picker<V>({
     const label = fit(it.label, labelWidth);
     const desc = it.description ? `  ${it.description}` : '';
     lines.push(sel
-      ? `${cP('▌ ')}${cP.bold(label)}${cP(desc)}`
+      ? `${cP('▌ ')}${cPB(label)}${cP(desc)}`
       : `  ${label}${cM(desc)}`);
   }
   if (below > 0) lines.push(`  ${cB('↓')} ${cM(`${below} more`)}`);

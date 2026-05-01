@@ -15,8 +15,8 @@
  */
 import React, { useEffect, useState } from 'react';
 import { Box, RawAnsi, useInput } from '../runtime/index';
-import chalk from 'chalk';
 import { useColors } from '../theme/ThemeProvider.js';
+import { paint, paintBold } from '../theme/paint.js';
 import { useTerminalSize } from './hooks.js';
 
 export interface MultiSelectOption<V = string> {
@@ -100,15 +100,16 @@ export function MultiSelect<V = string>({
     filteredPairs.length - visible,
   ));
 
-  const cP = chalk.hex(colors.primary);
-  const cM = chalk.hex(colors.muted);
+  const cP = paint(colors.primary);
+  const cPB = paintBold(colors.primary);
+  const cM = paint(colors.muted);
 
   const lines: string[] = [];
   const indicator = filter
     ? `filter: ${filter} · ${filteredPairs.length}/${options.length} · ${checked.size} checked`
     : `${checked.size}/${options.length} checked`;
   const pad = Math.max(1, innerWidth - title.length - indicator.length);
-  lines.push(`${cP.bold(title)}${' '.repeat(pad)}${cM(indicator)}`);
+  lines.push(`${cPB(title)}${' '.repeat(pad)}${cM(indicator)}`);
   lines.push('');
 
   const slice = filteredPairs.slice(off, off + visible);
@@ -118,7 +119,7 @@ export function MultiSelect<V = string>({
     const mark = checked.has(orig) ? '[x]' : '[ ]';
     const desc = o.description ? `  ${o.description}` : '';
     lines.push(sel
-      ? `${cP('▌ ')}${cP.bold(`${mark} ${o.label}`)}${cP(desc)}`
+      ? `${cP('▌ ')}${cPB(`${mark} ${o.label}`)}${cP(desc)}`
       : `  ${mark} ${o.label}${cM(desc)}`);
   }
 

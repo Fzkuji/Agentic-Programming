@@ -100,7 +100,7 @@ const Column: React.FC<{
   return (
     <Box flexDirection="column" width={width} paddingX={1}>
       <Box>
-        <Text bold color={colors.welcome.sectionTitle}>
+        <Text bold color={colors.welcome.sectionCount}>
           {spec.count}
         </Text>
         <Text bold color={colors.welcome.sectionTitle}>{` ${spec.label}`}</Text>

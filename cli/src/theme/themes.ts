@@ -1,53 +1,40 @@
-/**
- * Semantic theme tokens used across the Ink TUI.
- *
- * Same shape as the original `colors` const so component code keeps working
- * by simply replacing `import { colors }` with `const colors = useColors()`.
- *
- * Design notes:
- *   - `assistant.bg` and `system.bg` stay `undefined` so the terminal's own
- *     bg shines through. Only the user-message block paints a bg, mirroring
- *     Claude Code's chat layout.
- *   - Light variants use dark `text` so foreground stays readable when the
- *     terminal background is a bright color (the common daytime case).
- *   - The `*-dim` variants drop saturation; helpful in low-contrast terminals
- *     or when the high-saturation orange feels loud.
- */
-
 import type { Color } from '../runtime/index';
+
+export type ThemeColor = Color | undefined;
 
 export interface ColorTheme {
   // Common roles
   primary: Color;
-  secondary: Color;
+  secondary: ThemeColor;
   success: Color;
   warning: Color;
   error: Color;
-  muted: Color;
+  muted: ThemeColor;
   accent: Color;
-  text: Color;
-  border: Color;
+  text: ThemeColor;
+  border: ThemeColor;
 
   // App surface
   welcome: {
     appTitle: Color;
-    sectionTitle: Color;
+    sectionCount: Color;
+    sectionTitle: ThemeColor;
   };
   bottomBar: {
     effortXhigh: Color;
   };
   channelQr: {
-    hint: Color;
+    hint: ThemeColor;
     status: Color;
   };
 
   // Chat-turn roles
-  user: { bg: Color | undefined; fg: Color; glyph: Color };
-  assistant: { bg: Color | undefined; fg: Color; glyph: Color };
-  system: { bg: Color | undefined; fg: Color; glyph: Color };
+  user: { bg: ThemeColor; fg: ThemeColor; glyph: Color };
+  assistant: { bg: ThemeColor; fg: ThemeColor; glyph: Color };
+  system: { bg: ThemeColor; fg: ThemeColor; glyph: Color };
 
   // Tool-call rendering
-  tool: { running: Color; done: Color; error: Color };
+  tool: { running: Color; done: ThemeColor; error: Color };
 }
 
 export const THEME_NAMES = ['dark', 'dark-dim', 'light', 'light-dim'] as const;
@@ -62,124 +49,73 @@ export const THEME_SETTINGS = ['auto', ...THEME_NAMES] as const;
 export type ThemeSetting = (typeof THEME_SETTINGS)[number];
 
 export const THEME_LABELS: Record<ThemeSetting, string> = {
-  auto: 'Auto — match the terminal background',
-  dark: 'Dark — high-contrast text with orange frame',
-  'dark-dim': 'Dark dim — lower saturation for dark terminals',
-  light: 'Light — crisp text with restrained orange',
-  'light-dim': 'Light dim — softer contrast for bright terminals',
+  auto: 'Auto — use terminal-native foreground',
+  dark: 'Dark — terminal foreground with OpenProgram accent',
+  'dark-dim': 'Dark dim — terminal foreground with muted accent',
+  light: 'Light — terminal foreground with OpenProgram accent',
+  'light-dim': 'Light dim — terminal foreground with muted accent',
+};
+
+const CLAUDE_ORANGE = '#d97757';
+const CLAUDE_CLAY = '#c6613f';
+const EFFORT_XHIGH = '#991b1b';
+const TERMINAL_TEXT: ThemeColor = undefined;
+const TERMINAL_MUTED: Color = 'ansi:blackBright';
+
+const base: ColorTheme = {
+  primary: CLAUDE_ORANGE,
+  secondary: TERMINAL_MUTED,
+  success: 'ansi:green',
+  warning: 'ansi:yellow',
+  error: 'ansi:red',
+  muted: TERMINAL_MUTED,
+  accent: CLAUDE_CLAY,
+  text: TERMINAL_TEXT,
+  border: TERMINAL_MUTED,
+  welcome: {
+    appTitle: CLAUDE_ORANGE,
+    sectionCount: CLAUDE_ORANGE,
+    sectionTitle: TERMINAL_TEXT,
+  },
+  bottomBar: {
+    effortXhigh: EFFORT_XHIGH,
+  },
+  channelQr: {
+    hint: TERMINAL_MUTED,
+    status: CLAUDE_ORANGE,
+  },
+  user: { bg: undefined, fg: TERMINAL_TEXT, glyph: CLAUDE_ORANGE },
+  assistant: { bg: undefined, fg: TERMINAL_TEXT, glyph: 'ansi:green' },
+  system: { bg: undefined, fg: TERMINAL_MUTED, glyph: TERMINAL_MUTED },
+  tool: { running: 'ansi:yellow', done: TERMINAL_MUTED, error: 'ansi:red' },
 };
 
 const dark: ColorTheme = {
-  primary: '#f97316',
-  secondary: '#94a3b8',
-  success: '#4ade80',
-  warning: '#fbbf24',
-  error: '#fb7185',
-  muted: '#a1a1aa',
-  accent: '#38bdf8',
-  text: '#e5e7eb',
-  border: '#52525b',
-  welcome: {
-    appTitle: '#c2412d',
-    sectionTitle: '#e5e7eb',
-  },
-  bottomBar: {
-    effortXhigh: '#991b1b',
-  },
-  channelQr: {
-    hint: '#a1a1aa',
-    status: '#38bdf8',
-  },
-  user: { bg: '#2a211a', fg: '#f7efe7', glyph: '#f97316' },
-  assistant: { bg: undefined, fg: '#e5e7eb', glyph: '#4ade80' },
-  system: { bg: undefined, fg: '#a1a1aa', glyph: '#a1a1aa' },
-  tool: { running: '#fbbf24', done: '#a1a1aa', error: '#fb7185' },
+  ...base,
 };
 
 const darkDim: ColorTheme = {
-  primary: '#d08342',
-  secondary: '#8b949e',
-  success: '#86a886',
-  warning: '#c89642',
-  error: '#c76b6b',
-  muted: '#8a8f98',
-  accent: '#4aa3b8',
-  text: '#d7dce2',
-  border: '#3f4650',
+  ...base,
+  primary: CLAUDE_CLAY,
+  accent: CLAUDE_CLAY,
   welcome: {
-    appTitle: '#c2412d',
-    sectionTitle: '#d7dce2',
-  },
-  bottomBar: {
-    effortXhigh: '#8b1e1e',
+    appTitle: CLAUDE_ORANGE,
+    sectionCount: CLAUDE_CLAY,
+    sectionTitle: TERMINAL_TEXT,
   },
   channelQr: {
-    hint: '#8a8f98',
-    status: '#4aa3b8',
+    hint: TERMINAL_MUTED,
+    status: CLAUDE_CLAY,
   },
-  user: { bg: '#221d19', fg: '#ded6cf', glyph: '#d08342' },
-  assistant: { bg: undefined, fg: '#d7dce2', glyph: '#86a886' },
-  system: { bg: undefined, fg: '#8a8f98', glyph: '#8a8f98' },
-  tool: { running: '#c89642', done: '#8a8f98', error: '#c76b6b' },
+  user: { ...base.user, glyph: CLAUDE_CLAY },
 };
 
 const light: ColorTheme = {
-  // Black text on whatever the terminal's bg is (likely white-ish).
-  // Accents pick up the warm orange so the brand still reads, but at a
-  // saturation that contrasts cleanly with a bright background.
-  primary: '#c44a17',
-  secondary: '#5a5a5a',
-  success: '#2c7a36',
-  warning: '#a46500',
-  error: '#a8261b',
-  muted: '#5e5e5e',
-  accent: '#a13b13',
-  text: '#1a1a1a',
-  border: '#bdbdbd',
-  welcome: {
-    appTitle: '#c2412d',
-    sectionTitle: '#1a1a1a',
-  },
-  bottomBar: {
-    effortXhigh: '#991b1b',
-  },
-  channelQr: {
-    hint: '#5e5e5e',
-    status: '#a13b13',
-  },
-  // Light cream tint for the user block so it reads as a quoted region
-  // without going darker than the page itself.
-  user: { bg: '#f4e4d4', fg: '#3a1f12', glyph: '#c44a17' },
-  assistant: { bg: undefined, fg: '#1a1a1a', glyph: '#2c7a36' },
-  system: { bg: undefined, fg: '#5e5e5e', glyph: '#5e5e5e' },
-  tool: { running: '#a46500', done: '#5e5e5e', error: '#a8261b' },
+  ...base,
 };
 
 const lightDim: ColorTheme = {
-  primary: '#9b4a2a',
-  secondary: '#6e6e6e',
-  success: '#436e48',
-  warning: '#8a6420',
-  error: '#8b3a32',
-  muted: '#6e6e6e',
-  accent: '#8a4a2a',
-  text: '#262626',
-  border: '#c8c8c8',
-  welcome: {
-    appTitle: '#c2412d',
-    sectionTitle: '#262626',
-  },
-  bottomBar: {
-    effortXhigh: '#8b1e1e',
-  },
-  channelQr: {
-    hint: '#6e6e6e',
-    status: '#8a4a2a',
-  },
-  user: { bg: '#ecdfd1', fg: '#3a2418', glyph: '#9b4a2a' },
-  assistant: { bg: undefined, fg: '#262626', glyph: '#436e48' },
-  system: { bg: undefined, fg: '#6e6e6e', glyph: '#6e6e6e' },
-  tool: { running: '#8a6420', done: '#6e6e6e', error: '#8b3a32' },
+  ...darkDim,
 };
 
 export const THEMES: Record<ThemeName, ColorTheme> = {
