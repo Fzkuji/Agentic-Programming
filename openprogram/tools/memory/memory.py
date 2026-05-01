@@ -8,8 +8,12 @@ no vector search; if you need semantic recall, pair this with
 
 Location priority:
   1. ``$OPENPROGRAM_MEMORY_FILE`` — explicit override
-  2. ``./.openprogram/memory.json`` — project-local store
-  3. ``~/.openprogram/memory.json`` — user-global fallback
+  2. ``$OPENPROGRAM_MEMORY_SCOPE=project`` — ``./.openprogram/memory.json``
+  3. OpenProgram profile-global store — ``<state>/memory/memory.json``
+
+Default memory is profile-global, not cwd-local. This keeps long-term
+user and agent facts available across folders. Project-local memory is
+still possible, but only when explicitly requested.
 
 Five actions:
   - ``set key value``       upsert
@@ -77,10 +81,11 @@ def _store_path() -> Path:
     override = os.environ.get("OPENPROGRAM_MEMORY_FILE")
     if override:
         return Path(override).expanduser().resolve()
-    project = Path.cwd() / ".openprogram" / "memory.json"
-    if project.parent.exists():
-        return project
-    return (Path.home() / ".openprogram" / "memory.json").resolve()
+    scope = (os.environ.get("OPENPROGRAM_MEMORY_SCOPE") or "").strip().lower()
+    if scope in {"project", "workspace", "cwd"}:
+        return (Path.cwd() / ".openprogram" / "memory.json").resolve()
+    from openprogram.paths import get_memory_dir
+    return (get_memory_dir() / "memory.json").resolve()
 
 
 def _load(path: Path) -> dict[str, str]:
