@@ -24,7 +24,7 @@ describe('theme palettes', () => {
       text: '#e5e7eb',
       welcome: {
         appTitle: '#c2412d',
-        sectionTitle: '#bae6fd',
+        sectionTitle: '#e5e7eb',
       },
       bottomBar: {
         effortXhigh: '#991b1b',
@@ -55,9 +55,9 @@ describe('theme palettes', () => {
   it('refreshes the resolved auto theme after startup', () => {
     const source = readFileSync('src/theme/ThemeProvider.tsx', 'utf8');
     expect(source).toContain("activeSetting !== 'auto'");
-    expect(source).toContain('AUTO_THEME_REFRESH_MS');
     expect(source).toContain('detectAutoTheme(querier)');
     expect(source).toContain('setCachedSystemTheme(bg)');
+    expect(source).not.toContain('setInterval');
   });
 
   it('keeps normal UI component colors in theme tokens', () => {

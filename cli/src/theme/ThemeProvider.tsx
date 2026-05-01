@@ -33,7 +33,6 @@ const fallback: ThemeContextShape = {
 };
 
 const ThemeContext = createContext<ThemeContextShape | null>(null);
-const AUTO_THEME_REFRESH_MS = 5000;
 
 const resolve = (setting: ThemeSetting): ThemeName =>
   setting === 'auto' ? getSystemThemeName() : setting;
@@ -77,10 +76,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
 
     refresh();
-    const timer = setInterval(refresh, AUTO_THEME_REFRESH_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
     };
   }, [activeSetting, terminalFocused, querier]);
 

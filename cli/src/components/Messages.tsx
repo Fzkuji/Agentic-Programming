@@ -1,6 +1,7 @@
 import React from 'react';
 import { TurnRow, Turn } from './Turn.js';
 import { Welcome, WelcomeStats } from './Welcome.js';
+import { useTheme } from '../theme/ThemeProvider.js';
 
 export interface MessagesProps {
   /**
@@ -21,9 +22,11 @@ export interface MessagesProps {
 export const Messages: React.FC<MessagesProps> = ({
   committed, streaming, welcome, fillWelcome = false,
 }) => {
+  const { currentTheme } = useTheme();
+
   return (
     <>
-      {welcome ? <Welcome stats={welcome} fillAvailable={fillWelcome} /> : null}
+      {welcome ? <Welcome key={currentTheme} stats={welcome} fillAvailable={fillWelcome} /> : null}
       {committed.map((turn) => <TurnRow key={turn.id} turn={turn} />)}
       {streaming ? <TurnRow turn={streaming} /> : null}
     </>

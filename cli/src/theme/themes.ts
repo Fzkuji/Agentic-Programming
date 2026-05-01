@@ -81,7 +81,7 @@ const dark: ColorTheme = {
   border: '#52525b',
   welcome: {
     appTitle: '#c2412d',
-    sectionTitle: '#bae6fd',
+    sectionTitle: '#e5e7eb',
   },
   bottomBar: {
     effortXhigh: '#991b1b',
@@ -108,7 +108,7 @@ const darkDim: ColorTheme = {
   border: '#3f4650',
   welcome: {
     appTitle: '#c2412d',
-    sectionTitle: '#a8c9d7',
+    sectionTitle: '#d7dce2',
   },
   bottomBar: {
     effortXhigh: '#8b1e1e',
