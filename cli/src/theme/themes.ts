@@ -18,6 +18,7 @@ export interface ColorTheme {
   welcome: {
     appTitle: Color;
     sectionCount: Color;
+    sectionOverflow: Color;
     sectionTitle: ThemeColor;
   };
   bottomBar: {
@@ -75,6 +76,7 @@ const base: ColorTheme = {
   welcome: {
     appTitle: CLAUDE_ORANGE,
     sectionCount: CLAUDE_ORANGE,
+    sectionOverflow: CLAUDE_CLAY,
     sectionTitle: TERMINAL_TEXT,
   },
   bottomBar: {
@@ -101,6 +103,7 @@ const darkDim: ColorTheme = {
   welcome: {
     appTitle: CLAUDE_ORANGE,
     sectionCount: CLAUDE_CLAY,
+    sectionOverflow: CLAUDE_ORANGE,
     sectionTitle: TERMINAL_TEXT,
   },
   channelQr: {
