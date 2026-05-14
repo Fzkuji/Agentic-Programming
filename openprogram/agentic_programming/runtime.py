@@ -274,37 +274,52 @@ class Runtime:
 
     def _render_dag_messages_for_exec(self, content) -> Optional[list]:
         """Build the provider message list for an in-progress exec()
-        from the attached GraphStore.
+        from the DAG.
 
-        Returns ``None`` when no store is attached — callers fall back
-        to the tree-Context render path.
+        Source-of-truth resolution:
+          1. ``openprogram.context.active.current()`` — set by the
+             dispatcher at turn entry; this is the canonical path.
+          2. ``self.store`` — legacy: ``runtime.attach_store`` set by
+             the dispatcher in parallel with active. Same data, but
+             routed via the Runtime instance.
+          3. ``None`` — no DAG state available; fall back to the
+             tree-Context render path.
 
-        Algorithm:
-          1. Load the current DAG snapshot from the store.
-          2. Find the active @agentic_function frame (if any) via
-             ``_current_function_frame`` ContextVar — pull its node
-             from the graph, read seq + metadata.render_range.
-          3. Compute reads with that frame_entry_seq + render_range.
-          4. Render reads → pi-ai messages.
-          5. Append a fresh UserMessage built from ``content`` for
-             the turn that's about to fire.
+        Active context is preferred because it keeps an in-memory
+        graph alongside the store (so we don't reload from SQLite
+        on every exec), and because its frame stack is the new home
+        for ``@agentic_function`` bookkeeping.
+
+        Algorithm (regardless of source):
+          1. Take the graph snapshot + current frame.
+          2. Resolve frame_entry_seq + render_range from the frame.
+          3. Compute reads → render pi-ai messages.
+          4. Append a fresh UserMessage built from ``content``.
         """
-        if self.store is None:
+        from openprogram.context import active as _ac
+
+        active = _ac.current()
+        if active is not None:
+            graph = active.graph
+            frame = _ac.current_frame()
+            frame_node_id = frame.pending_call_id if frame else None
+        elif self.store is not None:
+            try:
+                from openprogram.agentic_programming.function import (
+                    _current_function_frame,
+                )
+                graph = self.store.load()
+                frame_node_id = _current_function_frame.get(None)
+            except Exception:
+                return None
+        else:
             return None
 
         try:
             from openprogram.context.nodes import compute_reads
             from openprogram.context.render import render_dag_messages
             from openprogram.providers.types import UserMessage, TextContent
-            # Local import: function.py drags openprogram.providers
-            # registry via _inject_runtime; importing it at module
-            # load creates a cycle.
-            from openprogram.agentic_programming.function import (
-                _current_function_frame,
-            )
 
-            graph = self.store.load()
-            frame_node_id = _current_function_frame.get(None)
             frame_entry_seq = -1
             render_range = None
             if frame_node_id and frame_node_id in graph.nodes:
@@ -356,23 +371,31 @@ class Runtime:
     ) -> None:
         """Append an llm-role Call after a successful provider call.
 
-        No-op when no store is attached. Picks up the enclosing
-        ``@agentic_function``'s pending id (if any) and stamps it as
-        ``called_by`` so the read-side can group LLM calls under
-        their function.
+        Resolution mirrors ``_render_dag_messages_for_exec``:
+        prefer ``active.current()`` and write via ``active.append_node``;
+        fall back to ``self.append_node`` when no active context is
+        installed (standalone scripts). No-op when neither is wired.
 
         ``reads`` is intentionally left empty for now — the prompt
         contents are still composed by the legacy ``render_context``
         path. Once prompts are DAG-driven this will carry the read ids.
         """
-        if self.store is None:
-            return
         try:
+            from openprogram.context import active as _ac
             from openprogram.context.nodes import Call, ROLE_LLM
             from openprogram.agentic_programming.function import (
                 _current_function_frame,
             )
-            caller_id = _current_function_frame.get(None) or ""
+
+            active = _ac.current()
+            if active is None and self.store is None:
+                return
+
+            active_frame = _ac.current_frame()
+            caller_id = (
+                active_frame.pending_call_id if active_frame is not None
+                else (_current_function_frame.get(None) or "")
+            )
             node = Call(
                 role=ROLE_LLM,
                 name=model or self.model or "",
@@ -385,7 +408,10 @@ class Runtime:
                     if content_text else {}
                 ),
             )
-            self.append_node(node)
+            if active is not None:
+                _ac.append_node(node)
+            else:
+                self.append_node(node)
         except Exception:
             # DAG bookkeeping failure must not break the LLM call.
             pass
