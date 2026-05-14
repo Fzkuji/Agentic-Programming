@@ -38,6 +38,7 @@ import { type SlashCommand } from "./slash-commands";
 import { sendChatMessage } from "./legacy-send";
 import { Slider } from "@/components/ui/slider";
 import { Lightning } from "@phosphor-icons/react/dist/ssr";
+import { cn } from "@/lib/utils";
 import { useFnFormState } from "./use-fn-form-state";
 import { useFnFormWrapper } from "./use-fn-form-wrapper";
 import { useSlashMenu } from "./use-slash-menu";
@@ -522,8 +523,8 @@ export function Composer() {
             <ThinkingEffortPill
               ref={thinkingTriggerRef}
               expanded={thinkingMenuOpen}
-              onExpand={() => {
-                setThinkingMenuOpen(true);
+              onToggle={() => {
+                setThinkingMenuOpen((v) => !v);
                 setPlusMenuOpen(false);
               }}
               options={thinkingOptions}
@@ -607,13 +608,13 @@ const ThinkingEffortPill = React.forwardRef<
   HTMLDivElement,
   {
     expanded: boolean;
-    onExpand: () => void;
+    onToggle: () => void;
     options: { value: string; desc?: string }[];
     value: string;
     onChange: (v: string) => void;
   }
 >(function ThinkingEffortPill(
-  { expanded, onExpand, options, value, onChange },
+  { expanded, onToggle, options, value, onChange },
   ref,
 ) {
   const valueIndex = Math.max(
@@ -621,6 +622,11 @@ const ThinkingEffortPill = React.forwardRef<
     options.findIndex((o) => o.value === value),
   );
   const maxIndex = Math.max(0, options.length - 1);
+  // Endpoint-selected state. Used both to colour the corresponding
+  // Lightning bolt (selected → blue; unselected → grey) and to hide
+  // the round thumb so the bolt itself reads as the marker.
+  const atMin = valueIndex === 0;
+  const atMax = valueIndex === maxIndex;
 
   return (
     <div
@@ -663,7 +669,7 @@ const ThinkingEffortPill = React.forwardRef<
         style={{ width: expanded ? 260 : 132 }}
         onClick={(e) => {
           e.stopPropagation();
-          if (!expanded) onExpand();
+          onToggle();
         }}
       >
         {/* Collapsed content. `hidden` (display: none) when expanded
@@ -698,10 +704,21 @@ const ThinkingEffortPill = React.forwardRef<
             stops={options.length}
             innerTicksOnly
             startIcon={
+              // Filled bolt, 14px so it fully covers the thumb
+              // diameter when the thumb hides at this endpoint.
+              // Colour: soft accent-blue (mixed 70% with
+              // transparent) when `off` is selected, otherwise
+              // `border-light` to match the unfilled track and
+              // unselected tick dots.
               <Lightning
-                size={11}
-                weight="regular"
-                className="cursor-pointer text-text-muted transition-colors hover:text-text-bright"
+                size={14}
+                weight="fill"
+                className={cn(
+                  "cursor-pointer transition-colors",
+                  atMin
+                    ? "text-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]"
+                    : "text-[var(--border-light)] hover:text-text-secondary",
+                )}
                 aria-label="less effort"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -711,10 +728,18 @@ const ThinkingEffortPill = React.forwardRef<
               />
             }
             endIcon={
+              // Same 14px filled bolt at the right endpoint. Soft
+              // blue when `xhigh` is selected; muted `border-light`
+              // otherwise (matches the unfilled track ahead of it).
               <Lightning
-                size={17}
+                size={14}
                 weight="fill"
-                className="cursor-pointer text-text-primary transition-colors hover:text-text-bright"
+                className={cn(
+                  "cursor-pointer transition-colors",
+                  atMax
+                    ? "text-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]"
+                    : "text-[var(--border-light)] hover:text-text-secondary",
+                )}
                 aria-label="more effort"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -736,9 +761,7 @@ const ThinkingEffortPill = React.forwardRef<
             // there so the bolt itself is the selected marker.
             className={[
               "flex-1",
-              valueIndex === 0 || valueIndex === maxIndex
-                ? "[&_[role=slider]]:opacity-0"
-                : "",
+              atMin || atMax ? "[&_[role=slider]]:opacity-0" : "",
             ].join(" ")}
           />
         </div>

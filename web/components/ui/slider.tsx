@@ -30,6 +30,14 @@ const Slider = React.forwardRef<
   React.ElementRef<typeof SliderPrimitive.Root>,
   SliderProps
 >(({ className, stops, innerTicksOnly, startIcon, endIcon, ...props }, ref) => {
+  // Read current step value so each tick (and downstream coloured
+  // elements) can know if it sits in the filled half or the unfilled
+  // half. Filled = i < currentValue → blue; otherwise grey.
+  const currentValue = Array.isArray(props.value)
+    ? props.value[0] ?? 0
+    : Array.isArray(props.defaultValue)
+      ? props.defaultValue[0] ?? 0
+      : 0;
   return (
   <SliderPrimitive.Root
     ref={ref}
@@ -46,21 +54,23 @@ const Slider = React.forwardRef<
     )}
     {...props}
   >
-    {/* Track colour matches the unfilled segment — `text-bright` is
-        near-white on dark and near-black on light, so the line stays
-        high-contrast against either panel background. */}
-    <SliderPrimitive.Track className="relative h-[4px] w-full grow overflow-hidden rounded-full bg-text-bright">
-      <SliderPrimitive.Range className="absolute h-full bg-[var(--accent-blue)]" />
+    {/* Unfilled track uses `border-light` — a translucent neutral
+        that's softer than `text-muted` and reads as "background
+        scale, not a hard line". The filled range ON TOP is a soft
+        accent-blue (mixed 70% with transparent), so it sits gently
+        on the surface instead of pinning the eye. */}
+    <SliderPrimitive.Track className="relative h-[4px] w-full grow overflow-hidden rounded-full bg-[var(--border-light)]">
+      <SliderPrimitive.Range className="absolute h-full bg-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]" />
     </SliderPrimitive.Track>
     {stops && stops > 1
       ? Array.from({ length: stops }).map((_, i) => {
           if (innerTicksOnly && (i === 0 || i === stops - 1)) return null;
-          // Ticks are painted in `text-bright` — the same hue as the
-          // unfilled track, so on the empty (`off`) side they melt
-          // into the line and don't appear as "floating dots on
-          // nothing". On the filled blue range they pop as bright
-          // notches that read as discrete stops — which is when the
-          // user actually needs the granularity hint.
+          // Selected = the tick's index is BELOW the current thumb
+          // position (i.e. the thumb has already passed it on the
+          // way right). Selected ticks paint accent-blue and melt
+          // into the filled range; unselected ticks paint
+          // text-muted and melt into the grey track.
+          const isFilled = i < currentValue;
           return (
           <span
             key={i}
@@ -73,7 +83,9 @@ const Slider = React.forwardRef<
             className={cn(
               "pointer-events-none absolute top-1/2 size-[6px] rounded-full",
               "-translate-x-1/2 -translate-y-1/2",
-              "bg-text-bright",
+              isFilled
+                ? "bg-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]"
+                : "bg-[var(--border-light)]",
             )}
             style={{ left: `calc(${i / (stops - 1)} * (100% - 14px) + 7px)` }}
             aria-hidden="true"
@@ -105,7 +117,8 @@ const Slider = React.forwardRef<
     ) : null}
     <SliderPrimitive.Thumb
       className={cn(
-        "relative block size-[14px] rounded-full bg-[var(--accent-blue)]",
+        "relative block size-[14px] rounded-full",
+        "bg-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]",
         "border-2 border-[var(--bg-tertiary)]",
         "shadow-[0_1px_2px_rgba(0,0,0,0.15)]",
         "transition-transform duration-150 ease-out",
