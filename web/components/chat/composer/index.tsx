@@ -12,7 +12,7 @@
  */
 "use client";
 
-import {
+import React, {
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -36,6 +36,7 @@ import {
 import { PlusMenuItem, ToolChip } from "./menu-pieces";
 import { type SlashCommand } from "./slash-commands";
 import { sendChatMessage } from "./legacy-send";
+import { Slider } from "@/components/ui/slider";
 import { useFnFormState } from "./use-fn-form-state";
 import { useFnFormWrapper } from "./use-fn-form-wrapper";
 import { useSlashMenu } from "./use-slash-menu";
@@ -76,7 +77,7 @@ export function Composer() {
     options: thinkingOptions,
     menuOpen: thinkingMenuOpen,
     setMenuOpen: setThinkingMenuOpen,
-    pick: pickThinking,
+    set: setThinking,
   } = useThinkingEffort();
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const {
@@ -538,9 +539,11 @@ export function Composer() {
             </div>
             {thinkingMenuOpen && thinkingMenuPos && typeof document !== "undefined"
               ? createPortal(
-                  <div
+                  <ThinkingEffortPanel
                     ref={thinkingMenuRef}
-                    className={styles.thinkingMenu}
+                    options={thinkingOptions}
+                    value={thinking}
+                    onChange={setThinking}
                     style={{
                       position: "fixed",
                       left: thinkingMenuPos.left,
@@ -548,19 +551,7 @@ export function Composer() {
                       top: "auto",
                       marginBottom: 0,
                     }}
-                  >
-                    {thinkingOptions.map((opt) => (
-                      <button
-                        key={opt.value}
-                        className={`${styles.thinkingMenuItem} ${opt.value === thinking ? styles.active : ""}`}
-                        onClick={() => pickThinking(opt.value)}
-                        type="button"
-                        title={opt.desc ?? ""}
-                      >
-                        {opt.value}
-                      </button>
-                    ))}
-                  </div>,
+                  />,
                   document.body,
                 )
               : null}
@@ -617,4 +608,79 @@ export function Composer() {
     </div>
   );
 }
+
+/**
+ * Effort slider popover. Replaces the old vertical option list — the
+ * thinking levels are a strictly ordered 6-step scale (off → xhigh),
+ * so a horizontal slider with step=1 reads as "intensity dial" and
+ * lets the user sweep through values instead of click-targeting each
+ * row. Uses the shadcn `Slider` (Radix under the hood) so keyboard
+ * (arrow keys, Home/End) and pointer drag both work out of the box.
+ *
+ * Index ↔ value mapping: Radix Slider works in numbers, but the
+ * backend options are strings (`"off" / "minimal" / ...`). We pick by
+ * array index — `valueIndex` is the current option's position; the
+ * `onValueChange` callback writes back the option at that index.
+ *
+ * The popover does NOT auto-close on slider change — that would make
+ * dragging impossible (the menu would unmount mid-drag). Closes only
+ * on click-outside, handled by the document listener in the parent.
+ */
+const ThinkingEffortPanel = React.forwardRef<
+  HTMLDivElement,
+  {
+    options: { value: string; desc?: string }[];
+    value: string;
+    onChange: (v: string) => void;
+    style?: React.CSSProperties;
+  }
+>(function ThinkingEffortPanel({ options, value, onChange, style }, ref) {
+  const valueIndex = Math.max(
+    0,
+    options.findIndex((o) => o.value === value),
+  );
+  const current = options[valueIndex];
+  const maxIndex = Math.max(0, options.length - 1);
+
+  return (
+    <div
+      ref={ref}
+      className={styles.thinkingPanel}
+      style={style}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className={styles.thinkingPanelHeader}>
+        <span className={styles.thinkingPanelValue}>{current?.value}</span>
+        {current?.desc ? (
+          <span className={styles.thinkingPanelDesc}>{current.desc}</span>
+        ) : null}
+      </div>
+      <Slider
+        min={0}
+        max={maxIndex}
+        step={1}
+        value={[valueIndex]}
+        onValueChange={(v) => {
+          const idx = v[0] ?? 0;
+          const next = options[idx];
+          if (next) onChange(next.value);
+        }}
+        className={styles.thinkingPanelSlider}
+      />
+      <div className={styles.thinkingPanelTicks}>
+        {options.map((opt, i) => (
+          <span
+            key={opt.value}
+            className={styles.thinkingPanelTick}
+            data-active={i === valueIndex || undefined}
+            onClick={() => onChange(opt.value)}
+            title={opt.desc ?? opt.value}
+          >
+            {opt.value}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+});
 

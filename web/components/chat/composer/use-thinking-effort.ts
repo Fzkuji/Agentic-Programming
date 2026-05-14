@@ -41,7 +41,8 @@ export interface ThinkingEffortHook {
   options: ThinkingOption[];
   menuOpen: boolean;
   setMenuOpen: (v: boolean | ((prev: boolean) => boolean)) => void;
-  pick: (level: ThinkingEffort) => void;
+  /** Update the selection without closing the popover (slider drag). */
+  set: (level: ThinkingEffort) => void;
 }
 
 export function useThinkingEffort(): ThinkingEffortHook {
@@ -72,10 +73,9 @@ export function useThinkingEffort(): ThinkingEffortHook {
     return () => clearInterval(id);
   }, []);
 
-  const pick = useCallback((level: ThinkingEffort) => {
+  const set = useCallback((level: ThinkingEffort) => {
     setThinking(level);
-    setMenuOpen(false);
   }, []);
 
-  return { thinking, options, menuOpen, setMenuOpen, pick };
+  return { thinking, options, menuOpen, setMenuOpen, set };
 }

@@ -482,16 +482,16 @@
 .thinkingArrow {
   flex-shrink: 0;
 }
-/* Thinking-effort dropdown. Same soft shadow stack as `.plusMenu` above.
-   `min-width` is sized to the longest label (`minimal`, `medium`, etc.)
-   plus comfortable side padding — without it the menu auto-shrunk to
-   ~88px and felt cramped. Rounded to 12px for parity with `.plusMenu`. */
-.thinkingMenu {
+/* Thinking-effort popover.
+   Replaces the legacy vertical option list with a horizontal slider
+   (shadcn `<Slider />`, Radix under the hood). Same chrome as
+   `.plusMenu` — soft shadow stack, 12px corners, bg-tertiary surface. */
+.thinkingPanel {
   position: absolute;
   bottom: 100%;
   left: 60px;
   margin-bottom: 4px;
-  min-width: 160px;
+  width: 280px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -499,35 +499,59 @@
     0 1px 2px rgba(0, 0, 0, 0.04),
     0 4px 6px -2px rgba(0, 0, 0, 0.06),
     0 12px 24px -8px rgba(0, 0, 0, 0.1);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
+  padding: 14px 16px 12px;
   z-index: 100;
 }
-.thinkingMenuItem {
-  background: transparent;
-  border: none;
-  color: var(--text-primary);
+
+/* Header — current value (bold) + backend desc (muted). */
+.thinkingPanelHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.thinkingPanelValue {
   font-size: 14px;
-  line-height: 20px;
-  padding: 6px 12px;
-  min-height: 32px;
-  text-align: left;
+  font-weight: 600;
+  color: var(--text-bright);
+  font-family: var(--font-mono);
+}
+.thinkingPanelDesc {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* The slider itself adds its own track + thumb via Tailwind utilities
+   in `components/ui/slider.tsx`; this just gives it side breathing room
+   so the thumb doesn't overlap the panel edge at min/max. */
+.thinkingPanelSlider {
+  margin: 4px 4px 10px;
+}
+
+/* Per-stop micro-labels under the track — also click-targets so users
+   who don't want to drag can hop directly to a stop. The flex
+   `space-between` distributes them evenly across the slider's width;
+   the slider's own padding (4px each side) is mirrored on the labels
+   so the first/last labels sit under the thumb's min/max position. */
+.thinkingPanelTicks {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.thinkingPanelTick {
   cursor: pointer;
-  border-radius: 8px;
-  transition: background 0.15s ease, color 0.15s ease;
+  padding: 2px 0;
+  transition: color 0.12s ease;
+  user-select: none;
 }
-.thinkingMenuItem:hover {
-  background: var(--bg-hover);
+.thinkingPanelTick:hover {
+  color: var(--text-primary);
 }
-.thinkingMenuItem.active {
-  background: color-mix(
-    in srgb,
-    var(--accent-blue, #6cb4ff) 12%,
-    transparent
-  );
+.thinkingPanelTick[data-active] {
   color: var(--accent-blue, #6cb4ff);
+  font-weight: 500;
 }
 
 /* Slash menu (popup above input that rolls up out of the input box) */
