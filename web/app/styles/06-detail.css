@@ -1,60 +1,19 @@
-/* ===== Right Panel (Detail) ===== */
-.detail-panel {
-  width: var(--detail-width);
-  background: var(--bg-secondary);
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-  flex-shrink: 0;
-  transition: width 0.3s ease;
-}
+/* ===== Right Panel (Detail) =====
+   The detail panel's shell (`.detail-panel / -panel.collapsed`,
+   `.detail-header`, `.detail-title`, `.detail-close`,
+   `.detail-header-actions`) was part of the legacy `_right-sidebar.html`
+   template that AppShell no longer injects — the right rail is now
+   `components/right-sidebar/right-sidebar.tsx` with Tailwind
+   utilities + the shared `nav-classes.ts` constants. Those rules and
+   the matching `.app:has(#detailPanel.collapsed) #detailResize`
+   override are dead and have been removed.
 
-.detail-panel.collapsed {
-  width: 0;
-  overflow: hidden;
-  border-left: none;
-}
-
-.app:has(#detailPanel.collapsed) #detailResize { display: none; }
-
-.detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 16px;
-  height: 48px;
-  box-sizing: border-box;
-  border-bottom: 1px solid var(--border);
-  position: sticky;
-  top: 0;
-  background: var(--bg-secondary);
-  z-index: 1;
-}
-
-.detail-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-bright);
-  font-family: var(--font-mono);
-}
-
-.detail-close {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 18px;
-  padding: 2px 6px;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.detail-close:hover { background: var(--bg-hover); color: var(--text-primary); }
-
-.detail-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
+   What remains here is the *body* of the detail view, which is still
+   produced as raw innerHTML strings by `public/js/shared/ui.js`
+   (`renderDetail()`) and the execution-tree renderer in
+   `public/js/chat/tree-render.js`. The classes below match the
+   class names those scripts emit, so they have to stay as global
+   stylesheet rules until the renderers themselves move to React. */
 
 .detail-body { padding: 16px; }
 
@@ -69,13 +28,11 @@
   margin-bottom: 6px;
 }
 
-.detail-field { margin-bottom: 8px; }
-
-.detail-field-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 2px;
-}
+/* `.detail-field` / `.detail-field-label` were originally wrappers for
+   labelled field rows in the detail view; `ui.js::renderDetail()` no
+   longer emits `<div class="detail-field"><div class="detail-field-label">…`
+   pairs, so the wrapper + label rules are dead. The `.detail-field-value`
+   is still emitted (path + expose rows), so its rule stays. */
 
 .detail-field-value {
   font-size: 14px;
