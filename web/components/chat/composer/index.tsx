@@ -645,6 +645,22 @@ const ThinkingEffortPill = React.forwardRef<
       xhigh: "color-mix(in srgb, var(--accent-red) 32%, transparent)",
     }[value] ?? "color-mix(in srgb, var(--text-bright) 10%, transparent)";
 
+  // Active hue for the slider's filled elements (range bar, filled
+  // tick dots, thumb, selected end-bolt). Same effort-level ramp as
+  // the collapsed pill tint, but at a higher opacity so the colour
+  // pops against the unfilled grey track. Passed down via a CSS
+  // custom property (`--slider-active`) so the slider's Tailwind
+  // classes can pick it up without prop-drilling colours.
+  const activeColor =
+    {
+      off: "color-mix(in srgb, var(--text-bright) 45%, transparent)",
+      minimal: "color-mix(in srgb, var(--accent-yellow) 70%, transparent)",
+      low: "color-mix(in srgb, var(--accent-yellow) 70%, transparent)",
+      medium: "color-mix(in srgb, var(--accent-orange) 70%, transparent)",
+      high: "color-mix(in srgb, var(--accent-orange) 70%, transparent)",
+      xhigh: "color-mix(in srgb, var(--accent-red) 70%, transparent)",
+    }[value] ?? "color-mix(in srgb, var(--accent-yellow) 70%, transparent)";
+
   // Measure the spacer so the collapsed pill width exactly matches
   // its content. Hard-coding 132px gave the same chip the same
   // footprint regardless of label text — `effort: xhigh` left a
@@ -706,7 +722,11 @@ const ThinkingEffortPill = React.forwardRef<
           // expanded we hand the bg back to the Tailwind class
           // (`bg-bg-hover`) above and skip the inline override.
           ...(expanded ? {} : { backgroundColor: collapsedTint }),
-        }}
+          // CSS variable inherited by the slider inside — its
+          // range / ticks / thumb / selected end-bolt all read
+          // `var(--slider-active)` for their filled colour.
+          ["--slider-active" as string]: activeColor,
+        } as React.CSSProperties}
         onClick={(e) => {
           e.stopPropagation();
           onToggle();
@@ -758,7 +778,7 @@ const ThinkingEffortPill = React.forwardRef<
                 className={cn(
                   "cursor-pointer transition-colors",
                   atMin
-                    ? "text-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]"
+                    ? "text-[var(--slider-active)]"
                     : "text-[var(--border-light)] hover:text-text-secondary",
                 )}
                 aria-label="less effort"
@@ -780,7 +800,7 @@ const ThinkingEffortPill = React.forwardRef<
                 className={cn(
                   "cursor-pointer transition-colors",
                   atMax
-                    ? "text-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]"
+                    ? "text-[var(--slider-active)]"
                     : "text-[var(--border-light)] hover:text-text-secondary",
                 )}
                 aria-label="more effort"

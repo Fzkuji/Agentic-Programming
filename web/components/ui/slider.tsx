@@ -60,7 +60,7 @@ const Slider = React.forwardRef<
         accent-blue (mixed 70% with transparent), so it sits gently
         on the surface instead of pinning the eye. */}
     <SliderPrimitive.Track className="relative h-[4px] w-full grow overflow-hidden rounded-full bg-[var(--border-light)]">
-      <SliderPrimitive.Range className="absolute h-full bg-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]" />
+      <SliderPrimitive.Range className="absolute h-full bg-[var(--slider-active)]" />
     </SliderPrimitive.Track>
     {stops && stops > 1
       ? Array.from({ length: stops }).map((_, i) => {
@@ -84,7 +84,7 @@ const Slider = React.forwardRef<
               "pointer-events-none absolute top-1/2 size-[6px] rounded-full",
               "-translate-x-1/2 -translate-y-1/2",
               isFilled
-                ? "bg-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]"
+                ? "bg-[var(--slider-active)]"
                 : "bg-[var(--border-light)]",
             )}
             style={{ left: `calc(${i / (stops - 1)} * (100% - 14px) + 7px)` }}
@@ -118,12 +118,12 @@ const Slider = React.forwardRef<
     <SliderPrimitive.Thumb
       className={cn(
         "relative block size-[14px] rounded-full",
-        "bg-[color-mix(in_srgb,var(--accent-blue)_70%,transparent)]",
+        "bg-[var(--slider-active)]",
         "border-2 border-[var(--bg-tertiary)]",
         "shadow-[0_1px_2px_rgba(0,0,0,0.15)]",
         "transition-transform duration-150 ease-out",
         "hover:scale-110",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]/40",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--slider-active)]",
         "disabled:pointer-events-none disabled:opacity-50",
       )}
     />
