@@ -34,19 +34,9 @@ import json
 import os
 from typing import Any, Optional
 
-from openprogram.agentic_programming.context import Context, _current_ctx
-from openprogram.agentic_programming.events import _emit_event
-
-# Context var for the currently-running exec node. Runtime.exec() and
-# async_exec() set it around the provider call; _call_via_providers() reads
-# it to get the node (and its render_messages() history) without changing
+# Context var for the tools passed into the current exec() call.
+# _call_via_providers reads it to feed AgentSession without changing
 # the _call() signature subclasses override.
-_current_exec_ctx: contextvars.ContextVar[Optional[Context]] = contextvars.ContextVar(
-    "_current_exec_ctx", default=None,
-)
-
-# Context var for the tools passed into the current exec() call. Set alongside
-# _current_exec_ctx so _call_via_providers can feed them to AgentSession.
 _current_tools: contextvars.ContextVar[Optional[list]] = contextvars.ContextVar(
     "_current_tools", default=None,
 )
@@ -429,64 +419,32 @@ class Runtime:
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
 
-        import time as _time
-        parent_ctx = _current_ctx.get(None)
         use_model = model or self.model
         content_text = "\n".join(b["text"] for b in content if b.get("type") == "text")
 
-        # --- Create exec child node ---
-        exec_ctx = None
-        if parent_ctx is not None:
-            exec_ctx = Context(
-                name="_exec",
-                node_type="exec",
-                params={"_content": content_text, "_content_blocks": list(content)},
-                parent=parent_ctx,
-                start_time=_time.time(),
-                expose="io",
-            )
-            parent_ctx.children.append(exec_ctx)
-            _emit_event("node_created", exec_ctx)
-
-        # --- Build call input (shape depends on the dispatch path) ---
-        # AgentSession path: _call_via_providers reads exec_ctx directly and
-        # renders its own message history, so we just pass `content` through.
-        # Legacy path (_call_fn or subclass-overridden _call): build the
-        # text-merged full_content list those implementations expect.
+        # --- Build call input ---
+        # AgentSession path: _call_via_providers builds its own message
+        # history from the DAG (via _render_history_messages). Pass
+        # ``content`` through as-is.
+        # Legacy path (_call_fn or subclass-overridden _call): prepend
+        # the caller-supplied ``context`` string + any system prompt
+        # the runtime is carrying. The caller is responsible for
+        # composing history themselves; we don't auto-walk a tree.
         if self._uses_legacy_call():
-            if context is None and exec_ctx is not None:
-                if self.has_session:
-                    if parent_ctx.prompt and parent_ctx.name not in self._prompted_functions:
-                        context = parent_ctx.prompt
-                        self._prompted_functions.add(parent_ctx.name)
-                else:
-                    kwargs = dict(parent_ctx.render_range) if parent_ctx.render_range else {}
-                    kwargs["prompted_functions"] = self._prompted_functions
-                    context = exec_ctx.render_context(**kwargs)
-
-            call_input = _merge_content(context, content, exec_ctx)
-            system_text = _find_system_prompt(parent_ctx)
+            call_input = list(content)
+            if context:
+                call_input.insert(0, {"type": "text", "text": context})
+            system_text = getattr(self, "system", "") or ""
             skills_block = self._skills_block()
             if skills_block:
                 system_text = (system_text + skills_block) if system_text else skills_block.lstrip("\n")
             if system_text:
                 call_input.insert(0, {"type": "text", "text": system_text, "role": "system"})
-
-            if os.environ.get("AGENTIC_DUMP_INPUT"):
-                _dump_llm_input(call_input, exec_ctx, parent_ctx, self)
         else:
             call_input = content
 
         # --- Call the LLM (with retry) ---
-        # Publish exec_ctx + tools so _call_via_providers can reach them via
-        # _current_exec_ctx / _current_tools and build the AgentSession.
-        exec_ctx_token = _current_exec_ctx.set(exec_ctx) if exec_ctx is not None else None
         tools_token = _current_tools.set(tools) if tools else None
-        # Snapshot any policy kwargs into the contextvar so
-        # _call_via_providers picks them up without growing its
-        # signature. Only set when at least one is provided; otherwise
-        # leave the outer-scope policy alone (e.g. dispatcher set one
-        # earlier from session config).
         _policy_kwargs = {
             "toolset": toolset,
             "source":  tools_source,
@@ -499,19 +457,10 @@ class Runtime:
             if _policy_kwargs else None
         )
         try:
-            attempts = exec_ctx.attempts if exec_ctx is not None else []
+            errors: list[str] = []
             for attempt in range(self.max_retries):
                 try:
                     reply = self._call(call_input, model=use_model, response_format=response_format)
-                    attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
-                    if exec_ctx is not None:
-                        exec_ctx.raw_reply = reply
-                        exec_ctx.output = reply
-                        exec_ctx.status = "success"
-                        exec_ctx.end_time = _time.time()
-                        _emit_event("node_completed", exec_ctx)
-                        # Backward compat: parent function also gets latest reply
-                        parent_ctx.raw_reply = reply
                     self._append_model_call_node(
                         reply=reply,
                         model=use_model,
@@ -521,20 +470,13 @@ class Runtime:
                 except (TypeError, NotImplementedError):
                     raise  # Programming errors — don't retry
                 except Exception as e:
-                    attempts.append({"attempt": attempt + 1, "reply": None, "error": f"{type(e).__name__}: {e}"})
+                    errors.append(f"Attempt {attempt + 1}: {type(e).__name__}: {e}")
                     if attempt == self.max_retries - 1:
-                        if exec_ctx is not None:
-                            exec_ctx.error = str(e)
-                            exec_ctx.status = "error"
-                            exec_ctx.end_time = _time.time()
-                            _emit_event("node_completed", exec_ctx)
-                        error_report = "\n".join(f"Attempt {a['attempt']}: {a['error']}" for a in attempts)
                         raise RuntimeError(
-                            f"exec() failed after {self.max_retries} attempts in {parent_ctx.name if parent_ctx else 'unknown'}():\n{error_report}"
+                            f"exec() failed after {self.max_retries} attempts:\n"
+                            + "\n".join(errors)
                         ) from e
         finally:
-            if exec_ctx_token is not None:
-                _current_exec_ctx.reset(exec_ctx_token)
             if tools_token is not None:
                 _current_tools.reset(tools_token)
             if policy_token is not None:
@@ -558,39 +500,15 @@ class Runtime:
         if isinstance(content, str):
             content = [{"type": "text", "text": content}]
 
-        import time as _time
-        parent_ctx = _current_ctx.get(None)
         use_model = model or self.model
         content_text = "\n".join(b["text"] for b in content if b.get("type") == "text")
 
-        # --- Create exec child node ---
-        exec_ctx = None
-        if parent_ctx is not None:
-            exec_ctx = Context(
-                name="_exec",
-                node_type="exec",
-                params={"_content": content_text, "_content_blocks": list(content)},
-                parent=parent_ctx,
-                start_time=_time.time(),
-                expose="io",
-            )
-            parent_ctx.children.append(exec_ctx)
-            _emit_event("node_created", exec_ctx)
-
         # --- Build call input (legacy text-merge only if needed) ---
         if self._uses_legacy_call():
-            if context is None and exec_ctx is not None:
-                if self.has_session:
-                    if parent_ctx.prompt and parent_ctx.name not in self._prompted_functions:
-                        context = parent_ctx.prompt
-                        self._prompted_functions.add(parent_ctx.name)
-                else:
-                    kwargs = dict(parent_ctx.render_range) if parent_ctx.render_range else {}
-                    kwargs["prompted_functions"] = self._prompted_functions
-                    context = exec_ctx.render_context(**kwargs)
-
-            call_input = _merge_content(context, content, exec_ctx)
-            system_text = _find_system_prompt(parent_ctx)
+            call_input = list(content)
+            if context:
+                call_input.insert(0, {"type": "text", "text": context})
+            system_text = getattr(self, "system", "") or ""
             skills_block = self._skills_block()
             if skills_block:
                 system_text = (system_text + skills_block) if system_text else skills_block.lstrip("\n")
@@ -600,43 +518,25 @@ class Runtime:
             call_input = content
 
         # --- Call the LLM (with retry) ---
-        exec_ctx_token = _current_exec_ctx.set(exec_ctx) if exec_ctx is not None else None
-        try:
-            attempts = exec_ctx.attempts if exec_ctx is not None else []
-            for attempt in range(self.max_retries):
-                try:
-                    reply = await self._async_call(call_input, model=use_model, response_format=response_format)
-                    attempts.append({"attempt": attempt + 1, "reply": reply, "error": None})
-                    if exec_ctx is not None:
-                        exec_ctx.raw_reply = reply
-                        exec_ctx.output = reply
-                        exec_ctx.status = "success"
-                        exec_ctx.end_time = _time.time()
-                        _emit_event("node_completed", exec_ctx)
-                        parent_ctx.raw_reply = reply
-                    self._append_model_call_node(
-                        reply=reply,
-                        model=use_model,
-                        content_text=content_text,
-                    )
-                    return reply
-                except (TypeError, NotImplementedError):
-                    raise
-                except Exception as e:
-                    attempts.append({"attempt": attempt + 1, "reply": None, "error": f"{type(e).__name__}: {e}"})
-                    if attempt == self.max_retries - 1:
-                        if exec_ctx is not None:
-                            exec_ctx.error = str(e)
-                            exec_ctx.status = "error"
-                            exec_ctx.end_time = _time.time()
-                            _emit_event("node_completed", exec_ctx)
-                        error_report = "\n".join(f"Attempt {a['attempt']}: {a['error']}" for a in attempts)
-                        raise RuntimeError(
-                            f"async_exec() failed after {self.max_retries} attempts in {parent_ctx.name if parent_ctx else 'unknown'}():\n{error_report}"
-                        ) from e
-        finally:
-            if exec_ctx_token is not None:
-                _current_exec_ctx.reset(exec_ctx_token)
+        errors: list[str] = []
+        for attempt in range(self.max_retries):
+            try:
+                reply = await self._async_call(call_input, model=use_model, response_format=response_format)
+                self._append_model_call_node(
+                    reply=reply,
+                    model=use_model,
+                    content_text=content_text,
+                )
+                return reply
+            except (TypeError, NotImplementedError):
+                raise
+            except Exception as e:
+                errors.append(f"Attempt {attempt + 1}: {type(e).__name__}: {e}")
+                if attempt == self.max_retries - 1:
+                    raise RuntimeError(
+                        f"async_exec() failed after {self.max_retries} attempts:\n"
+                        + "\n".join(errors)
+                    ) from e
 
     def _call(self, content: list[dict], model: str = "default", response_format: dict = None) -> str:
         """
@@ -698,7 +598,6 @@ class Runtime:
         """
         from openprogram.agent import AgentSession
 
-        exec_ctx = _current_exec_ctx.get(None)
         raw_tools = _current_tools.get(None)
         policy = _current_tool_policy.get(None) or {}
         # Default-on semantics: `tools=` unset (None) → resolve the
@@ -732,29 +631,18 @@ class Runtime:
             # Explicit `tools=[]` — caller wanted no tools, honour it.
             agent_tools = None
 
-        # Prompt-composition source: prefer the DAG when a store is
-        # attached, fall back to the tree-Context render_messages
-        # path for standalone runs / legacy callers.
+        # Prompt-composition: prefer DAG-derived history when a store
+        # is installed; fall back to wrapping ``content`` as a single
+        # UserMessage for standalone runs.
         dag_messages = self._render_history_messages(content)
         if dag_messages is not None:
-            # DAG path. The last message is the current turn's input
-            # (synthesized from ``content``).
-            system_prompt = (
-                _find_system_prompt(exec_ctx.parent)
-                if exec_ctx is not None else ""
-            ) or ""
             history = dag_messages[:-1]
             current = dag_messages[-1]
-        elif exec_ctx is not None:
-            messages = exec_ctx.render_messages()
-            system_prompt = _find_system_prompt(exec_ctx.parent) or ""
-            history = messages[:-1]
-            current = messages[-1]
         else:
-            ctx, sp = _build_pi_context(content)
-            system_prompt = sp or ""
+            ctx, _sp_unused = _build_pi_context(content)
             history = []
             current = ctx.messages[0]
+        system_prompt = getattr(self, "system", "") or ""
 
         skills_block = self._skills_block()
         if skills_block:
@@ -853,11 +741,7 @@ class Runtime:
 
         try:
             session.replace_messages(history)
-            pre_run_len = len(session.messages)
             final = _run_async(session.run(current))
-            new_messages = session.messages[pre_run_len:]
-            if exec_ctx is not None:
-                _record_session_trace(exec_ctx, new_messages)
         finally:
             if _unsub is not None:
                 try:
@@ -911,20 +795,6 @@ class Runtime:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
-
-def _find_system_prompt(ctx: Optional["Context"]) -> str:
-    """Walk up the Context tree to find the nearest @agentic_function(system=...).
-
-    Returns the first non-empty `system` field encountered, or "" if none.
-    Closer ancestors override farther ones (innermost wins).
-    """
-    node = ctx
-    while node is not None:
-        if getattr(node, "system", ""):
-            return node.system
-        node = node.parent
-    return ""
-
 
 def _run_async(coro):
     """
@@ -1102,171 +972,3 @@ def _adapt_tools(raw_tools: list) -> list:
     return adapted
 
 
-def _record_session_trace(exec_ctx: "Context", new_messages: list) -> None:
-    """Attach the agent-loop trace from a completed AgentSession run onto
-    ``exec_ctx`` as a tree of ``assistant_round`` and ``tool_call`` children.
-
-    Structure:
-      exec
-      ├── assistant_round (one per LLM response during the loop)
-      │     params: _thinking, _text, _stop_reason, _round_index
-      │     children:
-      │     ├── tool_call (node_type="tool_call")
-      │     │     params: tool args + _tool_call_id
-      │     │     output/status from the matching ToolResultMessage
-      │     └── ...
-      └── ...
-
-    This preserves the precise "round N: LLM said X + called T1/T2 → results"
-    sequence so ``render_messages`` can reconstruct a faithful tool-loop
-    transcript under ``expose="full"``.
-    """
-    from openprogram.providers.types import (
-        AssistantMessage,
-        TextContent,
-        ThinkingContent,
-        ToolCall,
-        ToolResultMessage,
-    )
-    import time as _time
-
-    results_by_id: dict[str, ToolResultMessage] = {}
-    for msg in new_messages:
-        if isinstance(msg, ToolResultMessage):
-            results_by_id[msg.tool_call_id] = msg
-
-    round_index = 0
-    for msg in new_messages:
-        if not isinstance(msg, AssistantMessage):
-            continue
-
-        thinking_parts: list[str] = []
-        text_parts: list[str] = []
-        tool_call_blocks: list[ToolCall] = []
-        for block in msg.content:
-            if isinstance(block, ToolCall):
-                tool_call_blocks.append(block)
-            elif isinstance(block, ThinkingContent):
-                thinking_parts.append(block.thinking)
-            elif isinstance(block, TextContent):
-                text_parts.append(block.text)
-
-        round_ts = (msg.timestamp / 1000.0) if msg.timestamp else _time.time()
-        round_ctx = Context(
-            name=f"round_{round_index}",
-            node_type="assistant_round",
-            params={
-                "_thinking": "\n".join(thinking_parts),
-                "_text": "\n".join(text_parts),
-                "_stop_reason": msg.stop_reason,
-                "_round_index": round_index,
-            },
-            parent=exec_ctx,
-            start_time=round_ts,
-            end_time=round_ts,
-            status="success",
-            expose="io",
-        )
-        exec_ctx.children.append(round_ctx)
-        _emit_event("node_created", round_ctx)
-
-        for tc_block in tool_call_blocks:
-            result = results_by_id.get(tc_block.id)
-            result_text = ""
-            if result is not None:
-                parts = []
-                for rb in result.content:
-                    if hasattr(rb, "text"):
-                        parts.append(rb.text)
-                result_text = "".join(parts)
-
-            tc_ctx = Context(
-                name=tc_block.name,
-                node_type="tool_call",
-                params={**tc_block.arguments, "_tool_call_id": tc_block.id},
-                parent=round_ctx,
-                start_time=round_ts,
-                end_time=(result.timestamp / 1000.0) if (result and result.timestamp) else round_ts,
-                output=result_text,
-                status="error" if (result and result.is_error) else "success",
-                expose="io",
-            )
-            round_ctx.children.append(tc_ctx)
-            _emit_event("node_created", tc_ctx)
-            _emit_event("node_completed", tc_ctx)
-
-        _emit_event("node_completed", round_ctx)
-        round_index += 1
-
-
-def _dump_llm_input(
-    call_input: list[dict],
-    exec_ctx: Optional["Context"],
-    parent_ctx: Optional["Context"],
-    runtime: "Runtime",
-) -> None:
-    """Write the text-merged LLM input to AGENTIC_DUMP_DIR for debugging."""
-    dump_dir = os.environ.get(
-        "AGENTIC_DUMP_DIR",
-        os.path.join(os.path.dirname(os.path.dirname(__file__)), "tmp"),
-    )
-    os.makedirs(dump_dir, exist_ok=True)
-    call_path = (
-        exec_ctx._call_path() if exec_ctx
-        else (parent_ctx._call_path() if parent_ctx else "unknown")
-    )
-    seq = getattr(runtime, "_dump_seq", 0)
-    runtime._dump_seq = seq + 1
-    dump_path = os.path.join(dump_dir, f"{seq:03d}_{call_path}.txt")
-    with open(dump_path, "w") as fh:
-        for block in call_input:
-            if block.get("type") == "text":
-                fh.write(block["text"])
-            else:
-                fh.write(json.dumps(block, ensure_ascii=False, default=str))
-            fh.write("\n\n")
-    print(f"[DUMP] {call_path} -> {dump_path}")
-
-
-def _merge_content(
-    context: Optional[str],
-    content: list[dict],
-    ctx: Optional["Context"],
-) -> list[dict]:
-    """Merge text content blocks into the context string.
-
-    Text blocks are indented and placed under a "→ Current Task:" marker.
-    Non-text blocks (images, audio, files) stay as separate content blocks.
-    """
-    full_content = []
-    if context and ctx is not None:
-        # Calculate indent relative to outermost ancestor
-        base = ctx._depth()
-        node = ctx.parent
-        while node and node.name:
-            base = node._depth()
-            node = node.parent
-        exec_indent = "    " * (ctx._depth() - base + 1)
-
-        text_parts = []
-        for block in content:
-            if block.get("type") == "text":
-                indented = "\n".join(
-                    exec_indent + line if line.strip() else ""
-                    for line in block["text"].splitlines()
-                )
-                text_parts.append(indented)
-            else:
-                full_content.append(block)
-
-        if text_parts:
-            merged = context + "\n" + exec_indent + "→ Current Task:\n" + "\n".join(text_parts)
-        else:
-            merged = context
-        full_content.insert(0, {"type": "text", "text": merged})
-    elif context:
-        full_content.append({"type": "text", "text": context})
-        full_content.extend(content)
-    else:
-        full_content.extend(content)
-    return full_content

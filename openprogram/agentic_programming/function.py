@@ -21,13 +21,6 @@ import time
 from contextvars import ContextVar
 from typing import Callable, Optional
 
-import os
-from datetime import datetime
-
-import openprogram.agentic_programming.context as _ctx_module
-from openprogram.agentic_programming.context import Context, _current_ctx
-from openprogram.agentic_programming.events import _emit_event
-
 # Runtime shared across the call chain via ContextVar.
 # Entry-point functions auto-create a runtime; child functions inherit it.
 _current_runtime: ContextVar = ContextVar('_current_runtime', default=None)
@@ -354,8 +347,6 @@ class agentic_function:
         self.no_tools = no_tools
         self.system = system
 
-        self.context = None  # Last executed Context tree (set after top-level call)
-
         if fn is not None:
             # Used as @agentic_function without parentheses
             self._fn = fn
@@ -426,95 +417,60 @@ class agentic_function:
             # Cancel check / other pre-invocation hooks — may raise to abort.
             _run_pre_invocation_hooks()
 
-            parent = _current_ctx.get(None)
-
             # Auto-inject runtime if needed
             new_args, new_kwargs, runtime_token, owns_runtime = _inject_runtime(sig, args, kwargs)
 
-            ctx = Context(
-                name=fn.__name__,
-                prompt=fn.__doc__ or "",
-                system=system or "",
-                params={},
-                parent=parent,
-                expose=expose,
-                render_range=render_range,
-                start_time=time.time(),
-            )
-            if parent is not None:
-                parent.children.append(ctx)
-            if parent is None:
-                self_ref.context = ctx
-            wrapper._last_ctx = ctx
-
-            ctx_token = _current_ctx.set(ctx)
-            # DAG entry: assign a stable id for the code Call we'll
-            # append now (output=None placeholder) and update on exit.
             import uuid as _uuid
             _pending_call_id = _uuid.uuid4().hex[:12]
-            # Bind args ahead of the try block so the entry-time DAG
-            # write has the real argument values.
+            _started_at = time.time()
+
             bound = sig.bind(*new_args, **new_kwargs)
             bound.apply_defaults()
-            ctx.params = dict(bound.arguments)
-            # Append the placeholder code Call now (its ``called_by``
-            # picks up the enclosing @agentic_function via _call_id).
+            bound_args = dict(bound.arguments)
+
             _append_function_call_entry(
                 pending_id=_pending_call_id,
                 function_name=fn.__name__,
-                arguments=ctx.params,
+                arguments=bound_args,
                 expose=expose,
                 render_range=render_range,
-                started_at=ctx.start_time,
+                started_at=_started_at,
             )
-            # Then stamp ``_call_id`` so anything further down the call
+            # Stamp ``_call_id`` so anything further down the call
             # tree (rt.exec → ModelCall.called_by, ask_user → user
             # Call.called_by) attributes its writes to this invocation.
             _call_token = _call_id.set(_pending_call_id)
+            output = None
+            error = None
+            status = "success"
             try:
-                # Emit node_created inside the try block so any pre-invocation
-                # hook fired by the emit (e.g. pause → stop → CancelledError)
-                # is caught by the except branches below and the ctx is marked
-                # as cancelled/error rather than orphaned.
-                _emit_event("node_created", ctx)
-                result = await fn(*new_args, **new_kwargs)
-                ctx.output = result
-                ctx.status = "success"
-                return result
+                output = await fn(*new_args, **new_kwargs)
+                return output
             except CancelledError:
-                ctx.error = "Cancelled by user"
-                ctx.status = "error"
+                error = "Cancelled by user"
+                status = "error"
                 raise
             except Exception as e:
-                ctx.error = str(e)
-                ctx.status = "error"
+                error = str(e)
+                status = "error"
                 raise
             finally:
-                ctx.end_time = time.time()
-                _emit_event("node_completed", ctx)
-                # DAG exit: fill in output / status on the placeholder
-                # that was appended at entry. No-op when no store is
-                # installed.
                 _update_function_call_exit(
                     pending_id=_pending_call_id,
-                    output=ctx.output,
-                    error=ctx.error,
-                    status=ctx.status or "success",
+                    output=output,
+                    error=error,
+                    status=status,
                     expose=expose,
-                    started_at=ctx.start_time,
-                    ended_at=ctx.end_time,
+                    started_at=_started_at,
+                    ended_at=time.time(),
                 )
                 _call_id.reset(_call_token)
-                _current_ctx.reset(ctx_token)
                 if runtime_token is not None:
                     _current_runtime.reset(runtime_token)
                 if owns_runtime:
                     rt = bound.arguments.get("runtime")
                     if rt and hasattr(rt, 'close'):
                         rt.close()
-                if parent is None:
-                    self_ref.context = ctx
-                    _auto_save(ctx)
 
         wrapper._is_agentic = True
         return wrapper
@@ -530,96 +486,57 @@ class agentic_function:
             # Cancel check / other pre-invocation hooks — may raise to abort.
             _run_pre_invocation_hooks()
 
-            parent = _current_ctx.get(None)
-
             # Auto-inject runtime if needed
             new_args, new_kwargs, runtime_token, owns_runtime = _inject_runtime(sig, args, kwargs)
 
-            # Create node BEFORE execution so even invalid calls are recorded
-            ctx = Context(
-                name=fn.__name__,
-                prompt=fn.__doc__ or "",
-                system=system or "",
-                params={},
-                parent=parent,
-                expose=expose,
-                render_range=render_range,
-                start_time=time.time(),
-            )
-            if parent is not None:
-                parent.children.append(ctx)
-            # Expose context immediately so external observers (e.g. visualizer
-            # polling thread) can read the in-progress tree.
-            if parent is None:
-                self_ref.context = ctx
-            wrapper._last_ctx = ctx
-
-            # Set as current context for the duration of the call
-            ctx_token = _current_ctx.set(ctx)
-            # DAG entry: assign a stable id and append the placeholder
-            # code Call now (output=None); exit handler fills it in.
             import uuid as _uuid
             _pending_call_id = _uuid.uuid4().hex[:12]
+            _started_at = time.time()
+
             bound = sig.bind(*new_args, **new_kwargs)
             bound.apply_defaults()
-            ctx.params = dict(bound.arguments)
+            bound_args = dict(bound.arguments)
+
             _append_function_call_entry(
                 pending_id=_pending_call_id,
                 function_name=fn.__name__,
-                arguments=ctx.params,
+                arguments=bound_args,
                 expose=expose,
                 render_range=render_range,
-                started_at=ctx.start_time,
+                started_at=_started_at,
             )
-            # ContextVar set/reset gives us scope-bound semantics for
-            # free — nested invocations restore the outer caller's id
-            # automatically on exit.
             _call_token = _call_id.set(_pending_call_id)
+            output = None
+            error = None
+            status = "success"
             try:
-                # Emit node_created inside the try block so any pre-invocation
-                # hook fired by the emit (e.g. pause → stop → CancelledError)
-                # is caught by the except branches below and the ctx is marked
-                # as cancelled/error rather than orphaned.
-                _emit_event("node_created", ctx)
-                result = fn(*new_args, **new_kwargs)
-                ctx.output = result
-                ctx.status = "success"
-                return result
+                output = fn(*new_args, **new_kwargs)
+                return output
             except CancelledError:
-                ctx.error = "Cancelled by user"
-                ctx.status = "error"
+                error = "Cancelled by user"
+                status = "error"
                 raise
             except Exception as e:
-                ctx.error = str(e)
-                ctx.status = "error"
+                error = str(e)
+                status = "error"
                 raise
             finally:
-                ctx.end_time = time.time()
-                wrapper._last_ctx = ctx
-                _emit_event("node_completed", ctx)
-                # DAG exit: fill in output / status on the placeholder.
                 _update_function_call_exit(
                     pending_id=_pending_call_id,
-                    output=ctx.output,
-                    error=ctx.error,
-                    status=ctx.status or "success",
+                    output=output,
+                    error=error,
+                    status=status,
                     expose=expose,
-                    started_at=ctx.start_time,
-                    ended_at=ctx.end_time,
+                    started_at=_started_at,
+                    ended_at=time.time(),
                 )
                 _call_id.reset(_call_token)
-                _current_ctx.reset(ctx_token)
-                # Clean up runtime if we created it
                 if runtime_token is not None:
                     _current_runtime.reset(runtime_token)
                 if owns_runtime:
                     rt = bound.arguments.get("runtime")
                     if rt and hasattr(rt, 'close'):
                         rt.close()
-                # If this was a top-level call (no parent), save and close
-                if parent is None:
-                    self_ref.context = ctx
-                    _auto_save(ctx)
 
         wrapper._is_agentic = True
         return wrapper
@@ -708,10 +625,12 @@ def _build_agentic_tool_spec(fn: Callable, input_meta: dict) -> dict:
 
 
 def traced(fn):
-    """Lightweight decorator that records function execution in the Context tree.
+    """Lightweight decorator that records function execution into the DAG.
 
-    Unlike @agentic_function, this does NOT involve any LLM logic — it simply
-    creates a Context node so the function appears in the Execution Tree.
+    Unlike @agentic_function, this does NOT involve any LLM logic — it
+    simply appends a placeholder code Call at entry and fills it in at
+    exit, so the function appears in the execution graph. No-op when no
+    ``_store`` is installed (standalone scripts).
 
     Usage:
         @traced
@@ -722,38 +641,48 @@ def traced(fn):
 
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
-        parent = _current_ctx.get(None)
-        if parent is None:
-            # No active context tree — run without tracing
-            return fn(*args, **kwargs)
+        import uuid as _uuid
+        _pending_call_id = _uuid.uuid4().hex[:12]
+        _started_at = time.time()
 
-        ctx = Context(
-            name=fn.__name__,
-            prompt=fn.__doc__ or "",
-            params={},
-            parent=parent,
-            start_time=time.time(),
-        )
-        parent.children.append(ctx)
-        token = _current_ctx.set(ctx)
-        _emit_event("node_created", ctx)
         try:
             bound = sig.bind(*args, **kwargs)
             bound.apply_defaults()
-            ctx.params = {k: v for k, v in bound.arguments.items()
+            bound_args = {k: v for k, v in bound.arguments.items()
                           if k not in ("self", "cls", "runtime", "callback")}
-            result = fn(*args, **kwargs)
-            ctx.output = result
-            ctx.status = "success"
-            return result
+        except TypeError:
+            bound_args = {}
+
+        _append_function_call_entry(
+            pending_id=_pending_call_id,
+            function_name=fn.__name__,
+            arguments=bound_args,
+            expose="io",
+            render_range=None,
+            started_at=_started_at,
+        )
+        _call_token = _call_id.set(_pending_call_id)
+        output = None
+        error = None
+        status = "success"
+        try:
+            output = fn(*args, **kwargs)
+            return output
         except Exception as e:
-            ctx.error = str(e)
-            ctx.status = "error"
+            error = str(e)
+            status = "error"
             raise
         finally:
-            ctx.end_time = time.time()
-            _emit_event("node_completed", ctx)
-            _current_ctx.reset(token)
+            _update_function_call_exit(
+                pending_id=_pending_call_id,
+                output=output,
+                error=error,
+                status=status,
+                expose="io",
+                started_at=_started_at,
+                ended_at=time.time(),
+            )
+            _call_id.reset(_call_token)
 
     wrapper._is_traced = True
     return wrapper
@@ -873,27 +802,3 @@ def auto_trace_package(pkg_dir, pkg_name=None):
             auto_trace_module(mod, trace_pkg=pkg_dir)
 
 
-def _auto_save(ctx: Context):
-    """Auto-save the completed Context tree to the logs directory.
-
-    Logs live under ~/.agentic/logs/ (override with AGENTIC_LOGS_DIR).
-    Historically they were saved inside the package tree next to the code,
-    but that polluted the workspace: tool-using agents (Codex, Claude Code)
-    would rg into these files and choke on the multi-MB JSONL records.
-    Keeping logs outside the codebase avoids that entirely.
-    """
-    try:
-        logs_dir = os.environ.get("AGENTIC_LOGS_DIR")
-        if not logs_dir:
-            from openprogram.paths import get_logs_dir
-            logs_dir = str(get_logs_dir())
-        os.makedirs(logs_dir, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        filename = f"{ctx.name}_{timestamp}.jsonl"
-        path = os.path.join(logs_dir, filename)
-        with open(path, "w", encoding="utf-8") as f:
-            for record in ctx._to_event_records():
-                f.write(__import__("json").dumps(record, ensure_ascii=False, default=str) + "\n")
-        ctx._persist_path = path
-    except Exception:
-        pass  # Never fail the user's function because of logging
