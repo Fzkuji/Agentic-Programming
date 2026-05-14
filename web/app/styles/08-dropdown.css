@@ -1,76 +1,37 @@
 /* ============================================================
-   Provider Catalog (LobeChat-inspired settings, Claude palette)
+   Model-picker dropdown + capability badges.
+
+   What lives here:
+   - `.model-dropdown` and its children — the floating panel that
+     pops up from `providers.js` / `conversations.js` when the user
+     opens the chat / exec / channel model picker. Built as raw
+     innerHTML strings, so the classnames have to live in a global
+     stylesheet rather than a CSS module.
+   - `.cap-badge` + `.cap-badge.{vision,reasoning,tools,ctx}` — the
+     small capability chips inside each model row (Vision / Tools /
+     Reasoning / context-window).
+   - `.provider-icon` / `.provider-icon-letter` — the round
+     letter-glyph next to a model name (also emitted by
+     `providers.js` / `conversations.js`).
+
+   What used to live here and was removed:
+   - The "Providers" settings catalogue (`.providers-layout`,
+     `.providers-sidebar`, `.providers-search`, `.providers-group-
+     label`, `.provider-item*`, `.providers-detail*`, `.provider-
+     detail-*`, `.toggle-switch`, `.model-list`, `.model-item*`,
+     `.model-search`, `.model-count-summary`, `.mini-action`,
+     `.settings-icon-btn`, `.test-result`) — that whole UI moved to
+     React + `components/settings/settings-page.module.css`; the
+     legacy global classes have zero remaining consumers.
    ============================================================ */
 
-.providers-layout {
-  display: grid;
-  grid-template-columns: 260px 1fr;
-  gap: 0;
-  min-height: 520px;
-  background: var(--bg-secondary);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.providers-sidebar {
-  border-right: 1px solid var(--border);
-  padding: 12px 10px;
-  overflow-y: auto;
-  max-height: 80vh;
-}
-
-.providers-search {
-  margin-bottom: 10px;
-}
-
-.providers-search input {
-  width: 100%;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 14px;
-  color: var(--text-primary);
-  box-sizing: border-box;
-  font-family: var(--font-sans);
-}
-
-.providers-search input:focus {
-  outline: none;
-  border-color: var(--accent-blue);
-}
-
-.providers-group-label {
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  padding: 10px 8px 4px;
-}
-
-.provider-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  color: var(--text-primary);
-  transition: background 0.15s;
-  user-select: none;
-}
-
-.provider-item:hover { background: var(--bg-hover); }
-.provider-item.active { background: var(--bg-tertiary); color: var(--text-bright); }
-
+/* Provider letter glyph used by the model dropdown. The tinted
+   off-white background keeps dark-mono brand logos (OpenAI, Anthropic)
+   readable on the dark popover surface. */
 .provider-icon {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  /* Near-white tinted circle behind colored brand logos so dark-mono marks
-     (OpenAI, Anthropic) stay readable against the dark sidebar. */
   background: #f5f5f2;
   display: flex;
   align-items: center;
@@ -78,322 +39,18 @@
   overflow: hidden;
   flex-shrink: 0;
 }
-
 .provider-icon img {
   width: 72%;
   height: 72%;
   object-fit: contain;
 }
-
 .provider-icon-letter {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
-.provider-item-label {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-item-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.provider-item-dot.on  { background: var(--accent-green); }
-.provider-item-dot.off { background: transparent; }
-.provider-item-dot.unconfigured { background: var(--accent-yellow); }
-
-/* Right panel */
-.providers-detail {
-  padding: 24px 28px;
-  overflow-y: auto;
-  max-height: 80vh;
-}
-
-.providers-detail-empty {
-  color: var(--text-muted);
-  font-size: 14px;
-  padding: 40px 0;
-  text-align: center;
-}
-
-.provider-detail-header {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  margin-bottom: 20px;
-}
-
-.provider-detail-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: var(--bg-tertiary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
-.provider-detail-icon img {
-  width: 60%;
-  height: 60%;
-  object-fit: contain;
-}
-
-.provider-detail-icon .provider-icon-letter {
-  font-size: 18px;
-}
-
-.provider-detail-title-wrap {
-  flex: 1;
-  min-width: 0;
-}
-
-.provider-detail-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-bright);
-  margin-bottom: 2px;
-}
-
-.provider-detail-subtitle {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.provider-detail-section {
-  margin-bottom: 20px;
-}
-
-.provider-detail-section-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-width: 0;
-}
-.provider-detail-section-title > span:first-child {
-  flex-shrink: 0;
-}
-.provider-detail-section-title .model-count-summary {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
-}
-
-.provider-detail-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.provider-detail-row > .settings-input {
-  flex: 1;
-  min-width: 0;
-  max-width: none;
-}
-
-.provider-detail-row > .settings-btn,
-.provider-detail-row > .settings-icon-btn {
-  flex-shrink: 0;
-}
-
-/* Toggle switch — compact, Claude-style */
-.toggle-switch {
-  position: relative;
-  display: inline-block;
-  width: 32px;
-  height: 18px;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.toggle-switch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-
-.toggle-switch .slider {
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: var(--bg-hover);
-  border-radius: 18px;
-  transition: 0.15s;
-}
-
-.toggle-switch .slider::before {
-  content: "";
-  position: absolute;
-  width: 12px;
-  height: 12px;
-  left: 3px;
-  top: 3px;
-  background: var(--text-secondary);
-  border-radius: 50%;
-  transition: 0.15s;
-}
-
-.toggle-switch input:checked + .slider {
-  background: var(--accent-blue);
-}
-
-.toggle-switch input:checked + .slider::before {
-  transform: translateX(14px);
-  background: #fff;
-}
-
-.toggle-switch input:disabled + .slider {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-/* Model list */
-.model-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.model-item {
-  display: flex;
-  align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  gap: 10px;
-  min-height: 40px;
-}
-
-.model-item:hover { background: var(--bg-hover); }
-
-.model-item-icon {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--bg-tertiary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-.model-item-icon img { width: 70%; height: 70%; object-fit: contain; }
-
-.model-item-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.model-item-name {
-  font-size: 14px;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.model-item-id {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 1;
-}
-
-.model-capabilities {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.cap-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 6px;
-  height: 18px;
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-}
-
-.cap-badge.vision     { color: var(--accent-cyan); }
-.cap-badge.reasoning  { color: var(--accent-purple); }
-.cap-badge.tools      { color: var(--accent-green); }
-.cap-badge.ctx        { color: var(--text-secondary); }
-
-.model-search {
-  margin-bottom: 8px;
-}
-
-.model-search input {
-  width: 100%;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 14px;
-  color: var(--text-primary);
-  box-sizing: border-box;
-  font-family: var(--font-sans);
-}
-
-.model-search input:focus {
-  outline: none;
-  border-color: var(--accent-blue);
-}
-
-.model-count-summary {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 400;
-}
-
-/* Bulk-action small link buttons */
-.mini-action {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  padding: 0 9px;
-  height: 26px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: 0.12s;
-  box-sizing: border-box;
-}
-.mini-action:hover {
-  color: var(--text-bright);
-  background: var(--bg-hover);
-}
-
-/* ============================================================
-   Enhanced model-picker dropdown (grouped by provider + caps)
-   ============================================================ */
+/* ============ Dropdown panel ============ */
 
 .model-dropdown {
   min-width: 300px;
@@ -414,10 +71,8 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--text-muted);
-  text-transform: none;
   letter-spacing: 0.02em;
 }
-
 .model-dd-group-label:not(:first-child) {
   margin-top: 6px;
   border-top: 1px solid var(--border);
@@ -438,16 +93,12 @@
   color: var(--text-primary);
   transition: background 75ms;
 }
-
-.model-dd-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-bright);
-}
-
+.model-dd-item:hover,
 .model-dd-item.active {
   background: var(--bg-hover);
   color: var(--text-bright);
 }
+/* The "active" model gets a checkmark to the right of its caps. */
 .model-dd-item.active::after {
   content: "";
   width: 16px;
@@ -477,15 +128,25 @@
   flex-shrink: 0;
 }
 
-/* ============================================================
-   Capability-badge icons (Lucide, inline SVG, stroke=currentColor)
-   ============================================================ */
+/* ============ Capability badges (Vision / Tools / Reasoning / Ctx) ============ */
 
 .cap-badge {
-  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   gap: 3px;
+  padding: 0 5px;
+  height: 18px;
+  border-radius: 4px;
   font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+  background: var(--bg-tertiary);
 }
+.cap-badge.vision    { color: var(--accent-cyan); }
+.cap-badge.reasoning { color: var(--accent-purple); }
+.cap-badge.tools     { color: var(--accent-green); }
+.cap-badge.ctx       { color: var(--text-secondary); }
 
 .cap-badge .cap-icon {
   width: 12px;
@@ -493,54 +154,10 @@
   flex-shrink: 0;
   display: block;
 }
-
 .cap-badge .cap-icon path,
 .cap-badge .cap-icon circle {
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
   fill: none;
-}
-
-/* Connectivity-check feedback + icon-button tweaks */
-.test-result {
-  font-size: 12px;
-  color: var(--text-muted);
-  padding: 0 6px;
-  white-space: nowrap;
-}
-.test-result.ok  { color: var(--accent-green); }
-.test-result.err { color: var(--accent-red); }
-
-.settings-icon-btn {
-  padding: 0 8px;
-  height: 28px;
-  min-width: 28px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s;
-  box-sizing: border-box;
-}
-.settings-icon-btn:hover {
-  color: var(--text-bright);
-  background: var(--bg-hover);
-}
-.settings-icon-btn .cap-icon {
-  width: 14px;
-  height: 14px;
-}
-.mini-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.mini-action .cap-icon {
-  width: 12px;
-  height: 12px;
 }
