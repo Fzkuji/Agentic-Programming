@@ -7,33 +7,78 @@ import time
 
 async def handle_delete_session(ws, cmd: dict):
     from openprogram.webui import server as _s
+    from openprogram.webui import persistence as _persist
+
     session_id = cmd.get("session_id")
-    if session_id:
-        with _s._sessions_lock:
-            conv = _s._sessions.pop(session_id, None)
-        if conv:
-            if conv.get("runtime") and hasattr(conv["runtime"], "close"):
-                conv["runtime"].close()
-            _s._cleanup_session_resources(session_id, conv)
+    if not session_id:
+        return
+    # Snapshot agent_id BEFORE popping. `_delete_session_files`
+    # otherwise looks up the conv in `_sessions` to find the
+    # agent_id and falls back to a filesystem scan — which silently
+    # misses sessions whose conv_dir is gone or never existed,
+    # leaving the DB row behind and resurrecting the conversation
+    # on the next page load.
+    with _s._sessions_lock:
+        conv = _s._sessions.pop(session_id, None)
+    agent_id = (conv or {}).get("agent_id") if conv else None
+    if conv:
+        if conv.get("runtime") and hasattr(conv["runtime"], "close"):
+            conv["runtime"].close()
+        _s._cleanup_session_resources(session_id, conv)
+    if agent_id:
+        try:
+            _persist.delete_session(agent_id, session_id)
+        except Exception as e:
+            _s._log(f"[delete_session] {session_id}: {e}")
+    else:
         _s._delete_session_files(session_id)
 
 
 async def handle_clear_sessions(ws, cmd: dict):
     from openprogram.webui import server as _s
+    from openprogram.webui import persistence as _persist
+
+    # Snapshot the full (session_id, agent_id) pairs BEFORE wiping
+    # `_sessions`. `_s._delete_session_files` resolves `agent_id` from
+    # `_sessions.get(...)` first; if we cleared the dict first that
+    # lookup returns None and the function falls through to a
+    # best-effort filesystem scan — which silently misses every
+    # session that wasn't backed by a conv_dir, so the DB row sticks
+    # around and the conversation reappears on refresh.
     with _s._sessions_lock:
-        session_ids = list(_s._sessions.keys())
-        convs = list(_s._sessions.values())
-        for conv in convs:
+        agent_id_by_session: dict[str, str | None] = {
+            sid: conv.get("agent_id")
+            for sid, conv in _s._sessions.items()
+        }
+        for conv in _s._sessions.values():
             if conv.get("runtime") and hasattr(conv["runtime"], "close"):
                 conv["runtime"].close()
         _s._sessions.clear()
     with _s._root_contexts_lock:
         _s._root_contexts.clear()
-    for cid in session_ids:
+    # Also collect any session IDs that exist only in the DB (never
+    # hydrated into `_sessions` this run) so a "clear all" really
+    # nukes everything the sidebar shows on next page load.
+    try:
+        for agent_id, sid in _persist.list_sessions():
+            agent_id_by_session.setdefault(sid, agent_id)
+    except Exception:
+        pass
+
+    for cid, agent_id in agent_id_by_session.items():
         _s._follow_up_queues.pop(cid, None)
         with _s._running_tasks_lock:
             _s._running_tasks.pop(cid, None)
-        _s._delete_session_files(cid)
+        # Prefer the snapshotted agent_id so the DB row + on-disk
+        # conv_dir both get nuked atomically. If we don't have one,
+        # fall back to the legacy resolve-by-scan path.
+        if agent_id:
+            try:
+                _persist.delete_session(agent_id, cid)
+            except Exception as e:
+                _s._log(f"[clear_sessions] delete {cid}: {e}")
+        else:
+            _s._delete_session_files(cid)
 
 
 async def handle_load_session(ws, cmd: dict):
