@@ -668,7 +668,12 @@ const ThinkingEffortPill = React.forwardRef<
       <span
         ref={spacerRef}
         aria-hidden="true"
-        className="invisible inline-flex items-center gap-[5px] px-[10px] text-[14px]"
+        // `whitespace-nowrap` + `shrink-0` keep the spacer measuring
+        // its FULL single-line content width even when the parent
+        // flex row would otherwise compress it (which would wrap the
+        // text and make the spacer report a too-narrow offsetWidth,
+        // dragging the pill down with it).
+        className="invisible inline-flex shrink-0 items-center gap-[5px] px-[10px] text-[14px] whitespace-nowrap"
       >
         <span>effort: {value}</span>
         <CaretIcon />
@@ -708,10 +713,12 @@ const ThinkingEffortPill = React.forwardRef<
         }}
       >
         {/* Collapsed content. `hidden` (display: none) when expanded
-            so there's no overlap / fade — instant swap on toggle. */}
+            so there's no overlap / fade — instant swap on toggle.
+            `whitespace-nowrap` keeps the label on a single line at
+            the same width the spacer measured. */}
         <div
           className={[
-            "h-full flex items-center gap-[5px] px-[10px]",
+            "h-full flex items-center gap-[5px] px-[10px] whitespace-nowrap",
             expanded ? "hidden" : "",
           ].join(" ")}
         >
