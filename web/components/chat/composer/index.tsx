@@ -12,7 +12,14 @@
  */
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 
 import { useSessionStore } from "@/lib/session-store";
 
@@ -87,6 +94,23 @@ export function Composer() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const sendBtnRef = useRef<HTMLButtonElement>(null);
+  // Refs for the menu triggers + portal containers, so we can:
+  //  (a) measure the trigger to position the floating menu (portal'd
+  //      out of the wrapper so `.inputWrapper { overflow: hidden }`
+  //      doesn't clip the popup), and
+  //  (b) treat clicks inside the portal'd menu as "still inside the
+  //      composer" — the document-level click-outside handler reads
+  //      these refs to skip the close.
+  const thinkingTriggerRef = useRef<HTMLDivElement>(null);
+  const plusTriggerRef = useRef<HTMLButtonElement>(null);
+  const thinkingMenuRef = useRef<HTMLDivElement>(null);
+  const plusMenuRef = useRef<HTMLDivElement>(null);
+  const [thinkingMenuPos, setThinkingMenuPos] = useState<
+    { left: number; bottom: number } | null
+  >(null);
+  const [plusMenuPos, setPlusMenuPos] = useState<
+    { left: number; bottom: number } | null
+  >(null);
 
   // Wrapper height transition (open / close / A→B switch crossfade)
   // is all in one hook — see `./use-fn-form-wrapper`. `outgoingFn`
@@ -118,19 +142,57 @@ export function Composer() {
   }, [focusTick]);
 
   // Close any open popovers when clicking outside.
+  // The plus / thinking menus are portal'd into `document.body` to
+  // escape `.inputWrapper { overflow: hidden }`, so a "click outside"
+  // check on the wrapper alone would close them on every click inside
+  // the menu itself. Treat the portaled menus as part of the composer
+  // by also testing their refs.
   useEffect(() => {
     function onDoc(ev: MouseEvent) {
       const t = ev.target as Node | null;
       if (!t) return;
       const wrapper = textareaRef.current?.closest(`.${styles.inputWrapper}`);
-      if (wrapper && !wrapper.contains(t)) {
-        setPlusMenuOpen(false);
-        setThinkingMenuOpen(false);
-      }
+      if (!wrapper) return;
+      if (wrapper.contains(t)) return;
+      if (thinkingMenuRef.current?.contains(t)) return;
+      if (plusMenuRef.current?.contains(t)) return;
+      setPlusMenuOpen(false);
+      setThinkingMenuOpen(false);
     }
     document.addEventListener("click", onDoc);
     return () => document.removeEventListener("click", onDoc);
   }, []);
+
+  // Position the portal'd thinking menu so its bottom sits 4px above
+  // the trigger row (the popup grows upward to mimic the old in-flow
+  // `bottom: 100%` behaviour). Recomputed every time the menu opens.
+  useLayoutEffect(() => {
+    if (!thinkingMenuOpen) {
+      setThinkingMenuPos(null);
+      return;
+    }
+    const trigger = thinkingTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    setThinkingMenuPos({
+      left: rect.left,
+      bottom: window.innerHeight - rect.top + 4,
+    });
+  }, [thinkingMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!plusMenuOpen) {
+      setPlusMenuPos(null);
+      return;
+    }
+    const trigger = plusTriggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    setPlusMenuPos({
+      left: rect.left,
+      bottom: window.innerHeight - rect.top + 4,
+    });
+  }, [plusMenuOpen]);
 
   // Slash menu (state + open/close timing + command dispatch).
   const slash = useSlashMenu({ input, textareaRef, send });
@@ -398,6 +460,7 @@ export function Composer() {
         <div key="bottom-row" className={styles.inputBottomRow}>
           <div className={styles.inputOptions}>
             <button
+              ref={plusTriggerRef}
               className={`${styles.plusBtn} ${anyToolActive ? styles.hasActive : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -428,29 +491,41 @@ export function Composer() {
               )}
             </div>
 
-            {plusMenuOpen && (
-              <div
-                className={styles.plusMenu}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <PlusMenuItem
-                  active={toolsEnabled}
-                  onClick={toggleTools}
-                  icon={<ToolsIcon />}
-                  label="Tools"
-                  title="Shell, read/write/edit, grep/glob, list, patch, todo"
-                />
-                <PlusMenuItem
-                  active={webSearchEnabled}
-                  onClick={toggleWebSearch}
-                  icon={<WebSearchIcon />}
-                  label="Web Search"
-                  title="Give the agent web search this turn"
-                />
-              </div>
-            )}
+            {plusMenuOpen && plusMenuPos && typeof document !== "undefined"
+              ? createPortal(
+                  <div
+                    ref={plusMenuRef}
+                    className={styles.plusMenu}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      position: "fixed",
+                      left: plusMenuPos.left,
+                      bottom: plusMenuPos.bottom,
+                      top: "auto",
+                      marginBottom: 0,
+                    }}
+                  >
+                    <PlusMenuItem
+                      active={toolsEnabled}
+                      onClick={toggleTools}
+                      icon={<ToolsIcon />}
+                      label="Tools"
+                      title="Shell, read/write/edit, grep/glob, list, patch, todo"
+                    />
+                    <PlusMenuItem
+                      active={webSearchEnabled}
+                      onClick={toggleWebSearch}
+                      icon={<WebSearchIcon />}
+                      label="Web Search"
+                      title="Give the agent web search this turn"
+                    />
+                  </div>,
+                  document.body,
+                )
+              : null}
 
             <div
+              ref={thinkingTriggerRef}
               className={`${styles.thinkingSelector} ${thinkingMenuOpen ? styles.open : ""}`}
               onClick={(e) => {
                 e.stopPropagation();
@@ -461,21 +536,34 @@ export function Composer() {
               <span>effort: {thinking}</span>
               <CaretIcon className={styles.thinkingArrow} />
             </div>
-            {thinkingMenuOpen && (
-              <div className={styles.thinkingMenu}>
-                {thinkingOptions.map((opt) => (
-                  <button
-                    key={opt.value}
-                    className={`${styles.thinkingMenuItem} ${opt.value === thinking ? styles.active : ""}`}
-                    onClick={() => pickThinking(opt.value)}
-                    type="button"
-                    title={opt.desc ?? ""}
+            {thinkingMenuOpen && thinkingMenuPos && typeof document !== "undefined"
+              ? createPortal(
+                  <div
+                    ref={thinkingMenuRef}
+                    className={styles.thinkingMenu}
+                    style={{
+                      position: "fixed",
+                      left: thinkingMenuPos.left,
+                      bottom: thinkingMenuPos.bottom,
+                      top: "auto",
+                      marginBottom: 0,
+                    }}
                   >
-                    {opt.value}
-                  </button>
-                ))}
-              </div>
-            )}
+                    {thinkingOptions.map((opt) => (
+                      <button
+                        key={opt.value}
+                        className={`${styles.thinkingMenuItem} ${opt.value === thinking ? styles.active : ""}`}
+                        onClick={() => pickThinking(opt.value)}
+                        type="button"
+                        title={opt.desc ?? ""}
+                      >
+                        {opt.value}
+                      </button>
+                    ))}
+                  </div>,
+                  document.body,
+                )
+              : null}
           </div>
           <div className={styles.inputBottomRight}>
             <ContextBadge />
