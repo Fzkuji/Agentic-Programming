@@ -145,7 +145,7 @@ function ConvItem({
     "group relative flex h-[32px] shrink-0 cursor-pointer items-center" +
     " gap-[12px] overflow-hidden rounded-[6px] px-[8px] py-[6px]" +
     " text-fs-base leading-[20px] whitespace-nowrap" +
-    " transition-colors duration-300 hover:bg-bg-hover";
+    " transition-colors duration-150 ease-out hover:bg-bg-hover";
   const colorCls = active
     ? "bg-bg-hover text-text-bright"
     : "text-text-primary";
@@ -173,10 +173,20 @@ function ConvItem({
         {label}
       </span>
       <span
-        className="absolute right-[6px] top-1/2 hidden size-[20px] -translate-y-1/2
+        // Fade the delete button in/out on the same 300ms curve as
+        // the row's background. `display: none → flex` (the legacy
+        // approach) is instant, so the X used to pop in before the
+        // hover background had time to fade in. Using
+        // `opacity + pointer-events` keeps it visible only on
+        // hover (no pointer events when transparent) and lets
+        // `transition-opacity` smooth the appearance.
+        className="absolute right-[6px] top-1/2 flex size-[20px] -translate-y-1/2
           items-center justify-center rounded-[4px] text-[12px]
           leading-none text-text-muted
-          group-hover:flex hover:!bg-accent-red hover:!text-white"
+          opacity-0 pointer-events-none
+          transition-opacity duration-150 ease-out
+          group-hover:opacity-100 group-hover:pointer-events-auto
+          hover:!bg-accent-red hover:!text-white"
         onClick={onDelete}
         title="Delete"
       >

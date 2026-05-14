@@ -81,6 +81,10 @@ const config: Config = {
         "accent-purple": "var(--accent-purple)",
         "accent-cyan": "var(--accent-cyan)",
         "accent-orange": "var(--accent-orange)",
+        /* sidebar nav default / hover colors — diverge from text-* in
+           light mode so we can't alias them to text-primary. */
+        "nav-color": "var(--nav-color)",
+        "nav-color-hover": "var(--nav-color-hover)",
       },
       borderRadius: {
         lg: "var(--radius-lg)",

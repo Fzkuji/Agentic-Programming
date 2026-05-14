@@ -41,6 +41,15 @@ import { refreshFunctionsList } from "@/lib/programs-actions";
 import { UserMenuFooter } from "../user-menu-footer";
 import { SessionsList } from "./sessions-list";
 import { FavoritesList } from "./favorites-list";
+import {
+  sidebarNavActionClass,
+  sidebarNavIconClass,
+  sidebarNavIconSvgClass,
+  sidebarNavItemActiveClass,
+  sidebarNavItemClass,
+  sidebarNavLabelClass,
+  sidebarToggleClass,
+} from "./nav-classes";
 import { useLegacyGlobals } from "./use-legacy-globals";
 
 function readPersistedSidebarOpen(): boolean {
@@ -172,7 +181,7 @@ export function Sidebar() {
           <img src="/images/logo.svg" alt="OpenProgram" className="logo-img" />
         </div>
         <button
-          className="sidebar-toggle"
+          className={sidebarToggleClass}
           onClick={toggleSidebar}
           title="Toggle sidebar"
           type="button"
@@ -183,37 +192,49 @@ export function Sidebar() {
         </button>
       </div>
 
-      <div className="sidebar-nav-group">
+      <div className="flex flex-col gap-px shrink-0 px-[8px] pt-[8px]">
         <div
-          className="sidebar-nav-item"
+          className={sidebarNavItemClass}
           id="navNewChat"
           onClick={newChat}
           role="button"
         >
-          <span className="sidebar-nav-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <span
+            className="flex size-[22.4px] shrink-0 -mx-[3.2px] items-center
+              justify-center rounded-full bg-[rgba(151,149,140,0.15)]
+              text-nav-color transition-colors duration-150 ease-out
+              group-hover:bg-[rgba(151,149,140,0.25)]
+              group-hover:[transform:rotate(-3deg)_scale(1.1)]
+              group-active:bg-text-primary
+              group-active:[transform:rotate(6deg)_scale(0.98)]
+              [transition:transform_0.3s_cubic-bezier(0.165,0.85,0.45,1),background_0.15s_ease,color_0.15s_ease]
+              group-hover:text-nav-color-hover"
+          >
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
               <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
             </svg>
           </span>
-          <span className="sidebar-nav-label">New chat</span>
+          <span className={sidebarNavLabelClass}>New chat</span>
         </div>
 
         <Link
           href="/programs"
           className={
-            "sidebar-nav-item" + (navActive.programs ? " active" : "")
+            sidebarNavItemClass +
+            (navActive.programs ? " " + sidebarNavItemActiveClass : "")
           }
           id="navPrograms"
         >
-          <span className="sidebar-nav-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <span className={sidebarNavIconClass}>
+            <svg className={sidebarNavIconSvgClass} viewBox="0 0 20 20" fill="currentColor">
               <path d="M4.25 2A2.25 2.25 0 0 0 2 4.25v2.5A2.25 2.25 0 0 0 4.25 9h2.5A2.25 2.25 0 0 0 9 6.75v-2.5A2.25 2.25 0 0 0 6.75 2h-2.5Zm0 9A2.25 2.25 0 0 0 2 13.25v2.5A2.25 2.25 0 0 0 4.25 18h2.5A2.25 2.25 0 0 0 9 15.75v-2.5A2.25 2.25 0 0 0 6.75 11h-2.5Zm9-9A2.25 2.25 0 0 0 11 4.25v2.5A2.25 2.25 0 0 0 13.25 9h2.5A2.25 2.25 0 0 0 18 6.75v-2.5A2.25 2.25 0 0 0 15.75 2h-2.5Zm0 9A2.25 2.25 0 0 0 11 13.25v2.5A2.25 2.25 0 0 0 13.25 18h2.5A2.25 2.25 0 0 0 18 15.75v-2.5A2.25 2.25 0 0 0 15.75 11h-2.5Z" />
             </svg>
           </span>
-          <span className="sidebar-nav-label">Programs</span>
+          <span className={sidebarNavLabelClass}>Programs</span>
           <span
             className={
-              "sidebar-nav-action refresh-btn" +
+              sidebarNavActionClass +
+              " refresh-btn" +
               (refreshing ? " spinning" : "") +
               (refreshDone ? " done" : "")
             }
@@ -243,29 +264,32 @@ export function Sidebar() {
 
         <Link
           href="/memory"
-          className={"sidebar-nav-item" + (navActive.memory ? " active" : "")}
+          className={
+            sidebarNavItemClass +
+            (navActive.memory ? " " + sidebarNavItemActiveClass : "")
+          }
           id="navMemory"
         >
-          <span className="sidebar-nav-icon">
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+          <span className={sidebarNavIconClass}>
+            <svg className={sidebarNavIconSvgClass} viewBox="0 0 20 20" fill="currentColor">
               <path d="M2 4.5A2.5 2.5 0 0 1 4.5 2h11a2.5 2.5 0 0 1 0 5h-11A2.5 2.5 0 0 1 2 4.5ZM2.75 9.083a.75.75 0 0 0 0 1.5h14.5a.75.75 0 0 0 0-1.5H2.75ZM2.75 12.663a.75.75 0 0 0 0 1.5h14.5a.75.75 0 0 0 0-1.5H2.75ZM2.75 16.25a.75.75 0 0 0 0 1.5h14.5a.75.75 0 1 0 0-1.5H2.75Z" />
             </svg>
           </span>
-          <span className="sidebar-nav-label">Memory</span>
+          <span className={sidebarNavLabelClass}>Memory</span>
         </Link>
 
         <Link
           href="/chats"
           className={
-            "sidebar-nav-item sidebar-nav-chats group" +
-            (navActive.chats ? " active" : "")
+            sidebarNavItemClass +
+            " sidebar-nav-chats" +
+            (navActive.chats ? " " + sidebarNavItemActiveClass : "")
           }
           id="navChats"
         >
-          <span className="sidebar-nav-icon">
+          <span className={sidebarNavIconClass}>
             <svg
-              width="20"
-              height="20"
+              className={sidebarNavIconSvgClass}
               viewBox="0 0 20 20"
               fill="currentColor"
               aria-hidden="true"
@@ -280,7 +304,7 @@ export function Sidebar() {
               />
             </svg>
           </span>
-          <span className="sidebar-nav-label">Chats</span>
+          <span className={sidebarNavLabelClass}>Chats</span>
         </Link>
       </div>
 

@@ -28,6 +28,14 @@
 
 import { useEffect } from "react";
 import { useSessionStore } from "@/lib/session-store";
+import {
+  sidebarNavIconClass,
+  sidebarNavIconSvgClass,
+  sidebarNavItemActiveClass,
+  sidebarNavItemClass,
+  sidebarNavLabelClass,
+  sidebarToggleClass,
+} from "../sidebar/nav-classes";
 
 // View IDs that round-trip through the `data-view` attribute. Matches
 // the legacy template exactly: "history" picks `<div data-view="history">`,
@@ -157,7 +165,7 @@ export function RightSidebar() {
     >
       <div className="sidebar-header right-sidebar-header">
         <button
-          className="sidebar-toggle"
+          className={sidebarToggleClass}
           onClick={onToggleRail}
           title="Toggle panel"
           type="button"
@@ -174,38 +182,38 @@ export function RightSidebar() {
         </button>
       </div>
 
-      <div className="sidebar-nav-group">
+      <div className="flex flex-col gap-px shrink-0 px-[8px] pt-[8px]">
         <div
           className={
-            "sidebar-nav-item right-nav-item" +
-            (view === VIEW_HISTORY ? " active" : "")
+            sidebarNavItemClass + " right-nav-item" +
+            (view === VIEW_HISTORY ? " " + sidebarNavItemActiveClass : "")
           }
           data-view={VIEW_HISTORY}
           onClick={() => onNavClick(VIEW_HISTORY)}
           role="button"
         >
-          <span className="sidebar-nav-icon">
-            <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor">
+          <span className={sidebarNavIconClass}>
+            <svg className={sidebarNavIconSvgClass} viewBox="0 0 256 256" fill="currentColor">
               <path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192Z" />
             </svg>
           </span>
-          <span className="sidebar-nav-label">History</span>
+          <span className={sidebarNavLabelClass}>History</span>
         </div>
         <div
           className={
-            "sidebar-nav-item right-nav-item" +
-            (view === VIEW_DETAIL ? " active" : "")
+            sidebarNavItemClass + " right-nav-item" +
+            (view === VIEW_DETAIL ? " " + sidebarNavItemActiveClass : "")
           }
           data-view={VIEW_DETAIL}
           onClick={() => onNavClick(VIEW_DETAIL)}
           role="button"
         >
-          <span className="sidebar-nav-icon">
-            <svg width="20" height="20" viewBox="0 0 256 256" fill="currentColor">
+          <span className={sidebarNavIconClass}>
+            <svg className={sidebarNavIconSvgClass} viewBox="0 0 256 256" fill="currentColor">
               <path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm-8,96H188.64L159,188a8,8,0,0,1-6.95,4h-.46a8,8,0,0,1-6.89-4.84L103,89.92,79,132a8,8,0,0,1-7,4H48a8,8,0,0,1,0-16H67.36L97.05,68a8,8,0,0,1,14.3.82L153,166.08l24-42.05a8,8,0,0,1,6.95-4h24a8,8,0,0,1,0,16Z" />
             </svg>
           </span>
-          <span className="sidebar-nav-label">Execution Detail</span>
+          <span className={sidebarNavLabelClass}>Execution Detail</span>
         </div>
       </div>
 

@@ -84,7 +84,7 @@ export function FavoritesList(): React.ReactElement | null {
             className="flex h-[32px] shrink-0 cursor-pointer items-center gap-[12px]
               overflow-hidden truncate rounded-[6px] px-[8px] py-[6px]
               text-fs-base text-text-primary
-              transition-colors duration-300 hover:bg-bg-hover"
+              transition-colors duration-150 ease-out hover:bg-bg-hover"
             onClick={() => onClick(f.name, cat)}
             title={f.description || ""}
           >
