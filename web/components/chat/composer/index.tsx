@@ -662,6 +662,20 @@ const ThinkingEffortPill = React.forwardRef<
       high: "color-mix(in srgb, var(--accent-orange) 70%, transparent)",
       xhigh: "color-mix(in srgb, var(--accent-red) 70%, transparent)",
     }[value] ?? "color-mix(in srgb, var(--accent-yellow) 70%, transparent)";
+  // Fully-opaque variant of the active hue. Used for the Lightning
+  // bolt itself — the range and ticks ride the softer half-alpha
+  // `--slider-active`, but the bolt floats above the ring as a
+  // standalone glyph and looks faded if it inherits the softened
+  // color (which mixes with whatever sits behind it).
+  const activeColorSolid =
+    {
+      off: "var(--text-bright)",
+      minimal: "var(--accent-yellow)",
+      low: "var(--accent-yellow)",
+      medium: "var(--accent-orange)",
+      high: "var(--accent-orange)",
+      xhigh: "var(--accent-red)",
+    }[value] ?? "var(--accent-yellow)";
 
   // Measure the spacer so the collapsed pill width exactly matches
   // its content. Hard-coding 132px gave the same chip the same
@@ -724,10 +738,13 @@ const ThinkingEffortPill = React.forwardRef<
           // expanded we hand the bg back to the Tailwind class
           // (`bg-bg-hover`) above and skip the inline override.
           ...(expanded ? {} : { backgroundColor: collapsedTint }),
-          // CSS variable inherited by the slider inside — its
-          // range / ticks / thumb / selected end-bolt all read
-          // `var(--slider-active)` for their filled colour.
+          // CSS variables inherited by the slider inside:
+          //   --slider-active        →  range / ticks / focus ring
+          //                              (soft, ~70% alpha)
+          //   --slider-active-solid  →  Lightning bolt thumb
+          //                              (opaque, full-strength hue)
           ["--slider-active" as string]: activeColor,
+          ["--slider-active-solid" as string]: activeColorSolid,
         } as React.CSSProperties}
         onClick={(e) => {
           e.stopPropagation();
@@ -807,7 +824,7 @@ const ThinkingEffortPill = React.forwardRef<
                 <Lightning
                   size={lightningSize}
                   weight="fill"
-                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[var(--slider-active)] pointer-events-none transition-[width,height] duration-150 ease-out"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[var(--slider-active-solid)] pointer-events-none transition-[width,height] duration-150 ease-out"
                   aria-hidden="true"
                 />
               </>
