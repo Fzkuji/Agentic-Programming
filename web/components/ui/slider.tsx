@@ -46,14 +46,16 @@ const Slider = React.forwardRef<
             // own thumb-position math (14px thumb, half-width 7).
             // `translate(-50%, -50%)` then pulls the tick's own centre
             // onto that point. `pointer-events-none` keeps the track
-            // click area uninterrupted. Colour is `bg-bg-hover` — the
-            // same shade as the unfilled track, so ticks blend into
-            // the inactive stretch and only appear as faint dots on
-            // the accent-blue range stretch (no harsh black contrast).
+            // click area uninterrupted. Colour is accent-blue — the
+            // same hue as the filled range and the thumb, so the
+            // whole slider reads as one continuous blue accent: the
+            // ticks on the unfilled grey track appear as blue dots
+            // marking each stop, and ticks under the filled range
+            // melt into it.
             className={cn(
               "pointer-events-none absolute top-1/2 size-[6px] rounded-full",
               "-translate-x-1/2 -translate-y-1/2",
-              "bg-bg-hover",
+              "bg-[var(--accent-blue)]",
             )}
             style={{ left: `calc(${i / (stops - 1)} * (100% - 14px) + 7px)` }}
             aria-hidden="true"
