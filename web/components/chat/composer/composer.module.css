@@ -482,97 +482,10 @@
 .thinkingArrow {
   flex-shrink: 0;
 }
-/* Thinking-effort popover.
-   Replaces the legacy vertical option list with a horizontal slider
-   (shadcn `<Slider />`, Radix under the hood). Same chrome as
-   `.plusMenu` — soft shadow stack, 12px corners, bg-tertiary surface. */
-.thinkingPanel {
-  position: absolute;
-  bottom: 100%;
-  left: 60px;
-  margin-bottom: 4px;
-  width: 280px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.04),
-    0 4px 6px -2px rgba(0, 0, 0, 0.06),
-    0 12px 24px -8px rgba(0, 0, 0, 0.1);
-  padding: 14px 16px 12px;
-  z-index: 100;
-}
-
-/* Header — current value (bold) + backend desc (muted). */
-.thinkingPanelHeader {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-.thinkingPanelValue {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-bright);
-  font-family: var(--font-mono);
-}
-.thinkingPanelDesc {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-/* The slider component handles its own track + thumb via Tailwind in
-   `components/ui/slider.tsx`. We don't add side padding here so the
-   tick row below can share the exact same coordinate space — both
-   span the full panel inner width, and tick labels are positioned at
-   the same x as the slider's thumb stops via `calc()`. */
-.thinkingPanelSlider {
-  margin: 4px 0 10px;
-}
-
-/* Per-stop micro-labels under the track.
-   `position: relative` makes this row the positioning context for the
-   absolutely-placed `.thinkingPanelTick` children — each tick centers
-   itself on the matching slider stop via inline `left: calc(...)`.
-   The whole row is a click target (`onClick` on the container in
-   `ThinkingEffortPanel`); the labels themselves are not separate
-   click-targets, so a click ANYWHERE in this strip — between labels,
-   above them, below them — snaps to the nearest stop. The 28px
-   height gives a forgiving touch target without expanding the panel
-   visibly. */
-.thinkingPanelTicks {
-  position: relative;
-  height: 28px;
-  font-size: 11px;
-  color: var(--text-muted);
-  cursor: pointer;
-}
-.thinkingPanelTick {
-  position: absolute;
-  top: 50%;
-  /* `left` is set inline so each tick's center lines up with the
-     corresponding slider thumb position. `translate(-50%, -50%)`
-     pulls the label's own center to that x/y. */
-  transform: translate(-50%, -50%);
-  /* No pointer events on the label itself — the parent .ticks row
-     owns click handling. This means a click that lands on a label
-     glyph still goes to the row's onClick (same target), but more
-     importantly clicks BETWEEN labels (over the strip's transparent
-     gaps) are equally valid hit targets and snap to the nearest
-     stop. Hover still works via CSS `:hover` because we use the
-     `none` value for events only on tick label TEXT — we still want
-     visual hover, so we keep events enabled. */
-  transition: color 0.12s ease, font-weight 0.12s ease;
-  user-select: none;
-  white-space: nowrap;
-}
-.thinkingPanelTicks:hover .thinkingPanelTick:not([data-active]) {
-  color: var(--text-secondary);
-}
-.thinkingPanelTick[data-active] {
-  color: var(--accent-blue, #6cb4ff);
-  font-weight: 500;
-}
+/* Thinking-effort popover panel + tick labels were ported to Tailwind
+   utilities inline on `<ThinkingEffortPanel />` in `composer/index.tsx`.
+   The Radix `<Slider />` (in `components/ui/slider.tsx`) is already
+   styled with Tailwind. Nothing remains here for the effort UI. */
 
 /* Slash menu (popup above input that rolls up out of the input box) */
 .slashClip {

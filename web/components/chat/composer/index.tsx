@@ -645,14 +645,23 @@ const ThinkingEffortPanel = React.forwardRef<
   return (
     <div
       ref={ref}
-      className={styles.thinkingPanel}
+      // Panel chrome: same soft shadow + 12px corner as the plus menu.
+      // Position values (top/left/bottom/fixed) come from the inline
+      // `style` prop the parent passes after measuring the trigger.
+      className={[
+        "w-[280px] rounded-[12px] border border-[var(--border)] bg-bg-tertiary",
+        "p-[14px_16px_12px] z-[100]",
+        "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_6px_-2px_rgba(0,0,0,0.06),0_12px_24px_-8px_rgba(0,0,0,0.1)]",
+      ].join(" ")}
       style={style}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className={styles.thinkingPanelHeader}>
-        <span className={styles.thinkingPanelValue}>{current?.value}</span>
+      <div className="mb-[14px] flex items-baseline gap-[8px]">
+        <span className="font-mono text-[14px] font-semibold text-text-bright">
+          {current?.value}
+        </span>
         {current?.desc ? (
-          <span className={styles.thinkingPanelDesc}>{current.desc}</span>
+          <span className="text-[12px] text-text-muted">{current.desc}</span>
         ) : null}
       </div>
       <Slider
@@ -665,18 +674,19 @@ const ThinkingEffortPanel = React.forwardRef<
           const next = options[idx];
           if (next) onChange(next.value);
         }}
-        className={styles.thinkingPanelSlider}
+        className="my-[4px] mb-[10px]"
       />
       <div
-        className={styles.thinkingPanelTicks}
+        // The tick row is a single 28px-tall click target. Click x →
+        // nearest stop via the same thumb-center math Radix uses.
+        // Labels are absolutely positioned children with no own click
+        // handler, so a click ANYWHERE in the strip — including the
+        // gaps between glyphs — snaps to the closest stop.
+        className="relative h-[28px] cursor-pointer text-[11px] text-text-muted"
         onClick={(e) => {
-          // Click-to-snap that covers the whole tick row (not just the
-          // text glyphs). Map the click's x to the nearest stop using
-          // the same `thumb-center = ratio * (W - thumbW) + thumbW/2`
-          // formula Radix uses — see CSS `--thumb` token below.
           const rect = e.currentTarget.getBoundingClientRect();
           const x = e.clientX - rect.left;
-          const thumbHalf = 7; // half of the 14px thumb
+          const thumbHalf = 7;
           const usable = rect.width - thumbHalf * 2;
           if (usable <= 0) return;
           const ratio = Math.max(
@@ -690,18 +700,24 @@ const ThinkingEffortPanel = React.forwardRef<
       >
         {options.map((opt, i) => {
           const ratio = maxIndex > 0 ? i / maxIndex : 0;
+          const isActive = i === valueIndex;
           return (
             <span
               key={opt.value}
-              className={styles.thinkingPanelTick}
-              data-active={i === valueIndex || undefined}
-              // Center each label horizontally at the matching slider
-              // stop. `calc(ratio * (100% - 14px) + 7px)` mirrors the
-              // thumb's center coordinate (Radix moves the 14px thumb
-              // along `0..W-14` and its center is offset by +7).
-              style={{
-                left: `calc(${ratio} * (100% - 14px) + 7px)`,
-              }}
+              // Each tick's CENTER lines up with the matching slider
+              // stop. `left: calc(ratio * (100% - 14px) + 7px)`
+              // mirrors Radix's thumb-center coordinate (14px thumb,
+              // half-width 7). `translate(-50%, -50%)` then pulls the
+              // label's own center onto that x/y.
+              className={[
+                "absolute top-1/2 -translate-x-1/2 -translate-y-1/2",
+                "transition-colors duration-150 ease-out select-none whitespace-nowrap",
+                isActive
+                  ? "font-medium text-[var(--accent-blue,#6cb4ff)]"
+                  : "",
+              ].join(" ")}
+              data-active={isActive || undefined}
+              style={{ left: `calc(${ratio} * (100% - 14px) + 7px)` }}
               title={opt.desc ?? opt.value}
             >
               {opt.value}
