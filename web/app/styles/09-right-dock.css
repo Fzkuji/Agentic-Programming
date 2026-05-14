@@ -12,11 +12,8 @@
   border-left: 1px solid var(--border);
 }
 
-/* Header: toggle sits at the LEFT edge so it's symmetric with the
-   left sidebar's toggle at the RIGHT edge. */
-.right-sidebar-header {
-  justify-content: flex-start;
-}
+/* Header layout (justify-start, h-12, p-2) moved to Tailwind inline
+   in `right-sidebar.tsx`. */
 
 /* Active nav item (currently showing view). */
 .right-sidebar .sidebar-nav-item.active {

@@ -163,7 +163,11 @@ export function RightSidebar() {
       className={"sidebar right-sidebar" + (open ? "" : " collapsed")}
       data-view={view}
     >
-      <div className="sidebar-header right-sidebar-header">
+      {/* Header — same 48px row + 8px padding as the left sidebar
+          header, but `justify-start` keeps the toggle pinned to the
+          LEFT edge so it mirrors the left sidebar's toggle (which
+          sits flush against the RIGHT edge there). */}
+      <div className="flex h-[48px] shrink-0 items-center justify-start p-[8px] box-border">
         <button
           className={sidebarToggleClass}
           onClick={onToggleRail}
