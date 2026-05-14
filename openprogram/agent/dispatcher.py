@@ -314,25 +314,37 @@ def process_user_turn(
     #    can create its own runtime as before — DAG persistence
     #    gracefully degrades to off for this turn.
     from openprogram.context.storage import GraphStore as _GraphStore
+    from openprogram.context import active as _ac
     from openprogram.agentic_programming.function import (
         _current_runtime as _current_runtime_var,
     )
     _dag_runtime = None
     _runtime_token = None
+    _active_token = None
     try:
         from openprogram.providers.registry import create_runtime as _create_rt
         _dag_runtime = _create_rt()
-        _dag_runtime.attach_store(
-            _GraphStore(db.db_path, req.session_id),
-            head_id=user_msg_id,
-        )
+        _store = _GraphStore(db.db_path, req.session_id)
+        _dag_runtime.attach_store(_store, head_id=user_msg_id)
         _runtime_token = _current_runtime_var.set(_dag_runtime)
+        # Mirror the DAG cursor into the ContextVar-scoped active
+        # context so callers reading via openprogram.context.active
+        # (Phase 3+ readers) see the same store / head_id without
+        # depending on which Runtime instance happens to be current.
+        # This is additive — the legacy runtime.attach_store path
+        # still drives every @agentic_function / Runtime.exec write
+        # in this turn. Phase 6 will retire the legacy path.
+        _active_token = _ac.set_active(
+            store=_store, head_id=user_msg_id,
+            session_id=req.session_id,
+        )
     except Exception:
         # No provider configured / runtime construction blew up.
         # Skip the attach; @agentic_function will still work, just
         # without its nodes landing in the DAG.
         _dag_runtime = None
         _runtime_token = None
+        _active_token = None
 
     # 4. Run the agent loop. Errors below get caught and reported as
     #    a system message so the conversation isn't left in a stuck
@@ -393,6 +405,8 @@ def process_user_turn(
                 _dag_runtime.detach_store()
             if _runtime_token is not None:
                 _current_runtime_var.reset(_runtime_token)
+            if _active_token is not None:
+                _ac.reset_active(_active_token)
         except Exception:
             pass
 

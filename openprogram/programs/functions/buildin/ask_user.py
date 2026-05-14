@@ -116,6 +116,7 @@ def _begin_ask_user_node(question: str):
         from openprogram.agentic_programming.function import (
             _current_runtime, _current_function_frame,
         )
+        from openprogram.context import active as _ac
         from openprogram.context.nodes import Call, ROLE_USER
     except Exception:
         return None, None
@@ -124,7 +125,15 @@ def _begin_ask_user_node(question: str):
     if runtime is None or getattr(runtime, "store", None) is None:
         return None, runtime
 
-    caller_id = _current_function_frame.get(None) or ""
+    # Prefer the dispatcher-managed active context's frame stack;
+    # fall back to the legacy ContextVar if no active context was
+    # installed (standalone scripts, older tests that drive
+    # @agentic_function without the dispatcher wrapper).
+    active_frame = _ac.current_frame()
+    caller_id = (
+        active_frame.pending_call_id if active_frame is not None
+        else (_current_function_frame.get(None) or "")
+    )
     node = Call(
         role=ROLE_USER,
         input={"question": question},

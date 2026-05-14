@@ -465,6 +465,18 @@ class agentic_function:
             # Push this function onto the frame stack so runtime.exec
             # called from the body can stamp its ModelCall.called_by.
             _frame_token = _current_function_frame.set(_pending_call_id)
+            # Mirror the frame into the ContextVar-scoped active
+            # context — readers migrating off ``_current_function_frame``
+            # (ask_user, runtime.exec render path) can already consult
+            # ``active.current_frame()`` without a behavior change here.
+            # No-op when no active context is installed (standalone).
+            from openprogram.context import active as _ac_mod
+            _active_frame = _ac_mod.push_frame(
+                name=fn.__name__,
+                pending_call_id=_pending_call_id,
+                expose=expose,
+                render_range=render_range,
+            )
             try:
                 # Emit node_created inside the try block so any pre-invocation
                 # hook fired by the emit (e.g. pause → stop → CancelledError)
@@ -499,6 +511,7 @@ class agentic_function:
                     started_at=ctx.start_time,
                     ended_at=ctx.end_time,
                 )
+                _ac_mod.pop_frame(_active_frame)
                 _current_function_frame.reset(_frame_token)
                 _current_ctx.reset(ctx_token)
                 if runtime_token is not None:
@@ -576,6 +589,15 @@ class agentic_function:
             # Push this function onto the frame stack so runtime.exec
             # called from the body can stamp its ModelCall.called_by.
             _frame_token = _current_function_frame.set(_pending_call_id)
+            # Mirror the frame into the ContextVar-scoped active
+            # context — see the async wrapper above for the rationale.
+            from openprogram.context import active as _ac_mod
+            _active_frame = _ac_mod.push_frame(
+                name=fn.__name__,
+                pending_call_id=_pending_call_id,
+                expose=expose,
+                render_range=render_range,
+            )
             try:
                 # Emit node_created inside the try block so any pre-invocation
                 # hook fired by the emit (e.g. pause → stop → CancelledError)
@@ -609,6 +631,7 @@ class agentic_function:
                     started_at=ctx.start_time,
                     ended_at=ctx.end_time,
                 )
+                _ac_mod.pop_frame(_active_frame)
                 _current_function_frame.reset(_frame_token)
                 _current_ctx.reset(ctx_token)
                 # Clean up runtime if we created it
