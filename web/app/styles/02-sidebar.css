@@ -92,8 +92,6 @@
 /* `.sidebar-toggle` moved to Tailwind via
    `components/sidebar/nav-classes.ts::sidebarToggleClass`. */
 
-/* .new-chat-btn kept hidden — JS still references it */
-.new-chat-btn { display: none; }
 
 /* `.sidebar-nav-group`, `.sidebar-nav-item / .sidebar-nav-icon /
    .sidebar-nav-label / .sidebar-nav-action`, plus the `#navNewChat`

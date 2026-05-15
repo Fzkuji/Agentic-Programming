@@ -246,7 +246,6 @@
   filter: brightness(1.2);
 }
 .history-node.is-head { filter: drop-shadow(0 0 4px rgba(255,255,255,0.35)); }
-.history-head-halo { pointer-events: none; }
 
 .history-tooltip {
   position: absolute;
