@@ -13,11 +13,12 @@
  */
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { useSessionStore } from "@/lib/session-store";
 
+import { AgentSelector } from "./agent-selector";
 import { installLegacyWrappers, legacyTopbarReady } from "./legacy-bridge";
 import { formatAgentDetails } from "./format";
 import styles from "./top-bar.module.css";
@@ -74,12 +75,16 @@ export function TopBar() {
           kind="chat"
           details={chatDetails}
           locked={chatLocked}
+          provider={chat.provider}
+          model={chat.model}
         />
         <AgentBadge
           id="execAgentBadge"
           kind="exec"
           details={execDetails}
           locked={false}
+          provider={exec.provider}
+          model={exec.model}
         />
       </div>
 
@@ -197,28 +202,47 @@ function AgentBadge({
   kind,
   details,
   locked,
+  provider,
+  model,
 }: {
   id: string;
   kind: "chat" | "exec";
   details: string;
   locked: boolean;
+  provider?: string;
+  model?: string;
 }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+
   function onClick() {
     if (locked) return;
-    const w = window as unknown as { openAgentSelector?: (k: string) => void };
-    w.openAgentSelector?.(kind);
+    setOpen((v) => !v);
   }
+
   const label = kind === "chat" ? "Chat" : "Exec";
   const tooltip = (kind === "chat" ? "Chat agent" : "Execution agent") + details;
   return (
-    <span
-      id={id}
-      className={"runtime-badge agent-badge" + (locked ? " locked" : "")}
-      onClick={onClick}
-      title={tooltip}
-    >
-      <span className="badge-short">{label}</span>
-      <span className="badge-details">{details}</span>
-    </span>
+    <>
+      <span
+        ref={ref}
+        id={id}
+        className={"runtime-badge agent-badge" + (locked ? " locked" : "")}
+        onClick={onClick}
+        title={tooltip}
+      >
+        <span className="badge-short">{label}</span>
+        <span className="badge-details">{details}</span>
+      </span>
+      {open ? (
+        <AgentSelector
+          kind={kind}
+          anchorRef={ref}
+          currentProvider={provider}
+          currentModel={model}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }

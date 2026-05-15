@@ -1,19 +1,5 @@
 // ===== Provider, Agent Settings, Model Management =====
 
-// Inline Lucide-style capability icons (linear, currentColor stroke).
-// Shared with settings.js.
-var _CAP_ICONS = {
-  vision:    '<svg class="cap-icon" viewBox="0 0 24 24" stroke="currentColor">' +
-             '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>' +
-             '<circle cx="12" cy="12" r="3"/></svg>',
-  tools:     '<svg class="cap-icon" viewBox="0 0 24 24" stroke="currentColor">' +
-             '<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>' +
-             '</svg>',
-  reasoning: '<svg class="cap-icon" viewBox="0 0 24 24" stroke="currentColor">' +
-             '<path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/>' +
-             '<path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>',
-};
-
 function updateProviderBadge(info) {
   var provBadge = document.getElementById('providerBadge');
   var sessBadge = document.getElementById('sessionBadge');
@@ -98,13 +84,14 @@ function updateAgentBadges() {
       + '<span class="badge-short">Chat</span>'
       + '<span class="badge-details">' + _escAgentBadge(details) + '</span>';
     chatBadge.title = 'Chat agent' + details;
+    // Click handling for the agent badge moved to the React
+    // `<AgentBadge>` / `<AgentSelector>` (topbar). This legacy path
+    // only keeps the `locked` class in sync.
     var isLocked = _agentSettings.chat.locked;
     if (isLocked) {
       chatBadge.classList.add('locked');
-      chatBadge.onclick = null;
     } else {
       chatBadge.classList.remove('locked');
-      chatBadge.onclick = function() { openAgentSelector('chat'); };
     }
   }
   if (execBadge && _agentSettings.exec) {
@@ -246,156 +233,6 @@ function _escAgentBadge(s) {
     .replace(/"/g, '&quot;');
 }
 
-async function openAgentSelector(agentType) {
-  var existing = document.getElementById('agentSelector');
-  if (existing) {
-    var sameType = existing.getAttribute('data-agent') === agentType;
-    existing.remove();
-    if (sameType) return;  // toggle close
-    // else: fall through and open the other one
-  }
-  if (window._closeAllPopovers) window._closeAllPopovers('agent');
-
-  var badge = document.getElementById(agentType === 'chat' ? 'chatAgentBadge' : 'execAgentBadge');
-  if (!badge) return;
-
-  // Source of truth: models the user enabled in Settings.
-  var catalog = [];
-  try {
-    var resp = await fetch('/api/models/enabled');
-    var data = await resp.json();
-    catalog = data.models || [];
-  } catch (e) { catalog = []; }
-
-  // Fallback: if nothing's enabled yet, fall back to the legacy
-  // _agentSettings.available map so the user isn't locked out on first use.
-  var legacyMode = catalog.length === 0;
-
-  var current = _agentSettings[agentType] || {};
-  var rect = badge.getBoundingClientRect();
-
-  var selector = document.createElement('div');
-  selector.id = 'agentSelector';
-  selector.className = 'agent-selector model-dropdown';
-  selector.setAttribute('data-agent', agentType);
-  selector.style.top = (rect.bottom + 4) + 'px';
-  selector.style.left = Math.max(rect.left - 50, 10) + 'px';
-
-  var html = '';
-  html += '<div class="model-dd-group-label" style="padding-top:6px">' +
-            '<span>' + (agentType === 'chat' ? 'Chat Agent' : 'Execution Agent') + '</span>' +
-          '</div>';
-
-  if (!legacyMode) {
-    // Group by provider using icons + capability badges.
-    var byProv = {};
-    var order = [];
-    catalog.forEach(function(m) {
-      var key = m.provider || '?';
-      if (!byProv[key]) { byProv[key] = { label: m.provider_label || key, items: [] }; order.push(key); }
-      byProv[key].items.push(m);
-    });
-
-    order.forEach(function(pid) {
-      var group = byProv[pid];
-      html += '<div class="model-dd-group-label">' +
-                '<span class="provider-icon" style="width:14px;height:14px">' + _dropdownProviderIcon(pid) + '</span>' +
-                '<span>' + escHtml(group.label) + '</span>' +
-              '</div>';
-      group.items.forEach(function(m) {
-        var active = (current.provider === pid && (current.model === m.id || current.model === pid + ':' + m.id));
-        var caps = '';
-        if (m.vision)    caps += '<span class="cap-badge vision" title="Vision">' + _CAP_ICONS.vision + '</span>';
-        if (m.tools)     caps += '<span class="cap-badge tools" title="Tools">' + _CAP_ICONS.tools + '</span>';
-        if (m.reasoning) caps += '<span class="cap-badge reasoning" title="Reasoning">' + _CAP_ICONS.reasoning + '</span>';
-        if (m.context_window) caps += '<span class="cap-badge ctx">' + _fmtCtxShort(m.context_window) + '</span>';
-
-        html += '<div class="model-dd-item' + (active ? ' active' : '') +
-                '" data-provider="' + escAttr(pid) +
-                '" data-model="' + escAttr(m.id) + '">' +
-                  '<span class="model-dd-name">' + escHtml(m.name || m.id) + '</span>' +
-                  '<span class="model-dd-caps">' + caps + '</span>' +
-                '</div>';
-      });
-    });
-
-    html += '<div class="model-dd-group-label" style="padding-top:10px;font-size:11px">' +
-              '<a href="/settings" style="color:var(--accent-blue);text-decoration:none">Manage models in Settings →</a>' +
-            '</div>';
-  } else {
-    // Legacy fallback (no enabled models yet).
-    var available = _agentSettings.available || {};
-    for (var provName in available) {
-      var prov = available[provName];
-      html += '<div class="model-dd-group-label">' +
-                '<span class="provider-icon" style="width:14px;height:14px">' + _dropdownProviderIcon(provName) + '</span>' +
-                '<span>' + escHtml(provName) + '</span>' +
-              '</div>';
-      var models = prov.models || [];
-      if (models.length === 0) models = [prov.default_model || ''];
-      models.forEach(function(m) {
-        var active = (current.provider === provName && current.model === m);
-        html += '<div class="model-dd-item' + (active ? ' active' : '') +
-                '" data-provider="' + escAttr(provName) +
-                '" data-model="' + escAttr(m) + '">' +
-                  '<span class="model-dd-name">' + escHtml(m) + '</span>' +
-                '</div>';
-      });
-    }
-    html += '<div class="model-dd-group-label" style="padding-top:10px;font-size:11px">' +
-              '<a href="/settings" style="color:var(--accent-blue);text-decoration:none">Enable models in Settings →</a>' +
-            '</div>';
-  }
-
-  selector.innerHTML = html;
-  document.body.appendChild(selector);
-
-  selector.addEventListener('click', function(e) {
-    var btn = e.target.closest('[data-provider]');
-    if (!btn) return;
-    e.stopPropagation();
-    var provider = btn.getAttribute('data-provider');
-    var model = btn.getAttribute('data-model');
-    selector.remove();
-
-    var body = {};
-    body[agentType] = { provider: provider, model: model };
-    fetch('/api/agent_settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }).then(function(r) { return r.json(); }).then(function(data) {
-      _agentSettings.chat = data.chat || _agentSettings.chat;
-      _agentSettings.exec = data.exec || _agentSettings.exec;
-      updateAgentBadges();
-      loadAgentSettings();
-    }).catch(function() {});
-
-    // The agent-settings update above only writes the agent's
-    // *default* model. The session has a per-conv provider/model
-    // override that takes priority over the agent default (set by
-    // the model picker / inherited from `_user_pinned_*`), so without
-    // also pushing this pick through `/api/model` the change has
-    // zero effect on the current conversation — the user picked
-    // Sonnet here but the chat still answers as Opus because the
-    // conv's `model_override` is still `claude-opus-4`. Fire both
-    // requests in parallel; the chat side wins because it's the one
-    // the runtime resolution actually reads.
-    if (agentType === 'chat' && currentSessionId) {
-      fetch('/api/model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider: provider,
-          model: model,
-          session_id: currentSessionId,
-        }),
-      }).catch(function() {});
-    }
-  });
-
-  // Outside-click close is handled by the unified popover listener in ui.js.
-}
 
 // ===== Provider List =====
 
