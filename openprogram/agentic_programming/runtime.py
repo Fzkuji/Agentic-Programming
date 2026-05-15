@@ -1,14 +1,14 @@
 """
-runtime — LLM call interface with automatic Context integration.
+runtime — LLM call interface with automatic DAG integration.
 
 Runtime is a class that wraps an LLM provider. You instantiate it once
 with your provider config, then call rt.exec() inside @agentic_functions.
 
 exec() automatically:
-    1. Reads the Context tree (via render_context) to build execution context
-    2. Prepends context to your content as a text block
-    3. Calls _call() (override this for your provider)
-    4. Records the reply to the Context tree
+    1. Builds the prompt's message history from the DAG (the
+       ``_store`` GraphStore the dispatcher installed for this turn)
+    2. Calls _call() (override this for your provider)
+    3. Appends a ModelCall node recording the reply into the DAG
 
 Usage:
     from openprogram import Runtime, agentic_function
@@ -286,9 +286,8 @@ class Runtime:
         invocation via ``_call_id``. No-op when no store is installed
         (standalone scripts).
 
-        ``reads`` is intentionally left empty for now — the prompt
-        contents are still composed by the legacy ``render_context``
-        path. Once prompts are DAG-driven this will carry the read ids.
+        ``reads`` is intentionally left empty for now — wiring the
+        exact read-id set the prompt consumed is a future refinement.
         """
         try:
             from openprogram.context.storage import _store
@@ -372,7 +371,7 @@ class Runtime:
         max_iterations: int = 20,
     ) -> str:
         """
-        Call the LLM. Creates an exec node in the Context tree.
+        Call the LLM. Appends a ModelCall node to the DAG.
 
         Args:
             content:          List of content blocks. Each block is a dict:
@@ -381,8 +380,10 @@ class Runtime:
                               {"type": "audio", "path": "recording.wav"}
                               {"type": "file", "path": "data.csv"}
 
-            context:          Override auto-generated context string.
-                              If None: exec node calls render_context() on itself.
+            context:          Optional text prefix for the legacy ``_call``
+                              path (``call=`` callable / subclass override).
+                              Ignored on the default AgentSession path,
+                              which builds history from the DAG.
 
             response_format:  Expected output format (JSON schema).
                               Passed to _call() for provider-native handling.

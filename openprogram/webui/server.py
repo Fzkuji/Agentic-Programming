@@ -1,5 +1,5 @@
 """
-Visualization server — FastAPI + WebSocket for real-time Context tree viewing
+Visualization server — FastAPI + WebSocket for chat + DAG viewing
 and interactive chat-style function execution.
 
 Runs in a background thread alongside user code. Streams tree updates to
@@ -600,7 +600,7 @@ from openprogram.webui._functions import (
 
 
 # ---------------------------------------------------------------------------
-# Conversation management — each conversation has a Context tree
+# Conversation management — each conversation is a DAG in SessionDB
 # ---------------------------------------------------------------------------
 
 def _get_or_create_session(session_id: str = None,
@@ -609,7 +609,7 @@ def _get_or_create_session(session_id: str = None,
                                 channel: str = None,
                                 account_id: str = None,
                                 peer: str = None) -> dict:
-    """Get or create a conversation with its own Context tree + Runtime.
+    """Get or create a conversation with its own DAG session + Runtime.
 
     If ``agent_id`` is provided the new conversation is bound to that
     agent; otherwise it lands in the registry's default agent. Existing
@@ -791,7 +791,7 @@ def _execute_in_context(session_id: str, msg_id: str, action: str,
                         thinking_effort: str = None, exec_thinking_effort: str = None,
                         tools_flag=None, permission_mode: str = None,
                         attachments: list = None):
-    """Execute a chat query or function call within the conversation's Context tree.
+    """Execute a chat query or function call within the conversation's DAG.
 
     This is the core execution engine. Everything runs under the conversation's
     root Context, so summarize() automatically provides conversation history.
@@ -1467,7 +1467,7 @@ def _broadcast_chat_response(session_id: str, msg_id: str, response: dict):
     response["msg_id"] = msg_id
     response["timestamp"] = time.time()
 
-    # No need to store in messages list — Context tree IS the storage
+    # No need to store in messages list — the DAG in SessionDB IS the storage
     msg = json.dumps({"type": "chat_response", "data": response}, default=str)
     _broadcast(msg)
 
@@ -1490,7 +1490,7 @@ from openprogram.webui._chat_helpers import (
 # ---------------------------------------------------------------------------
 
 async def _websocket_handler(ws):
-    """WebSocket endpoint for real-time Context tree updates and chat."""
+    """WebSocket endpoint for real-time chat streaming."""
     await ws.accept()
 
     # Install the global store→WS broadcaster on first connection. We can't

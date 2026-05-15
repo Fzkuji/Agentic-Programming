@@ -12,11 +12,11 @@ Architecture:
 
     Each iteration:
         1. step() — LLM sees the goal + recent history, decides next action AND executes it
-        2. Python records the result as a sibling in the context tree
-        3. Repeat — the next step() sees previous siblings via render_context()
+        2. Python records the result as a DAG node alongside prior steps
+        3. Repeat — the next step() sees prior steps through the DAG history
 
     Context management:
-        - Steps are siblings under a shared parent context
+        - Steps are recorded as sibling DAG nodes under a shared caller
         - render_range={"siblings": N} gives a sliding window — recent steps,
           older steps truncated automatically
         - expose="io" folds completed steps into one-line summaries (default)

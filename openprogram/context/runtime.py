@@ -16,10 +16,9 @@ The caller is responsible for choosing ``reads``. Helpers in
 ``branch_terminals`` / ``fold_history`` / etc.) are convenience functions
 that compute commonly-wanted ``reads`` lists.
 
-Unlike the legacy ``Runtime``, DagRuntime does NOT walk a Context tree
-to invent context, does NOT manipulate ``_current_ctx``, and does NOT
-care about @agentic_function decorators. It is purely a thin wrapper:
-"given a Graph state + this turn's input, ask the model".
+DagRuntime does NOT invent context on its own and does NOT care about
+@agentic_function decorators. It is purely a thin wrapper: "given a
+Graph state + this turn's input, ask the model".
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-agentic_function — decorator class that records function execution into the Context tree.
+agentic_function — decorator class that records function execution into the DAG.
 
 Usage is identical to a decorator function:
 
@@ -268,33 +268,32 @@ def _inject_runtime(sig, args, kwargs):
 
 class agentic_function:
     """
-    Decorator that records function execution into the Context tree.
+    Decorator that records function execution into the DAG.
 
-    Every decorated function is unconditionally recorded. On entry, a new
-    Context node is created. On exit, the node is updated with the return
-    value (or error) and timing.
+    Every decorated function is unconditionally recorded. On entry a
+    placeholder code Call (``output=None``, ``status='running'``) is
+    appended to the session's GraphStore; on exit the same node is
+    updated with the return value (or error) and timing.
 
     Args:
         expose:     What outside observers see of me after I complete. [DEFAULT: "io"]
 
-                    "io"     — only name + return value (subtree hidden)
-                    "full"   — docstring + params + output + LLM reply + subtree
-                    "hidden" — not shown at all
+                    "io"     — only name + return value (internals hidden)
+                    "full"   — docstring + params + output + LLM reply + internals
+                    "hidden" — no DAG node at all
 
-                    While I'm still running, expose is ignored and I'm rendered
-                    in full. The children are always recorded in the tree; expose
-                    only affects how render_context() picks nodes into the LLM
-                    prompt. tree() and save() always show the complete structure.
+                    ``expose`` is stamped into the code Call's metadata;
+                    ``compute_reads`` uses it to decide whether a later
+                    LLM call can see this function's internal nodes.
 
-        render_range: What slice of the tree I bring into my own LLM calls.
+        render_range: What slice of the DAG I bring into my own LLM calls.
 
-                    Dict of keyword arguments passed to ctx.render_context() when
-                    runtime.exec() auto-injects context for this function.
+                    Dict stamped into the code Call's metadata; the
+                    runtime's ``compute_reads`` reads it to bound the
+                    history a nested ``runtime.exec`` sees.
                     Example: {"depth": 1, "siblings": 3}
 
-                    If None (default), runtime.exec() calls render_context() with
-                    no arguments → all ancestors + all siblings (respecting each
-                    ancestor/sibling's own expose).
+                    If None (default), no extra bound is applied.
 
                     Common patterns:
                       {"depth": 0, "siblings": 0}    — isolated, see nothing
