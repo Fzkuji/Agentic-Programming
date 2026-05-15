@@ -118,18 +118,27 @@ def get_thinking_config_for_model(provider: str, model_id: str | None) -> dict:
     gpt-5 shows minimal/low/medium/high, Codex Max adds xhigh).
     """
     from openprogram.providers import get_model
+
+    def _build(levels: list[str], default: str | None, variant: str | None) -> dict:
+        values = ["off", *levels]
+        return {
+            "label": get_thinking_config(provider).get("label", "thinking"),
+            "options": [
+                {"value": v, "desc": _LEVEL_DESC.get(v, "No reasoning" if v == "off" else v)}
+                for v in values
+            ],
+            "default": default or (levels[len(levels) // 2] if levels else None),
+            "variant": variant,
+        }
+
     if model_id:
         model = get_model(provider, model_id)
         if model is not None and getattr(model, "thinking_levels", None):
-            levels = list(model.thinking_levels)
-            label = get_thinking_config(provider).get("label", "thinking")
-            values = ["off", *levels]
-            return {
-                "label": label,
-                "options": [{"value": v, "desc": _LEVEL_DESC.get(v, "No reasoning" if v == "off" else v)} for v in values],
-                "default": model.default_thinking_level or levels[len(levels) // 2],
-                "variant": model.thinking_variant,
-            }
+            return _build(
+                list(model.thinking_levels),
+                model.default_thinking_level,
+                model.thinking_variant,
+            )
         # Model found but declares no thinking_levels → hide menu.
         if model is not None:
             return {
@@ -138,6 +147,21 @@ def get_thinking_config_for_model(provider: str, model_id: str | None) -> dict:
                 "default": None,
                 "variant": None,
             }
+        # Model NOT in the catalog (proxy / custom models like
+        # `anthropic/claude-opus-4-7`, which only ever live in
+        # `THINKING_OVERRIDES`). The static provider fallback would
+        # drop the override's level set, default AND `thinking_variant`
+        # — and a lost variant means the runtime picks the wrong wire
+        # format. Consult THINKING_OVERRIDES directly so those models
+        # still get their declared picker.
+        from openprogram.providers.thinking_catalog import THINKING_OVERRIDES
+        override = THINKING_OVERRIDES.get(f"{provider}/{model_id}")
+        if override and override.get("thinking_levels"):
+            return _build(
+                list(override["thinking_levels"]),
+                override.get("default_thinking_level"),
+                override.get("thinking_variant"),
+            )
     return get_thinking_config(provider)
 
 
