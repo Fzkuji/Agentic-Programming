@@ -637,19 +637,18 @@ const ThinkingEffortPill = React.forwardRef<
   // Warm hue per effort level. NOT the project `--accent-*` tokens —
   // those are deliberately muted/earthy (`--accent-orange` is a
   // brownish #b8651f, `--accent-yellow` reads as dirt-yellow), which
-  // looked drab in the slider. These are vivid pure-hue oranges /
-  // yellows / red instead, each softened slightly with white so it
-  // stays airy rather than neon. `off` keeps neutral bright-white.
-  // Everything below derives from this single hue so the collapsed
-  // tint / range / bolt all agree.
+  // looked drab in the slider. Plain vivid hex hues, used as-is (no
+  // white mixing). `off` keeps neutral bright-white. Everything
+  // below derives from this single hue so the collapsed tint /
+  // range / bolt all agree.
   const warmHue =
     {
       off: "var(--text-bright)",
-      minimal: "color-mix(in srgb, #fbbf24 94%, white)",
-      low: "color-mix(in srgb, #fbbf24 94%, white)",
-      medium: "color-mix(in srgb, #ff9d2e 86%, white)",
-      high: "color-mix(in srgb, #ff9d2e 86%, white)",
-      xhigh: "color-mix(in srgb, #ff5c5c 88%, white)",
+      minimal: "#fbbf24",
+      low: "#fbbf24",
+      medium: "#ff9d2e",
+      high: "#ff9d2e",
+      xhigh: "#ff5c5c",
     }[value] ?? "var(--text-bright)";
 
   // Effort-level tint for the COLLAPSED pill — `warmHue` at low
