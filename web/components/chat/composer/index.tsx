@@ -118,10 +118,16 @@ export function Composer() {
   const { outgoingFn } = useFnFormWrapper({
     fnFormFunction,
     fnFormClosing: fnForm.closing,
+    // Depend only on the two STABLE callbacks, not the whole `fnForm`
+    // object — `useFnFormState` returns a fresh object every render, so
+    // depending on it made `onCloseComplete` change identity each
+    // render, which re-fired the wrapper's height-transition layout
+    // effect on EVERY render. That restarted the open/close transition
+    // mid-flight and made the send button jump.
     onCloseComplete: useCallback(() => {
       closeFnFormStore();
       fnForm.setClosing(false);
-    }, [closeFnFormStore, fnForm]),
+    }, [closeFnFormStore, fnForm.setClosing]),
     wrapperRef,
     sendBtnRef,
   });

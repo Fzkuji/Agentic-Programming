@@ -2,8 +2,7 @@
  * WelcomeScreen — empty-chat onboarding panel.
  *
  * Renders the `{LLM}` logo, the "Agentic Programming" title, the help
- * text, and the four function-shortcut buttons (Run analyze_sentiment,
- * Deep work, Create function, Edit function). Visible whenever the
+ * text, and the four function-shortcut buttons. Visible whenever the
  * session store says so; mounted as a portal inside #welcome-mount
  * placeholder that PageShell leaves in the chat area.
  *
@@ -35,13 +34,13 @@ const EXAMPLES: Example[] = [
     icon: <BookIcon />,
   },
   {
-    name: "create",
-    label: "Create function",
+    name: "word_count",
+    label: "Run word_count",
     icon: <DocumentIcon />,
   },
   {
-    name: "edit",
-    label: "Edit function",
+    name: "extract_action_items",
+    label: "Run extract_action_items",
     icon: <WandIcon />,
   },
 ];
