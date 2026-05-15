@@ -54,8 +54,6 @@ async def handle_clear_sessions(ws, cmd: dict):
             if conv.get("runtime") and hasattr(conv["runtime"], "close"):
                 conv["runtime"].close()
         _s._sessions.clear()
-    with _s._root_contexts_lock:
-        _s._root_contexts.clear()
     # Also collect any session IDs that exist only in the DB (never
     # hydrated into `_sessions` this run) so a "clear all" really
     # nukes everything the sidebar shows on next page load.
@@ -131,7 +129,7 @@ async def handle_load_session(ws, cmd: dict):
                 "next_sibling_id": next_id,
             })
 
-        tree_data = conv["root_context"]._to_dict() if conv.get("root_context") else {}
+        tree_data = {}  # tree Context retired — DAG tree is fetched via /api/sessions/{id}/dag-tree
         try:
             from openprogram.agent.session_db import default_db
             full_msgs = default_db().get_messages(conv["id"])

@@ -644,13 +644,13 @@ const ThinkingEffortPill = React.forwardRef<
   // values fall back to the neutral whitish wash. */
   const collapsedTint =
     {
-      off: "color-mix(in srgb, var(--text-bright) 10%, transparent)",
-      minimal: "color-mix(in srgb, var(--accent-yellow) 22%, transparent)",
-      low: "color-mix(in srgb, var(--accent-yellow) 32%, transparent)",
-      medium: "color-mix(in srgb, var(--accent-orange) 28%, transparent)",
-      high: "color-mix(in srgb, var(--accent-orange) 38%, transparent)",
-      xhigh: "color-mix(in srgb, var(--accent-red) 32%, transparent)",
-    }[value] ?? "color-mix(in srgb, var(--text-bright) 10%, transparent)";
+      off: "color-mix(in srgb, var(--text-bright) 8%, transparent)",
+      minimal: "color-mix(in srgb, var(--accent-yellow) 13%, transparent)",
+      low: "color-mix(in srgb, var(--accent-yellow) 19%, transparent)",
+      medium: "color-mix(in srgb, var(--accent-orange) 16%, transparent)",
+      high: "color-mix(in srgb, var(--accent-orange) 23%, transparent)",
+      xhigh: "color-mix(in srgb, var(--accent-red) 20%, transparent)",
+    }[value] ?? "color-mix(in srgb, var(--text-bright) 8%, transparent)";
 
   // Active hue for the slider's filled elements (range bar, filled
   // tick dots, thumb, selected end-bolt). Same effort-level ramp as
