@@ -534,7 +534,14 @@
     // First render after #chatArea mounts is a good moment to hook
     // chat scroll → visibility sync. Idempotent.
     _wireChatScrollSync();
+    // Compute once synchronously for nodes whose chat bubbles are
+    // already laid out, then again on the next frame: a render
+    // triggered by a *new* message often runs before that message's
+    // bubble is inserted / laid out in #chatMessages, so the sync
+    // pass would miss it and the new node would stay solid (no white
+    // centre) until the next scroll. The rAF pass catches it.
     _recomputeVisibility();
+    requestAnimationFrame(_recomputeVisibility);
 
     if (!body._historyHoverWired) {
       body._historyHoverWired = true;
