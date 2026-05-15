@@ -292,7 +292,6 @@ function handleMessage(msg) {
       _agentSettings.exec = msg.data.exec || _agentSettings.exec;
       updateAgentBadges();
       loadAgentSettings();
-      addSystemMessage('Agent settings updated: Chat=' + msg.data.chat.provider + '\u00b7' + msg.data.chat.model + ', Exec=' + msg.data.exec.provider + '\u00b7' + msg.data.exec.model);
       break;
     case 'chat_session_update':
       if (msg.data && msg.data.session_id && _agentSettings.chat) {
