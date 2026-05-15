@@ -37,14 +37,8 @@ function startElapsedTimer() {
 }
 
 function refreshInlineTrees() {
-  var treeBodies = document.querySelectorAll('.inline-tree-body');
-  treeBodies.forEach(function(body) {
-    var path = body.getAttribute('data-root-path');
-    if (path && _nodeCache[path]) {
-      body.innerHTML = renderTreeNode(_nodeCache[path]);
-    }
-  });
-  window._lastTreeJson = null;
+  // Phase 3: inline trees are React <ExecutionTree /> components now —
+  // they re-render from the store on their own. No-op.
 }
 
 function _treeHasRunning(node) {

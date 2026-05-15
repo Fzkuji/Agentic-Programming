@@ -120,7 +120,8 @@ function rerunFunction() {
 }
 
 function rerunFromNode(path) {
-  executeRetry(path);
+  // Phase 3: per-node retry is handled by the React <ExecutionTree />
+  // retry panel now (sends `retry_node` directly). Legacy path retired.
 }
 
 function retryChatQuery(text, btn) {

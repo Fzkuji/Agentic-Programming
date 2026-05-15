@@ -441,62 +441,6 @@ function _renderChatStreamEvent(evt, msgId) {
 // Rebuild the streamed scaffold HTML from persisted blocks. Used when
 // reloading a conversation — the live DOM is gone but msg.blocks has
 // everything needed to regenerate the same collapsible layout.
-function _renderAssistantBlocks(blocks, finalText) {
-  var thinking = '';
-  var toolsHtml = '';
-  var toolCount = 0;
-  blocks.forEach(function(b) {
-    if (b.type === 'thinking' && b.text) {
-      thinking =
-        '<div class="chat-thinking" data-collapsed="1">' +
-          '<button type="button" class="chat-fold-btn" onclick="_toggleChatFold(this)" onmousedown="event.preventDefault()">' +
-            '<span class="chat-fold-caret">&#9654;</span>' +
-            '<span class="chat-fold-label">Thinking</span>' +
-          '</button>' +
-          '<div class="chat-fold-content">' + escHtml(b.text) + '</div>' +
-        '</div>';
-    } else if (b.type === 'tool') {
-      toolCount++;
-      var errCls = b.is_error ? ' is-error' : '';
-      var statusTxt = b.is_error ? 'error' : 'done';
-      var argsPreview = escHtml(_compactToolArgs(b.input || ''));
-      var hasResult = b.result !== undefined && b.result !== null && b.result !== '';
-      toolsHtml +=
-        '<div class="chat-tool' + errCls + '" data-collapsed="1" data-call-id="' + escAttr(b.tool_call_id || '') + '">' +
-          '<button type="button" class="chat-fold-btn" onclick="_toggleChatFold(this)" onmousedown="event.preventDefault()">' +
-            '<span class="chat-fold-caret">&#9654;</span>' +
-            '<span class="chat-fold-label"><span class="chat-tool-name">' + escHtml(b.tool || '?') + '</span>' +
-              '<span class="chat-tool-args">(' + argsPreview + ')</span></span>' +
-            '<span class="chat-fold-elapsed chat-tool-status">' + escHtml(statusTxt) + '</span>' +
-          '</button>' +
-          '<div class="chat-fold-content">' +
-            '<div class="chat-tool-section"><div class="chat-tool-section-label">args</div><pre class="chat-tool-pre">' + escHtml(b.input || '') + '</pre></div>' +
-            (hasResult
-              ? '<div class="chat-tool-section chat-tool-result-section"><div class="chat-tool-section-label">result</div><pre class="chat-tool-pre chat-tool-result">' + escHtml(String(b.result)) + '</pre></div>'
-              : '') +
-          '</div>' +
-        '</div>';
-    }
-  });
-  var toolsBlock = toolCount > 0
-    ? ('<div class="chat-tools inline-tree" data-collapsed="1">' +
-         '<div class="inline-tree-header chat-tools-header" onclick="_toggleChatToolsCard(this)">' +
-           '<span><span style="color:var(--accent-cyan)">&#9670;</span> Tool calls <span class="chat-tools-count">' + toolCount + '</span></span>' +
-           '<span class="inline-tree-actions">' +
-             '<button class="inline-tree-copy chat-tools-copy" onclick="event.stopPropagation();_copyChatTools(event, this)" title="Copy tool calls as JSON">Copy JSON</button>' +
-             '<span class="inline-tree-toggle chat-tools-toggle">&#9654;</span>' +
-           '</span>' +
-         '</div>' +
-         '<div class="inline-tree-body chat-tools-body">' + toolsHtml + '</div>' +
-       '</div>')
-    : '';
-  return '<div class="chat-stream-body">' +
-      thinking +
-      toolsBlock +
-      '<div class="chat-text message-content">' + renderMd(finalText || '') + '</div>' +
-    '</div>';
-}
-
 function _toggleChatFold(btn) {
   var parent = btn.parentElement;
   if (!parent) return;
@@ -590,107 +534,11 @@ function _handleTreeUpdate(data) {
 }
 
 function _handleRetryResult(data) {
+  // Phase 3: retry results will be applied through the chat-stream
+  // reducer in a later slice. Legacy DOM renderer retired — just clear
+  // the running flag + refresh badges.
   setRunning(false);
   loadAgentSettings();
-
-  if (data.context_tree && (data.context_tree.path || data.context_tree.name)) {
-    var ct = data.context_tree;
-    var rootKey = ct.path || ct.name;
-    var idx = trees.findIndex(function(t) { return t.path === rootKey || t.name === ct.name; });
-    if (idx >= 0) { trees[idx] = ct; } else { trees.push(ct); }
-    expandedNodes.add(rootKey);
-  }
-
-  var statusLine = document.getElementById('currentStatusLine');
-  if (statusLine) statusLine.remove();
-  var pendingKeys = Object.keys(pendingResponses);
-  for (var pi = 0; pi < pendingKeys.length; pi++) {
-    var pel = pendingResponses[pendingKeys[pi]];
-    if (pel && pel.parentNode) pel.parentNode.removeChild(pel);
-    delete pendingResponses[pendingKeys[pi]];
-  }
-
-  if (currentSessionId && conversations[currentSessionId]) {
-    var msgs = conversations[currentSessionId].messages || [];
-    for (var mi = msgs.length - 1; mi >= 0; mi--) {
-      if (msgs[mi].role === 'assistant' && msgs[mi].function === data.function) {
-        msgs[mi].attempts = data.attempts;
-        msgs[mi].current_attempt = data.current_attempt;
-        msgs[mi].content = data.content;
-        break;
-      }
-    }
-  }
-
-  if (data.truncated) {
-    var existingCheck = document.querySelector('[data-function="' + data.function + '"]');
-    if (existingCheck) {
-      while (existingCheck.nextElementSibling) {
-        existingCheck.nextElementSibling.remove();
-      }
-    }
-    if (currentSessionId && conversations[currentSessionId]) {
-      var msgs = conversations[currentSessionId].messages || [];
-      for (var ti = msgs.length - 1; ti >= 0; ti--) {
-        if (msgs[ti].role === 'assistant' && msgs[ti].function === data.function) {
-          conversations[currentSessionId].messages = msgs.slice(0, ti + 1);
-          break;
-        }
-      }
-    }
-  }
-
-  var existingEl = document.querySelector('[data-function="' + data.function + '"]');
-  if (existingEl) {
-    var curIdx = data.current_attempt;
-    var total = data.attempts.length;
-    var retryTree = data.context_tree || (data.attempts[curIdx] && data.attempts[curIdx].tree);
-
-    if (existingEl.classList.contains('runtime-block')) {
-      var resultContentHtml = renderMd(data.content || '');
-      var treeHtml = '';
-      var attemptNavHtml = '';
-      var rerunHtml = '';
-      if (retryTree && (retryTree.path || retryTree.name)) {
-        treeHtml = renderInlineTree(retryTree, 'itree_retry_' + data.function.replace(/[^a-zA-Z0-9]/g, '_') + '_' + curIdx);
-      }
-      if (total > 1) {
-        attemptNavHtml = renderAttemptNav(data.function, curIdx, total);
-      }
-      rerunHtml = '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(data.function) + '\')">&#8634; Retry</button>';
-      var usageFooter = formatUsageFooterLabel(data.usage);
-      var existingHeader = existingEl.querySelector('.runtime-block-header');
-      var headerHtml = existingHeader ? existingHeader.outerHTML : '<div class="runtime-block-header"><span class="runtime-icon">&#9654;</span><span class="runtime-func">' + escHtml(data.function) + '</span>()</div>';
-      var bodyHtml = '<div class="runtime-block-body"><div class="runtime-block-content"><div class="runtime-result">' + resultContentHtml + '</div>' + treeHtml + '</div></div>';
-      var footerHtml = '';
-      if (rerunHtml || attemptNavHtml || usageFooter) {
-        footerHtml = '<div class="runtime-block-footer">' +
-          '<div class="runtime-footer-left">' + rerunHtml + '</div>' +
-          '<div class="runtime-footer-center">' + attemptNavHtml + '</div>' +
-          '<div class="runtime-footer-right">' + usageFooter + '</div>' +
-        '</div>';
-      }
-      existingEl.innerHTML = headerHtml + bodyHtml + footerHtml;
-    } else {
-      var cHtml = '<div class="message-content">';
-      cHtml += '<div style="margin-bottom:4px"><span style="font-family:var(--font-mono);color:var(--accent-green);font-size:12px">' +
-        escHtml(data.function) + '()</span> completed</div>';
-      cHtml += renderMd(data.content || '');
-      cHtml += '</div>';
-      if (total > 1) {
-        cHtml += renderAttemptNav(data.function, curIdx, total);
-      }
-      if (retryTree && (retryTree.path || retryTree.name)) {
-        cHtml += renderInlineTree(retryTree, 'itree_retry_' + data.function.replace(/[^a-zA-Z0-9]/g, '_') + '_' + curIdx);
-      }
-      existingEl.innerHTML =
-        '<div class="message-header">' +
-          '<div class="message-avatar bot-avatar">A</div>' +
-          '<div class="message-sender">Agentic</div>' +
-        '</div>' + cHtml;
-    }
-  }
-  scrollToBottom();
 }
 
 function _handleRuntimeResult(data, type) {

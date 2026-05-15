@@ -113,22 +113,6 @@ function finalizeExecLog() {
 
 // ===== Context Card =====
 
-function renderContextCard(tree, treeId) {
-  var id = treeId || 'ctx_' + Date.now();
-  expandedNodes.add(tree.path);
-  return '<div class="context-card">' +
-    '<div class="context-card-header" onclick="toggleContextCard(\'' + id + '\')">' +
-      '<span class="context-card-title">' +
-        '<span style="color:var(--accent-cyan)">&#9670;</span> Execution Tree: ' + escHtml(tree.name) +
-      '</span>' +
-      '<span class="context-card-toggle" id="toggle_' + id + '">&#9654;</span>' +
-    '</div>' +
-    '<div class="context-card-body" id="body_' + id + '">' +
-      renderTreeNode(tree) +
-    '</div>' +
-  '</div>';
-}
-
 function toggleContextCard(id) {
   var body = document.getElementById('body_' + id);
   var toggle = document.getElementById('toggle_' + id);
