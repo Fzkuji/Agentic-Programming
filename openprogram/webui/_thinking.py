@@ -32,11 +32,16 @@ THINKING_CONFIGS = {
         ],
         "default": "high",
     },
+    # openai-codex serves only the gpt-5.5 family (5.5 / -mini / -pro),
+    # none of which accept `minimal` — OpenAI's API 400s on it
+    # ("Supported values: none, low, medium, high, xhigh"). So the
+    # static fallback config here omits `minimal`. (The per-model path
+    # in get_thinking_config_for_model already excludes it via
+    # thinking_catalog; this keeps the fallback correct too.)
     "openai-codex": {
         "label": "reasoning effort",
         "options": [
             {"value": "off", "desc": "No reasoning"},
-            {"value": "minimal", "desc": "Minimal reasoning"},
             {"value": "low", "desc": "Quick reasoning"},
             {"value": "medium", "desc": "Balanced"},
             {"value": "high", "desc": "Deep reasoning"},
