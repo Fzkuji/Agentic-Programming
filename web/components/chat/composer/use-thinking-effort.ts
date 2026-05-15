@@ -14,6 +14,25 @@ import { useCallback, useEffect, useState } from "react";
 
 const DEFAULT_THINKING: ThinkingEffort = "medium";
 const FALLBACK_LEVELS = ["low", "medium", "high", "xhigh"] as const;
+const STORAGE_KEY = "thinkingEffort";
+
+/** Last picked effort, persisted so a page refresh keeps the choice. */
+function readPersistedEffort(): ThinkingEffort | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedEffort(level: ThinkingEffort): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, level);
+  } catch {
+    /* ignore */
+  }
+}
 
 export type ThinkingEffort = string;
 
@@ -46,7 +65,11 @@ export interface ThinkingEffortHook {
 }
 
 export function useThinkingEffort(): ThinkingEffortHook {
-  const [thinking, setThinking] = useState<ThinkingEffort>(DEFAULT_THINKING);
+  // Seed from localStorage so a page refresh keeps the last pick;
+  // fall back to `medium` for a first-ever visit.
+  const [thinking, setThinking] = useState<ThinkingEffort>(
+    () => readPersistedEffort() ?? DEFAULT_THINKING,
+  );
   const [menuOpen, setMenuOpen] = useState(false);
   const [options, setOptions] = useState<ThinkingOption[]>(() =>
     readThinkingOptions(),
@@ -60,8 +83,10 @@ export function useThinkingEffort(): ThinkingEffortHook {
       if (sig === prevSig) return;
       prevSig = sig;
       setOptions(opts);
-      // Snap the selection back to a valid value if the current pick
-      // isn't part of the new option list.
+      // Snap the selection back to a valid value ONLY if the current
+      // pick isn't part of the new option list (e.g. the agent
+      // switched to a provider that doesn't offer it). A valid
+      // persisted pick is left untouched — refresh keeps the choice.
       setThinking((cur) =>
         opts.some((o) => o.value === cur)
           ? cur
@@ -75,6 +100,7 @@ export function useThinkingEffort(): ThinkingEffortHook {
 
   const set = useCallback((level: ThinkingEffort) => {
     setThinking(level);
+    writePersistedEffort(level);
   }, []);
 
   return { thinking, options, menuOpen, setMenuOpen, set };
