@@ -292,7 +292,10 @@
   flex-direction: column;
   gap: 0;
 }
-.chat-messages:has(> .welcome) {
+/* Descendant (not `> .welcome`): the React <WelcomeScreen /> renders
+   inside a `#welcome-mount` host, so `.welcome` is not a direct child
+   of `.chat-messages`. */
+.chat-messages:has(.welcome) {
   padding-bottom: 0;
 }
 

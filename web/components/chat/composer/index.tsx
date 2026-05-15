@@ -66,6 +66,7 @@ export function Composer() {
   const focusTick = useSessionStore((s) => s.composerFocusTick);
   const fnFormFunction = useSessionStore((s) => s.fnFormFunction);
   const closeFnFormStore = useSessionStore((s) => s.closeFnForm);
+  const setFnFormClosing = useSessionStore((s) => s.setFnFormClosing);
   const send = wsSend;
 
   const isRunning = runningTask !== null;
@@ -272,7 +273,12 @@ export function Composer() {
   // transition ends (handled inside the useLayoutEffect).
   const handleFnFormClose = useCallback(() => {
     fnForm.setClosing(true);
-  }, [fnForm]);
+    // Mirror into the store so the welcome screen flips its examples
+    // row out of the collapsed state NOW — in sync with the form
+    // shrinking — instead of a beat later when `fnFormFunction`
+    // finally clears at transition end.
+    setFnFormClosing(true);
+  }, [fnForm, setFnFormClosing]);
 
   const submitFnForm = useCallback(() => {
     if (!fnFormFunction || isRunning) return;

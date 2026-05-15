@@ -226,6 +226,14 @@ interface ConvState {
   fnFormFunction: AgenticFunction | null;
   openFnForm: (fn: AgenticFunction) => void;
   closeFnForm: () => void;
+  /** True between the close click and the wrapper-height transition
+   *  end — `fnFormFunction` stays non-null through the close animation
+   *  (the form must stay mounted to animate), so other components that
+   *  react to the form opening/closing (e.g. the welcome screen's
+   *  examples row) read this to start their own transition in sync
+   *  with the form shrinking, not a beat later when it unmounts. */
+  fnFormClosing: boolean;
+  setFnFormClosing: (v: boolean) => void;
 
   /** Right sidebar dock state. `open` = expanded (icons + content
    *  visible); when false, only the icon rail shows (collapsed).
@@ -410,8 +418,10 @@ export const useSessionStore = create<ConvState>((set) => ({
     set((state) => ({ composerFocusTick: state.composerFocusTick + 1 })),
 
   fnFormFunction: null,
-  openFnForm: (fn) => set({ fnFormFunction: fn }),
-  closeFnForm: () => set({ fnFormFunction: null }),
+  openFnForm: (fn) => set({ fnFormFunction: fn, fnFormClosing: false }),
+  closeFnForm: () => set({ fnFormFunction: null, fnFormClosing: false }),
+  fnFormClosing: false,
+  setFnFormClosing: (v) => set({ fnFormClosing: v }),
 
   rightDock: readRightDock(),
   setRightDockOpen: (open) =>

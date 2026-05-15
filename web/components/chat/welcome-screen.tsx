@@ -49,13 +49,17 @@ export function WelcomeScreen() {
   const visible = useSessionStore((s) => s.welcomeVisible);
   const openFnForm = useSessionStore((s) => s.openFnForm);
   const fnFormFunction = useSessionStore((s) => s.fnFormFunction);
+  const fnFormClosing = useSessionStore((s) => s.fnFormClosing);
   const setComposerInput = useSessionStore((s) => s.setComposerInput);
   const focusComposer = useSessionStore((s) => s.focusComposer);
   const { availableFunctions } = useLegacyGlobals();
 
   if (!visible) return null;
 
-  const collapsed = fnFormFunction !== null;
+  // Treat a closing form as already not-collapsed so the examples row
+  // animates back in WITH the form shrinking, not a beat later when
+  // `fnFormFunction` finally clears at the transition end.
+  const collapsed = fnFormFunction !== null && !fnFormClosing;
 
   function pickExample(name: string, ev?: React.MouseEvent<HTMLButtonElement>) {
     // Blur the clicked button BEFORE flipping state — once `collapsed`
