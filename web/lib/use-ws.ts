@@ -16,6 +16,14 @@
  */
 import { useEffect } from "react";
 
+import {
+  handleAttemptSwitched,
+  loadSessionData,
+  onBranchCheckedOut,
+  onBranchesListMessage,
+  onChannelAccountsMessage,
+} from "./conversations";
+
 interface WsWindow {
   ws?: WebSocket | null;
   handleMessage?: (msg: unknown) => void;
@@ -164,19 +172,19 @@ export function useWS(): void {
           return true;
         }
         case "attempt_switched":
-          w.handleAttemptSwitched?.(d);
+          handleAttemptSwitched(d as never);
           return true;
         case "channel_accounts":
-          w._onChannelAccountsMessage?.(d);
+          onChannelAccountsMessage(d as never);
           return true;
         case "branches_list":
-          w._onBranchesListMessage?.(d);
+          onBranchesListMessage(d as never);
           return true;
         case "branch_checked_out":
-          w._onBranchCheckedOut?.(d);
+          onBranchCheckedOut(d as never);
           return true;
         case "session_loaded":
-          w.loadSessionData?.(d);
+          loadSessionData(d as never);
           return true;
         case "sessions_list":
           w._handleSessionsList?.(d);

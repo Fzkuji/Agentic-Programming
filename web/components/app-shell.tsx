@@ -21,10 +21,11 @@ import { useColResize } from "@/lib/use-col-resize";
 // Legacy shared JS modules. We keep loading the ones that the
 // not-yet-migrated chat page + sidebar + right rail still depend on;
 // the settings/programs/chats trios are gone (migrated to React).
+// `shared/conversations.js` is migrated — see `web/lib/conversations.ts`
+// (imported for side effects by `useWS`).
 const SHARED_JS = [
   "shared/state.js",
   "shared/helpers.js",
-  "shared/conversations.js",
   "shared/programs-panel.js",
   "shared/providers.js",
   "shared/ui.js",
