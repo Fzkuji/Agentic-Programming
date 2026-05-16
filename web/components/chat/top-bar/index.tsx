@@ -184,7 +184,6 @@ function BranchBadge({
 }: {
   branchInfo: ReturnType<typeof useSessionStore.getState>["branchInfo"];
 }) {
-  const ref = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -193,24 +192,21 @@ function BranchBadge({
     return () => window.removeEventListener("topbar-close-menus", close);
   }, []);
 
-  function onClick() {
-    if (open) {
-      setOpen(false);
-      return;
+  function onOpenChange(next: boolean) {
+    if (next) {
+      window.dispatchEvent(new Event("topbar-close-menus"));
+      (
+        window as unknown as { _closeAllPopovers?: () => void }
+      )._closeAllPopovers?.();
     }
-    window.dispatchEvent(new Event("topbar-close-menus"));
-    (
-      window as unknown as { _closeAllPopovers?: () => void }
-    )._closeAllPopovers?.();
-    setOpen(true);
+    setOpen(next);
   }
   return (
-    <>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
     <span
-      ref={ref}
       id="branchBadge"
       className="runtime-badge branch-badge"
-      onClick={onClick}
       title={`${branchInfo.name} (${branchInfo.count} branches)`}
     >
       <span className="branch-icon" aria-hidden="true">
@@ -244,10 +240,15 @@ function BranchBadge({
         {branchInfo.name} ({branchInfo.count})
       </span>
     </span>
-    {open ? (
-      <BranchMenu anchorRef={ref} onClose={() => setOpen(false)} />
-    ) : null}
-    </>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={4}
+        className="w-auto border-0 bg-transparent p-0 shadow-none"
+      >
+        <BranchMenu onClose={() => setOpen(false)} />
+      </PopoverContent>
+    </Popover>
   );
 }
 

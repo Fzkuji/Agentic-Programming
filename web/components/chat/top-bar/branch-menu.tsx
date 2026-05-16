@@ -1,19 +1,17 @@
 "use client";
 
 /**
- * Branch menu — React port of `conversations.js::openBranchDropdown`.
+ * Branch menu — the content of the topbar branch-chip popover.
  *
- * The topbar branch-chip dropdown: the conversation's DAG branches with
- * per-row checkout (click), inline rename and delete. Same actions as
- * the right-rail <BranchesPanel />, different surface.
+ * The conversation's DAG branches with per-row checkout (click),
+ * inline rename and delete. Same actions as the right-rail
+ * <BranchesPanel />, different surface.
  *
  * On open it force-refreshes the branch list (`fetchBranches`) so a
- * fresh retry/edit leaf shows up. Branch data still rides the legacy
- * `window._branchesByConv` cache + `window.fetchBranches` — they
- * migrate with the WS layer.
+ * fresh retry/edit leaf shows up. Positioning / click-outside / portal
+ * are handled by the shadcn <Popover> in `index.tsx`.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState } from "react";
 
 import { useSessionStore } from "@/lib/session-store";
 import { Badge } from "@/components/ui/badge";
@@ -160,6 +158,8 @@ function BranchRowItem({
               commitRename();
             } else if (e.key === "Escape") {
               e.preventDefault();
+              // Stop the popover from also closing on this Escape.
+              e.stopPropagation();
               setEditing(false);
             }
           }}
@@ -220,24 +220,9 @@ function BranchRowItem({
   );
 }
 
-export function BranchMenu({
-  anchorRef,
-  onClose,
-}: {
-  anchorRef: React.RefObject<HTMLElement | null>;
-  onClose: () => void;
-}) {
+export function BranchMenu({ onClose }: { onClose: () => void }) {
   const sessionId = useSessionStore((s) => s.currentSessionId);
   const [rows, setRows] = useState<BranchRow[] | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const a = anchorRef.current;
-    if (!a) return;
-    const r = a.getBoundingClientRect();
-    setPos({ left: r.left, top: r.bottom + 4 });
-  }, [anchorRef]);
 
   useEffect(() => {
     const w = window as unknown as BranchWindow;
@@ -253,31 +238,10 @@ export function BranchMenu({
     );
   }, [sessionId]);
 
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      const t = e.target as Node | null;
-      if (!t) return;
-      if (panelRef.current?.contains(t)) return;
-      if (anchorRef.current?.contains(t)) return;
-      onClose();
-    }
-    const id = setTimeout(() => document.addEventListener("click", onDoc), 0);
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener("click", onDoc);
-    };
-  }, [anchorRef, onClose]);
-
-  if (!pos || typeof document === "undefined") return null;
-
-  return createPortal(
+  return (
     <div
-      ref={panelRef}
       className="agent-selector model-dropdown branch-selector"
       style={{
-        position: "fixed",
-        left: pos.left,
-        top: pos.top,
         minWidth: 0,
         maxWidth: "none",
         width: "auto",
@@ -300,7 +264,6 @@ export function BranchMenu({
           onClose={onClose}
         />
       ))}
-    </div>,
-    document.body,
+    </div>
   );
 }
