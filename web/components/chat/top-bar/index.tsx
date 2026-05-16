@@ -18,6 +18,12 @@ import { useShallow } from "zustand/react/shallow";
 
 import { useSessionStore } from "@/lib/session-store";
 
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+
 import { AgentSelector } from "./agent-selector";
 import { BranchMenu } from "./branch-menu";
 import { ChannelMenu } from "./channel-menu";
@@ -122,7 +128,6 @@ function StatusBadge({
 }: {
   statusBadge: ReturnType<typeof useSessionStore.getState>["statusBadge"];
 }) {
-  const ref = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -131,17 +136,15 @@ function StatusBadge({
     return () => window.removeEventListener("topbar-close-menus", close);
   }, []);
 
-  function onClick() {
-    if (open) {
-      setOpen(false);
-      return;
+  function onOpenChange(next: boolean) {
+    if (next) {
+      // Close every other top-bar dropdown first.
+      window.dispatchEvent(new Event("topbar-close-menus"));
+      (
+        window as unknown as { _closeAllPopovers?: () => void }
+      )._closeAllPopovers?.();
     }
-    // Close every other top-bar dropdown first.
-    window.dispatchEvent(new Event("topbar-close-menus"));
-    (
-      window as unknown as { _closeAllPopovers?: () => void }
-    )._closeAllPopovers?.();
-    setOpen(true);
+    setOpen(next);
   }
   const cls =
     "status-badge" +
@@ -154,21 +157,25 @@ function StatusBadge({
      statusBadge.tone === "warn" ? "warn" :
      statusBadge.tone === "err" ? "err" : "");
   return (
-    <>
-      <span
-        ref={ref}
-        id="statusBadge"
-        className={cls}
-        onClick={onClick}
-        title={statusBadge.title || statusBadge.label}
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger asChild>
+        <span
+          id="statusBadge"
+          className={cls}
+          title={statusBadge.title || statusBadge.label}
+        >
+          <span className={dotCls} aria-hidden="true" />
+          <span className="badge-short">{statusBadge.label}</span>
+        </span>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        sideOffset={4}
+        className="w-auto border-0 bg-transparent p-0 shadow-none"
       >
-        <span className={dotCls} aria-hidden="true" />
-        <span className="badge-short">{statusBadge.label}</span>
-      </span>
-      {open ? (
-        <ChannelMenu anchorRef={ref} onClose={() => setOpen(false)} />
-      ) : null}
-    </>
+        <ChannelMenu onClose={() => setOpen(false)} />
+      </PopoverContent>
+    </Popover>
   );
 }
 

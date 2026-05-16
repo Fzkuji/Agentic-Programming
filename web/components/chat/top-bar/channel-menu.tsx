@@ -1,21 +1,18 @@
 "use client";
 
 /**
- * Channel menu — React port of `conversations.js::openChannelDropdown`.
+ * Channel menu — the content of the topbar `<StatusBadge />` popover.
  *
- * Opened by the topbar `<StatusBadge />`. Lists the enabled channel
- * accounts (WeChat / Discord / Telegram / Slack) grouped by platform,
- * plus a "Local" row for no binding. Picking one binds the current
- * conversation to that channel (`set_conversation_channel` over WS) —
- * or, for a brand-new chat with no session yet, stashes the choice on
- * `window._pendingChannelChoice` for the first message to carry.
+ * Lists the enabled channel accounts (WeChat / Discord / Telegram /
+ * Slack) grouped by platform, plus a "Local" row for no binding.
+ * Picking one binds the current conversation to that channel
+ * (`set_conversation_channel` over WS) — or, for a brand-new chat with
+ * no session yet, stashes the choice on `window._pendingChannelChoice`.
  *
- * Channel-account data still comes from the legacy
- * `window.fetchChannelAccounts()` (a cached WS round-trip) — that data
- * helper migrates with the rest of the WS layer.
+ * Positioning / click-outside / portal are handled by the shadcn
+ * <Popover> in `index.tsx`; this component just renders the rows.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useState } from "react";
 
 import { useSessionStore } from "@/lib/session-store";
 import { Badge } from "@/components/ui/badge";
@@ -48,24 +45,9 @@ function brandFor(plat: string): string {
   return BRAND[plat.toLowerCase()] || plat;
 }
 
-export function ChannelMenu({
-  anchorRef,
-  onClose,
-}: {
-  anchorRef: React.RefObject<HTMLElement | null>;
-  onClose: () => void;
-}) {
+export function ChannelMenu({ onClose }: { onClose: () => void }) {
   const sessionId = useSessionStore((s) => s.currentSessionId);
   const [rows, setRows] = useState<ChannelAccount[] | null>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  useLayoutEffect(() => {
-    const a = anchorRef.current;
-    if (!a) return;
-    const r = a.getBoundingClientRect();
-    setPos({ left: r.left, top: r.bottom + 4 });
-  }, [anchorRef]);
 
   useEffect(() => {
     const f = (window as unknown as ChannelWindow).fetchChannelAccounts;
@@ -78,25 +60,6 @@ export function ChannelMenu({
       setRows([]);
     }
   }, []);
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      const t = e.target as Node | null;
-      if (!t) return;
-      if (panelRef.current?.contains(t)) return;
-      if (anchorRef.current?.contains(t)) return;
-      onClose();
-    }
-    // Defer so the opening click doesn't immediately close it.
-    const id = setTimeout(
-      () => document.addEventListener("click", onDoc),
-      0,
-    );
-    return () => {
-      clearTimeout(id);
-      document.removeEventListener("click", onDoc);
-    };
-  }, [anchorRef, onClose]);
 
   const w = window as unknown as ChannelWindow;
   const cur = w._currentChannelChoice?.() ?? {
@@ -131,8 +94,6 @@ export function ChannelMenu({
     w.refreshChannelBadge?.();
   }
 
-  if (!pos || typeof document === "undefined") return null;
-
   // Group accounts by platform, preserving first-seen order.
   const enabled = (rows ?? []).filter((r) => r.enabled);
   const groups: { plat: string; accounts: ChannelAccount[] }[] = [];
@@ -145,12 +106,8 @@ export function ChannelMenu({
     g.accounts.push(r);
   }
 
-  return createPortal(
-    <div
-      ref={panelRef}
-      className="agent-selector model-dropdown channel-selector"
-      style={{ position: "fixed", left: pos.left, top: pos.top }}
-    >
+  return (
+    <div className="agent-selector model-dropdown channel-selector">
       <div className="model-dd-group-label" style={{ paddingTop: 6 }}>
         <span>Conversation channel</span>
       </div>
@@ -214,7 +171,6 @@ export function ChannelMenu({
           })}
         </div>
       ))}
-    </div>,
-    document.body,
+    </div>
   );
 }
