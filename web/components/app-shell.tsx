@@ -16,6 +16,7 @@ import { legacyConvToChatMsgs } from "@/lib/legacy-conv-map";
 import { useColResize } from "@/lib/use-col-resize";
 // Migrated legacy modules — imported for side effects (they install
 // their `window.*` bridges for the still-legacy scripts).
+import "@/lib/helpers";
 import "@/lib/providers";
 import "@/lib/programs-panel";
 import { initOverlayScrollbars } from "@/lib/scrollbar";
@@ -28,15 +29,12 @@ import { initOverlayScrollbars } from "@/lib/scrollbar";
 // the settings/programs/chats trios are gone (migrated to React).
 // `shared/conversations.js` is migrated — see `web/lib/conversations.ts`
 // (imported for side effects by `useWS`).
+// Migrated to lib/: conversations.js, providers.js, programs-panel.js,
+// helpers.js, scrollbar.js, chat/*.js — see the `import "@/lib/..."`
+// side-effect imports above. `right-dock.js` is owned by <RightSidebar />.
 const SHARED_JS = [
   "shared/state.js",
-  "shared/helpers.js",
   "shared/ui.js",
-  // scrollbar.js migrated → lib/scrollbar.ts
-  "shared/scrollbar.js",
-  // `shared/right-dock.js` is no longer loaded — `<RightSidebar />`
-  // owns open/close + view switching now and installs the
-  // `window.rightDock` shim itself for any still-vanilla callers.
   "shared/history-graph.js",
 ];
 
