@@ -22,6 +22,14 @@ interface WsWindow {
   updateStatus?: (s: string) => void;
   loadAgentSettings?: () => void;
   currentSessionId?: string | null;
+  // Legacy handlers the hook dispatch calls until each is migrated.
+  _handleRunningTask?: (data: unknown) => void;
+  updateProviderBadge?: (data: unknown) => void;
+  loadProviders?: () => void;
+  addSystemMessage?: (text: string) => void;
+  formatProviderLabel?: (data: unknown) => string;
+  updateAgentBadges?: () => void;
+  _agentSettings?: { chat?: Record<string, unknown>; exec?: Record<string, unknown> };
 }
 
 export function useWS(): void {
@@ -37,13 +45,14 @@ export function useWS(): void {
      *  one batch at a time until the legacy dispatcher is empty. */
     function dispatch(msg: {
       type?: string;
-      data?: { session_id?: string };
+      data?: Record<string, unknown>;
     }): boolean {
+      const d = msg.data;
       switch (msg.type) {
         case "pong":
           return true;
         case "session_reload": {
-          const sid = msg.data?.session_id;
+          const sid = d?.session_id as string | undefined;
           if (sid && sid === w.currentSessionId) {
             socket?.send(
               JSON.stringify({ action: "load_session", session_id: sid }),
@@ -54,7 +63,7 @@ export function useWS(): void {
         case "branch_renamed":
         case "branch_name_deleted":
         case "branch_deleted": {
-          const sid = msg.data?.session_id;
+          const sid = d?.session_id as string | undefined;
           if (sid) {
             socket?.send(
               JSON.stringify({ action: "list_branches", session_id: sid }),
@@ -62,6 +71,35 @@ export function useWS(): void {
           }
           return true;
         }
+        case "running_task":
+          w._handleRunningTask?.(d);
+          return true;
+        case "provider_info":
+        case "provider_changed":
+          w.updateProviderBadge?.(d);
+          w.loadProviders?.();
+          if (msg.type === "provider_changed") {
+            w.addSystemMessage?.(
+              "Switched to " + (w.formatProviderLabel?.(d) ?? ""),
+            );
+          }
+          return true;
+        case "agent_settings_changed": {
+          const as = w._agentSettings;
+          if (as) {
+            if (d?.chat) as.chat = d.chat as Record<string, unknown>;
+            if (d?.exec) as.exec = d.exec as Record<string, unknown>;
+          }
+          w.updateAgentBadges?.();
+          w.loadAgentSettings?.();
+          return true;
+        }
+        case "chat_session_update":
+          if (d?.session_id && w._agentSettings?.chat) {
+            w._agentSettings.chat.session_id = d.session_id;
+            w.updateAgentBadges?.();
+          }
+          return true;
         default:
           return false;
       }

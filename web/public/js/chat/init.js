@@ -240,29 +240,6 @@ function handleMessage(msg) {
         _removePauseRetryButtons();
       }
       break;
-    case 'running_task':
-      _handleRunningTask(msg.data);
-      break;
-    case 'provider_info':
-    case 'provider_changed':
-      updateProviderBadge(msg.data);
-      loadProviders();
-      if (msg.type === 'provider_changed') {
-        addSystemMessage('Switched to ' + formatProviderLabel(msg.data));
-      }
-      break;
-    case 'agent_settings_changed':
-      _agentSettings.chat = msg.data.chat || _agentSettings.chat;
-      _agentSettings.exec = msg.data.exec || _agentSettings.exec;
-      updateAgentBadges();
-      loadAgentSettings();
-      break;
-    case 'chat_session_update':
-      if (msg.data && msg.data.session_id && _agentSettings.chat) {
-        _agentSettings.chat.session_id = msg.data.session_id;
-        updateAgentBadges();
-      }
-      break;
   }
 }
 
