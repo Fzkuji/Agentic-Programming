@@ -141,10 +141,10 @@ export function useWS(): void {
           }
           return true;
         case "full_tree":
-          w.trees = d || [];
+          // Tree data rides the store via `tree_update` now — the
+          // legacy `trees` global is no longer read by the UI.
           return true;
         case "event":
-          w.updateTreeData?.(d);
           return true;
         case "functions_list":
           w.availableFunctions = d || [];

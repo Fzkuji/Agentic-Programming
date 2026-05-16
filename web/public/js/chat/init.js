@@ -119,66 +119,23 @@ window._wsHandleChatResponse = function (data) {
 };
 
 window._wsHandleStatus = function (msg) {
-      isPaused = msg.paused;
-      if (msg.stopped) {
-        isRunning = false;
-        // Optimistically mark every still-running node as cancelled.
-        // The worker thread will broadcast the authoritative tree_update
-        // momentarily, but without this step the tree flashes "running"
-        // (blue pulse) between the stop ack and the worker's final emit.
-        function _markCancelled(node) {
-          if (!node) return;
-          if (node.status === 'running') {
-            node.status = 'error';
-            if (!node.error) node.error = 'Cancelled by user';
-            if (!node.end_time) node.end_time = Date.now() / 1000;
-          }
-          if (node.children) node.children.forEach(_markCancelled);
-        }
-        try { (trees || []).forEach(_markCancelled); } catch(e) {}
-        try {
-          Object.keys(_nodeCache || {}).forEach(function(k) { _markCancelled(_nodeCache[k]); });
-        } catch(e) {}
-        // Tear down the elapsed-time ticker and strip data-running flags so
-        // the frozen durations stop being overwritten.
-        if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
-        document.querySelectorAll('.node-duration[data-running]').forEach(function(el) {
-          el.removeAttribute('data-running');
-        });
-        // Optimistically finalize the in-progress runtime block: drop the
-        // typing-indicator, flip the tree header icon from pulsing to idle,
-        // and inject a footer with Retry button. The worker's final `result`
-        // broadcast may arrive late (or not at all if the CLI subprocess
-        // takes time to die) — without this, the block stays stuck at
-        // "... three dots" with a blue pulse forever.
-        document.querySelectorAll('.runtime-block[data-function]').forEach(function(block) {
-          var ti = block.querySelector('.typing-indicator');
-          if (ti && ti.parentNode) ti.parentNode.removeChild(ti);
-          if (block.id === 'runtime_pending') block.id = '';
-          var treeHdr = block.querySelector('.inline-tree-header > span:first-child');
-          if (treeHdr) {
-            treeHdr.innerHTML = '<span style="color:var(--accent-cyan)">&#9670;</span> Execution Tree';
-          }
-          if (!block.querySelector('.runtime-block-footer')) {
-            var fn = block.getAttribute('data-function');
-            var footer = document.createElement('div');
-            footer.className = 'runtime-block-footer';
-            footer.innerHTML = '<div class="runtime-footer-left">' +
-              '<button class="rerun-btn" onclick="retryCurrentBlock(\'' + escAttr(fn) + '\')">&#8634; Retry</button>' +
-            '</div><div class="runtime-footer-center"></div><div class="runtime-footer-right"></div>';
-            block.appendChild(footer);
-          }
-        });
-      }
-      updatePauseBtn();
-      refreshInlineTrees();
-      if (msg.stopped) {
-        _removePauseRetryButtons();
-      } else if (msg.paused) {
-        _injectPauseRetryButtons();
-      } else {
-        _removePauseRetryButtons();
-      }
+  // Pause / stop state. The legacy optimistic tree-cancel + runtime
+  // block DOM finalization is gone — the React <ExecutionTree /> /
+  // <RuntimeBlock /> handle their own running state via `tree_update`
+  // and the terminal `result`.
+  isPaused = msg.paused;
+  if (msg.stopped) {
+    isRunning = false;
+    if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+  }
+  updatePauseBtn();
+  if (msg.stopped) {
+    _removePauseRetryButtons();
+  } else if (msg.paused) {
+    _injectPauseRetryButtons();
+  } else {
+    _removePauseRetryButtons();
+  }
 };
 
 function _handleSessionsList(data) {
