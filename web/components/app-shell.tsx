@@ -17,6 +17,7 @@ import { useColResize } from "@/lib/use-col-resize";
 // Migrated legacy modules — imported for side effects (they install
 // their `window.*` bridges for the still-legacy scripts).
 import "@/lib/helpers";
+import "@/lib/ui";
 import "@/lib/providers";
 import "@/lib/programs-panel";
 import { initOverlayScrollbars } from "@/lib/scrollbar";
@@ -32,11 +33,7 @@ import { initOverlayScrollbars } from "@/lib/scrollbar";
 // Migrated to lib/: conversations.js, providers.js, programs-panel.js,
 // helpers.js, scrollbar.js, chat/*.js — see the `import "@/lib/..."`
 // side-effect imports above. `right-dock.js` is owned by <RightSidebar />.
-const SHARED_JS = [
-  "shared/state.js",
-  "shared/ui.js",
-  "shared/history-graph.js",
-];
+const SHARED_JS = ["shared/state.js", "shared/history-graph.js"];
 
 const EXTERNAL_LIBS = [
   "https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js",
