@@ -14,6 +14,9 @@ import { useSessionStore } from "@/lib/session-store";
 import { applyChatWsMessage, appendLocalUserTurn } from "@/lib/chat-stream";
 import { legacyConvToChatMsgs } from "@/lib/legacy-conv-map";
 import { useColResize } from "@/lib/use-col-resize";
+// Migrated legacy modules — imported for side effects (they install
+// their `window.*` bridges for the still-legacy scripts).
+import "@/lib/providers";
 
 // Scripts shared by every page — loaded once on shell mount and kept alive for
 // the whole session. Page-specific scripts live in PageShell. Files sit in
@@ -27,7 +30,6 @@ const SHARED_JS = [
   "shared/state.js",
   "shared/helpers.js",
   "shared/programs-panel.js",
-  "shared/providers.js",
   "shared/ui.js",
   "shared/scrollbar.js",
   // `shared/right-dock.js` is no longer loaded — `<RightSidebar />`
