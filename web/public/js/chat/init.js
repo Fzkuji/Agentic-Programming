@@ -24,18 +24,12 @@ window.setRunActive = setRunActive;
 // WebSocket lifecycle (connect / reconnect) is owned by the React
 // `useWS` hook now — see web/lib/use-ws.ts.
 
-function handleMessage(msg) {
-  // Phase 3: mirror chat envelopes into the React message store. The
-  // store is dormant (MessageList not yet mounted) so this is a no-op
-  // for the visible legacy DOM; once the cutover flips it becomes the
-  // sole renderer.
-  if (msg.type === 'chat_ack' || msg.type === 'chat_response') {
-    if (typeof window.__applyChatWsMessage === 'function') {
-      try { window.__applyChatWsMessage(msg); } catch (e) {}
-    }
-  }
-  switch (msg.type) {
-    case 'chat_ack':
+// WS message dispatch is owned by the React `useWS` hook now
+// (web/lib/use-ws.ts). The three handlers below are the last legacy
+// ones still called from there; they migrate in slice F.
+
+window._wsHandleChatAck = function (data) {
+  var msg = { data: data };
       if (msg.data.session_id) {
         currentSessionId = msg.data.session_id;
         window.currentSessionId = currentSessionId;
@@ -90,8 +84,10 @@ function handleMessage(msg) {
       // Flip the container flag so Edit/Retry grey out until the
       // run finishes (signalled by chat_response / error / result).
       setRunActive(true);
-      break;
-    case 'chat_response':
+};
+
+window._wsHandleChatResponse = function (data) {
+  var msg = { data: data };
       // Cancelled envelope without a msg_id is the force-stop signal
       // from /api/stop. Clear every in-flight placeholder + the
       // running_task ghost bubble in one shot, then fall through so
@@ -111,7 +107,7 @@ function handleMessage(msg) {
         } catch (e) {}
         setRunActive(false);
         if (typeof setRunning === 'function') setRunning(false);
-        break;
+        return;
       }
       handleChatResponse(msg.data);
       // Terminal response types signal the run is finished — lift
@@ -120,8 +116,9 @@ function handleMessage(msg) {
       if (msg.data && (msg.data.type === 'result' || msg.data.type === 'error')) {
         setRunActive(false);
       }
-      break;
-    case 'status':
+};
+
+window._wsHandleStatus = function (msg) {
       isPaused = msg.paused;
       if (msg.stopped) {
         isRunning = false;
@@ -182,13 +179,7 @@ function handleMessage(msg) {
       } else {
         _removePauseRetryButtons();
       }
-      break;
-  }
-}
-
-function handleContextEvent(eventType, data) {
-  updateTreeData(data);
-}
+};
 
 function _handleSessionsList(data) {
   var serverIds = new Set((data || []).map(function(c) { return c.id; }));

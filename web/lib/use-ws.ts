@@ -45,6 +45,10 @@ interface WsWindow {
   _handleSessionsList?: (data: unknown) => void;
   refreshStatusSource?: () => void;
   refreshChannelBadge?: () => void;
+  __applyChatWsMessage?: (msg: unknown) => void;
+  _wsHandleChatAck?: (data: unknown) => void;
+  _wsHandleChatResponse?: (data: unknown) => void;
+  _wsHandleStatus?: (msg: unknown) => void;
 }
 
 export function useWS(): void {
@@ -65,6 +69,27 @@ export function useWS(): void {
       const d = msg.data;
       switch (msg.type) {
         case "pong":
+          return true;
+        case "chat_ack":
+          // Mirror into the React message store, then the legacy
+          // session/badge bookkeeping.
+          try {
+            w.__applyChatWsMessage?.(msg);
+          } catch (err) {
+            console.error("[useWS] reducer error:", err);
+          }
+          w._wsHandleChatAck?.(d);
+          return true;
+        case "chat_response":
+          try {
+            w.__applyChatWsMessage?.(msg);
+          } catch (err) {
+            console.error("[useWS] reducer error:", err);
+          }
+          w._wsHandleChatResponse?.(d);
+          return true;
+        case "status":
+          w._wsHandleStatus?.(msg);
           return true;
         case "session_reload": {
           const sid = d?.session_id as string | undefined;
@@ -226,12 +251,12 @@ export function useWS(): void {
       socket.onerror = () => socket?.close();
     }
 
-    // The dispatcher (`window.handleMessage`) is defined by the legacy
-    // `init.js` page script, injected asynchronously by PageShell.
-    // Poll briefly until it exists, then open the socket.
+    // The legacy WS handlers (`_wsHandleChatResponse` etc.) are defined
+    // by the `init.js` page script, injected asynchronously by
+    // PageShell. Poll until init.js has run, then open the socket.
     function start(): void {
       if (stopped) return;
-      if (typeof w.handleMessage === "function") connect();
+      if (typeof w._wsHandleChatResponse === "function") connect();
       else setTimeout(start, 50);
     }
     start();
