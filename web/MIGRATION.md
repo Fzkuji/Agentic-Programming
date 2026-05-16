@@ -1,106 +1,144 @@
-# 消息流 React 迁移 — 交接文档
+# Web 迁移交接 — WS 层 slice F 余下部分
 
-新会话直接说「读 web/MIGRATION.md，继续 Phase 3」即可。
+新会话直接说「读 web/MIGRATION.md,继续 slice F」即可。
 
-## 目标
+分支:`phase3-message-flip`(领先 main 23 个 commit,全部 build 过、浏览器实测过)。
+本地:`web` 跑在 `:3000`,backend `:8109`。
 
-把 `/chat` 的消息流渲染从 legacy vanilla JS(`public/js/chat/chat.js` +
-`chat-ws.js`)迁到 React。**只迁消息气泡渲染**,`chat-ws.js` 里非渲染的
-handler(token badge、执行树、branch、follow-up)保留。
+---
 
-## 已完成(已提交)
+## 已完成(不要重做)
 
-- **Phase 1** — store + WS reducer。`web/lib/session-store.ts`(`messagesById` /
-  `messageOrder`、`ChatMsg` / `ChatToolCall`、`useMessageIds` / `useMessageById`)、
-  `web/lib/chat-stream.ts`(`applyChatWsMessage` reducer:`chat_ack` /
-  `chat_response` 的 `stream_event` / `result` / `error` / `cancelled` /
-  `user_message`;`appendLocalUserTurn` helper)。
-- **Phase 2** — React 组件,`web/components/chat/messages/`:`message-list.tsx`、
-  `user-bubble.tsx`、`assistant-bubble.tsx`、`thinking-block.tsx`、
-  `tool-card.tsx`、`runtime-block.tsx`、`use-stick-to-bottom.ts`、
-  `markdown.ts`(含 `useMarkdownReady` hook)。复用 legacy CSS 类
-  (`.message`、`.chat-stream-body`、`.chat-thinking`、`.chat-tools` 等,
-  全部在 `web/app/styles/05-chat.css`,按 `data-collapsed` 属性折叠)。
-  组件已逐个视觉验证过(预览路由已删)。
+聊天页面用户能看到、能交互的一切都已经是 React:消息流 / 消息气泡 /
+执行树(`<ExecutionTree>`)/ 消息悬浮操作栏(`<MessageActions>`)/
+composer / 顶栏三个菜单(模型 `<AgentSelector>` / 分支 `<BranchMenu>` /
+channel `<ChannelMenu>`)/ 右栏分支面板(`<BranchesPanel>`)/ welcome /
+slash 菜单。
 
-reducer + 组件这条链路是好的,起点干净。
+WebSocket **连接** 和 **25 种消息的分发** 都已经在 React 侧:
+`web/lib/use-ws.ts` 的 `useWS` hook 拥有 socket(开/重连/keepalive/
+teardown),它的 `dispatch()` 函数分发每一种消息类型。
 
-## 待做 — Phase 3 切换(原子的)
+已删除的 legacy 文件:`tree.js` `tree-render.js` `tree-retry.js`
+`tree-log.js`、`message-actions.js` `message-actions-edit.js`
+`message-actions-nav.js`。`public/js/chat/` 从 12 个文件减到 3 个。
 
-消息流是一个原子单位:用户/助手气泡在同一个有序容器 `#chatMessages` 里交错,
-没法按气泡类型分步迁。要换就整体换。五处协调改动:
+---
 
-1. **喂 store(WS)** — `public/js/chat/init.js` 的 `handleMessage`,对
-   `chat_ack` 和 `chat_response` 两个 envelope 额外调 `applyChatWsMessage(msg)`
-   (从 React 侧 import,或挂个 `window.__applyChatWsMessage`)。
+## 当前架构 — 关键理解
 
-2. **喂 store(历史)** — `public/js/shared/conversations.js` 的
-   `renderSessionMessages(conv)`(约 line 1196)改成把 `conv.messages` 映射成
-   `ChatMsg[]` 灌进 `setMessages(sessionId, ...)`,不再 build DOM。注意
-   legacy message 形状有 `msg.blocks`(thinking/tools 结构),映射逻辑参考
-   `chat-ws.js:426` `_renderAssistantBlocks`。
+`useWS` hook(`web/lib/use-ws.ts`)的 `dispatch(msg)`:
+- 已迁的类型(pong / session_reload / branch_* / provider_* /
+  agent_settings_changed / running_task / full_tree / event /
+  functions_list / history_list / attempt_switched / channel_accounts /
+  branches_list / branch_checked_out / session_loaded / sessions_list /
+  session_channel_updated)→ 在 hook 里直接处理,大多是 `w.someGlobal?.()`
+  调一个 legacy window 全局函数。
+- chat_ack / chat_response → 先 `window.__applyChatWsMessage(msg)`
+  喂 React store reducer,再调 `window._wsHandleChatAck/ChatResponse`。
+- status → `window._wsHandleStatus(msg)`。
 
-3. **喂 store(本地发送)** — composer 发送路径
-   (`web/components/chat/composer/legacy-send.ts` 或 `chat.js sendMessage`)
-   调 `appendLocalUserTurn`,让用户气泡立即出现。
+也就是说:**分发是 React 的,handler 函数体还是 legacy JS**,通过
+`window.*` 全局被 hook 调用。slice F 余下的工作 = 把这些 handler 函数体
+用 TS 重写、把 legacy 全局搬进 React store。这是纯内部重构,零行为变化。
 
-4. **挂 MessageList** — `web/components/page-shell.tsx` 的
-   `stripLegacyChatChrome()`(约 line 100-135,已经在那里建
-   `#composer-mount` / `#welcome-mount` / `#topbar-mount`)加一个
-   `#messages-mount` 占位 div(放在 `#chatMessages` 里),app-shell.tsx
-   的 `findMounts` effect(约 line 132-155)加上找它,portal
-   `<MessageList sessionId={...}/>` 进去。
+---
 
-5. **掐掉旧渲染** — 把 legacy 的消息气泡渲染函数改成 no-op,但**保留**
-   非渲染 handler。要掐的:`chat.js` 的 `addUserMessage` /
-   `addAssistantPlaceholder` / `addAssistantMessage` / `addRuntimeBlockPending`;
-   `chat-ws.js` 的 `_renderChatStreamEvent`(stream 渲染)/
-   `_handleInboundUserMessage`(DOM 部分)/ `_renderAssistantBlocks`;
-   `conversations.js renderSessionMessages` 的 DOM build;
-   `init.js _handleRunningTask` 里 `_chat` 的 ghost 气泡(line 360-393)。
-   **保留**:`chat-ws.js` 的 `_handleContextStats`、`_handleStatusResponse`、
-   `_handleTreeUpdate`、`_handleRetryResult`、`_handleFollowUpQuestion`。
+## 还剩什么(slice F 余下部分)
 
-## 关键文件 + 行号
+### 剩余 legacy 文件
 
-| 文件 | 作用 |
-|---|---|
-| `public/js/chat/init.js` | WS 创建(line 26)、`handleMessage` envelope dispatch(58-305)、`_handleRunningTask`(355) |
-| `public/js/chat/chat-ws.js` | `handleChatResponse`(3-126)、`_renderChatStreamEvent`(273)、`_renderAssistantBlocks`(426) |
-| `public/js/chat/chat.js` | `sendMessage` / `addUserMessage` / `addAssistantPlaceholder` / runtime block builders |
-| `public/js/shared/conversations.js` | `renderSessionMessages`(1189)、`newSession`(1037)、`_clearChatMessages`(新加的 helper) |
-| `public/js/shared/helpers.js` | `appendToChat` → `#chatMessages`(116)、`setWelcomeVisible`(127)、`renderMd`(20) |
-| `web/components/page-shell.tsx` | `stripLegacyChatChrome` 建 mount 占位(100-135) |
-| `web/components/app-shell.tsx` | `findMounts` portal 挂载(132-155)、pathname effect(160-218) |
-| `web/lib/chat-stream.ts` | reducer |
-| `web/components/chat/messages/` | React 组件 |
+```
+public/js/chat/chat.js      367  sendMessage / retry 系列 / submitFollowUp
+                                 / buildRuntimeBlockHtml / addUserMessage 等
+public/js/chat/chat-ws.js   324  handleChatResponse 分发 + 终结记账
+                                 / _handleContextStats / _handleStatusResponse
+                                 / _handleFollowUpQuestion / _handleInboundUserMessage
+public/js/chat/init.js      257  _wsHandleChatAck/ChatResponse/Status
+                                 / _handleSessionsList / _handleRunningTask
+                                 / setRunActive / _rehydrateToolsUI IIFE
+public/js/shared/conversations.js  605  loadSessionData / renderSessionMessages
+                                        / newSession / fetchBranches 等数据层
+                                        / channel helpers / extractMessagesFromTree
+                                        / handleAttemptSwitched
+public/js/shared/state.js   48   全局变量:ws / trees / conversations
+                                 / currentSessionId / _agentSettings
+                                 / pendingResponses / isPaused / isRunning 等
+public/js/shared/providers.js 282  loadProviders / loadAgentSettings
+                                   / updateProviderBadge / updateAgentBadges
+public/js/shared/ui.js      679  updateStatus / showDetail / popover 逻辑 / 等
+public/js/shared/helpers.js 289  renderMd / escHtml / escAttr / scrollToBottom
+                                 / setWelcomeVisible / appendToChat(已 no-op)
+public/js/shared/history-graph.js 1245  右栏 DAG 图(SVG 渲染器,自包含)
+public/js/shared/programs-panel.js 81  renderFunctions / loadProgramsMeta
+public/js/shared/scrollbar.js 166  自定义滚动条
+```
 
-## 协议(reducer 已按此解析)
+### 建议的子步骤(每步一轮、各自能独立验证、保持页面可用)
 
-- envelope `{type, data}`。`type` = `chat_ack` / `chat_response` / `session_loaded` / ...
-- `chat_response` 的 `data.type` = `stream_event` / `result` / `error` /
-  `cancelled` / `user_message` / `context_stats` / `status` / `tree_update` /
-  `retry_result` / `follow_up_question`
-- `stream_event` 的 `data.event.type` = `text` / `thinking` / `tool_use` /
-  `tool_result` / `status`
-- 助手回复在 store 里 key 为 `<msg_id>_reply`,用户回合 key 为裸 `msg_id`
+1. **chat.js 的 send 路径** — `sendMessage` 现在被 composer 的
+   `sendChatMessage` bridge(`web/components/chat/composer/legacy-send.ts`)
+   通过 `window.sendMessage` 调用。`sendMessage` 真正需要做的只是
+   `ws.send({action:'chat',...})` + `setRunning(true)`。把这段直接搬进
+   `legacy-send.ts`(用 `useWS` 的 wsSend 或 `window.ws`),然后 `sendMessage`
+   /`addUserMessage`/`addAssistantPlaceholder`/`addRuntimeBlockPending`/
+   `buildRuntimeBlockHtml`/`addAssistantMessage` 这一串就能删——它们产生的
+   DOM 早就被 `appendToChat`(no-op)丢弃了。`retryCurrentBlock` /
+   `retryChatQuery` / `stopAndRetry` 还被 React 组件 `window.*` 调用,
+   要么一起搬,要么留着。
 
-## 坑
+2. **chat-ws.js 的 handler** — `handleChatResponse` 的「终结记账」段
+   (往 `conversations[].messages` push、更新标题、`refreshTokenBadge`、
+   `fetchBranches`)+ `_handleContextStats`(token badge,写 `#contextStats`
+   + `window._renderTokenBadge`)+ `_handleStatusResponse` +
+   `_handleFollowUpQuestion`(往 `#runtime_pending` 注入跟进输入框 —— 注意
+   `#runtime_pending` 现在是 React `<RuntimeBlock>` 的节点)。把这些重写成
+   React/store 逻辑或保留为 thin 函数。`_handleStreamEvent`/`_handleTreeUpdate`/
+   `_handleRuntimeResult`/`_handleChatResult`/`_handleRetryResult` 已经是
+   no-op 桩,可连同 `handleChatResponse` 的对应 dispatch 分支一起删。
 
-- `chat-ws.js` 远不止渲染消息——删整个文件会废掉 token badge、执行树、
-  attempt 导航、follow-up、branch 同步、peer 消息。只能 no-op 渲染函数。
-- `#chatMessages` 不能 `innerHTML = ''` 清空——会销毁 React portal 的
-  `#welcome-mount`(已修过一次,见 `_clearChatMessages`)。MessageList 的
-  `#messages-mount` 同理。
-- `html { font-size: 14px }`,Tailwind 的 rem 全部 ×0.875,像素值要写死
-  arbitrary value(`h-[32px]`)。
-- runtime block(`/run` 的执行块)带执行树、attempt 导航、footer,最复杂,
-  `RuntimeBlock` 组件目前是简化版,Phase 3 要补全或保留 legacy runtime 渲染。
-- retry / branch / follow-up 这些边角只有真跑才暴露,必须在 live chat 上联调。
+3. **conversations.js 数据层** — `loadSessionData` / `renderSessionMessages`
+   现在的核心作用是调 `window.__feedStoreFromConv(conv)` 把会话喂进 React
+   store(其余是 history graph、run_active、pivot 滚动)。`_handleSessionsList`
+   填 `window.conversations`(React 侧栏经 `useLegacyGlobals` 读它)。
+   `fetchBranches` / `_onBranchesListMessage` 是分支数据层(`<BranchMenu>`/
+   `<BranchesPanel>` 复用)。channel helpers(`fetchChannelAccounts` 等)被
+   `<ChannelMenu>` 复用。把这些搬进 store / React query。
 
-## 开发流程
+4. **state.js 全局并进 store** — `conversations` / `trees` / `_agentSettings`
+   等全局是 1、2、3 步迁完后才能干净搬走的最后一环。`useLegacyGlobals`
+   (`web/components/sidebar/use-legacy-globals.ts`)是 React 读这些全局的
+   现有桥;迁完后换成 store 订阅、删掉这个桥。
 
-改完 web 源码:`cd web && npm run build`,然后
-`OPENPROGRAM_WEB_PORT=3000 python -m openprogram worker restart`(web 在
-:3000,backend 在 :8109)。改 `public/js/*` 不用 build,但要重启 worker +
-浏览器硬刷新。
+5. **收尾** — 删 `init.js` / `chat.js` / `chat-ws.js` / `conversations.js`
+   / `state.js`,从 `web/components/page-shell.tsx` 的 `JS_FILES_BY_PAGE`
+   和 `web/components/app-shell.tsx` 的 `SHARED_JS` 里移除。
+   `useWS` hook 的 `WsWindow` 接口里那些 `window.*` 字段也跟着删。
+   `providers.js` / `ui.js` / `helpers.js` / `history-graph.js` /
+   `programs-panel.js` / `scrollbar.js` 是否也迁,看精力 —— 它们不阻塞
+   chat,history-graph 是个自包含的 1245 行 SVG 渲染器,单独评估。
+
+### 注意的坑
+
+- `appendToChat`(helpers.js)已经是 no-op —— legacy 的所有气泡构建函数
+  还在跑,但 DOM 节点被丢弃。删它们时确认没有别的副作用(往
+  `conversations[]` 写之类)。
+- `#runtime_pending` 这个 id 现在由 React `<RuntimeBlock>` 在 streaming
+  时渲染;legacy 若还往它注入会和 React 打架。
+- 纯行为不变的重构,每步 build + 浏览器实测:加载会话 / 发普通 chat /
+  `/run` / 重试 / 分支切换 / 新建会话。
+- `git add` 要明确列文件 —— 仓库里有会话开始前就存在的、与本迁移无关的
+  未提交改动(`pdf_figures` 等),别用 `git add -A` 把它们卷进 commit。
+
+### 开发流程
+
+改 `web` 源码:`cd web && npm run build`,然后
+`OPENPROGRAM_WEB_PORT=3000 python -m openprogram worker restart`。
+改 `public/js/*` 不用 build,但要 worker restart + 浏览器硬刷新。
+
+---
+
+## 建议
+
+这个分支本身是个完整、测过、可用的里程碑 —— 可以先 merge 回 main 锁住,
+再在新分支上做 slice F 余下部分(纯内部清理,零行为变化,不阻塞功能)。
