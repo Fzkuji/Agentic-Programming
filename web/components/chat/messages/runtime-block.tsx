@@ -10,22 +10,27 @@
  * `id="runtime_pending"` so the legacy CLI/tree stream handlers can
  * target it; on finalize React takes over with the full block.
  *
- * Retry (`retryCurrentBlock`) and attempt switching (`switchAttempt`)
- * are still legacy globals — they belong to the conversation / WS
- * layer, migrated in a later slice.
+ * Retry (`retryCurrentBlock`) is still a legacy global — it belongs to
+ * the conversation / WS layer, migrated in a later slice.
  */
 import { useEffect, useRef, useState } from "react";
 
 import { formatUsageFooterLabel } from "@/lib/format";
-import type { ChatMsg } from "@/lib/session-store";
+import { useSessionStore, type ChatMsg } from "@/lib/session-store";
 
 import { ExecutionTree } from "./execution-tree";
 import { renderMarkdown, useMarkdownReady } from "./markdown";
 
 interface RuntimeLegacyGlobals {
   retryCurrentBlock?: (fn: string) => void;
-  switchAttempt?: (fn: string, dir: number) => void;
   renderMathInElement?: (el: HTMLElement, opts: unknown) => void;
+}
+
+function wsSend(payload: unknown): boolean {
+  const w = window as Window & { ws?: WebSocket };
+  if (!w.ws || w.ws.readyState !== WebSocket.OPEN) return false;
+  w.ws.send(JSON.stringify(payload));
+  return true;
 }
 
 /** Split a `run fn(args)` / `run fn arg1 arg2` command into name +
@@ -59,6 +64,7 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
   const [collapsed, setCollapsed] = useState(false);
   useMarkdownReady();
 
+  const sessionId = useSessionStore((s) => s.currentSessionId);
   const streaming = msg.status === "streaming" || msg.status === "pending";
   const { fn, params } = parseRun(msg.function || msg.content || "");
   const fnName = msg.function || fn;
@@ -142,6 +148,19 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
   const w = window as unknown as RuntimeLegacyGlobals;
   const attempts = msg.attempts ?? [];
   const attemptIdx = msg.current_attempt || 0;
+
+  // Switch the displayed attempt — sends `switch_attempt`; the server
+  // moves the pointer and a `load_session` re-feed re-renders.
+  function switchAttempt(dir: number) {
+    const next = attemptIdx + dir;
+    if (next < 0 || next >= attempts.length || !sessionId) return;
+    wsSend({
+      action: "switch_attempt",
+      session_id: sessionId,
+      function: fnName,
+      attempt_index: next,
+    });
+  }
   const usageHtml = formatUsageFooterLabel(
     (msg.usage as Parameters<typeof formatUsageFooterLabel>[0]) || null,
   );
@@ -186,7 +205,7 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
                   className="attempt-nav-btn"
                   disabled={attemptIdx <= 0}
                   title="Previous attempt"
-                  onClick={() => w.switchAttempt?.(fnName, -1)}
+                  onClick={() => switchAttempt(-1)}
                 >
                   {"◀"}
                 </button>
@@ -197,7 +216,7 @@ export function RuntimeBlock({ msg }: { msg: ChatMsg }) {
                   className="attempt-nav-btn"
                   disabled={attemptIdx >= attempts.length - 1}
                   title="Next attempt"
-                  onClick={() => w.switchAttempt?.(fnName, 1)}
+                  onClick={() => switchAttempt(1)}
                 >
                   {"▶"}
                 </button>

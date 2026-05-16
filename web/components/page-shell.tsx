@@ -18,10 +18,10 @@ const PAGE_HTML: Record<Page, string> = {
 // settings/ui/scrollbar) are loaded once by AppShell.
 const JS_FILES_BY_PAGE: Record<Page, string[]> = {
   chat: [
-    // tree-render.js / tree-retry.js are gone — the execution tree is
-    // the React <ExecutionTree /> now. tree.js / tree-log.js remain
-    // (tree DATA layer + exec-log / attempt-nav), pending the WS slice.
-    "chat/tree.js", "chat/tree-log.js",
+    // The execution tree + exec-log are React now. tree.js remains —
+    // the tree DATA layer (updateTreeData / the `trees` global), still
+    // woven into the WS handlers; it goes with the WS slice.
+    "chat/tree.js",
     "chat/chat.js", "chat/chat-ws.js",
     "chat/init.js",
   ],
