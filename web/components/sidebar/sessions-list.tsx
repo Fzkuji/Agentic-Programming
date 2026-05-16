@@ -12,9 +12,17 @@
  */
 
 import { useState } from "react";
-import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import { useLegacyGlobals, useCurrentSessionId } from "./use-legacy-globals";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import styles from "./sidebar.module.css";
 
 interface SessionWindow {
@@ -31,7 +39,7 @@ function wsSend(payload: unknown): void {
   }
 }
 
-/** Modal confirm — React port of legacy `_showConfirm`. */
+/** Modal confirm — shadcn <Dialog>. */
 function ConfirmDialog({
   title,
   message,
@@ -43,31 +51,28 @@ function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    <div
-      className={`${styles.confirmOverlay} ${styles.visible}`}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
+  return (
+    <Dialog
+      open
+      onOpenChange={(o) => {
+        if (!o) onCancel();
       }}
     >
-      <div className={styles.confirmDialog}>
-        <div className={styles.confirmTitle}>{title}</div>
-        <div className={styles.confirmMessage}>{message}</div>
-        <div className={styles.confirmActions}>
-          <button className={styles.confirmBtn} onClick={onCancel}>
+      <DialogContent className="max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{message}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
             Cancel
-          </button>
-          <button
-            className={`${styles.confirmBtn} ${styles.confirmBtnDanger}`}
-            onClick={onConfirm}
-          >
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
             Delete
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
