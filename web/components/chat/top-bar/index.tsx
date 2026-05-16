@@ -19,6 +19,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useSessionStore } from "@/lib/session-store";
 
 import { AgentSelector } from "./agent-selector";
+import { ChannelMenu } from "./channel-menu";
 import { installLegacyWrappers, legacyTopbarReady } from "./legacy-bridge";
 import { formatAgentDetails } from "./format";
 import styles from "./top-bar.module.css";
@@ -120,12 +121,26 @@ function StatusBadge({
 }: {
   statusBadge: ReturnType<typeof useSessionStore.getState>["statusBadge"];
 }) {
-  function onClick(e: React.MouseEvent) {
-    // Close the React agent-selector menus before opening this legacy
-    // popover, so the two can't sit open at the same time.
+  const ref = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    const close = () => setOpen(false);
+    window.addEventListener("topbar-close-menus", close);
+    return () => window.removeEventListener("topbar-close-menus", close);
+  }, []);
+
+  function onClick() {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    // Close every other top-bar dropdown first.
     window.dispatchEvent(new Event("topbar-close-menus"));
-    const w = window as unknown as { openChannelDropdown?: (e: MouseEvent) => void };
-    w.openChannelDropdown?.(e.nativeEvent);
+    (
+      window as unknown as { _closeAllPopovers?: () => void }
+    )._closeAllPopovers?.();
+    setOpen(true);
   }
   const cls =
     "status-badge" +
@@ -138,15 +153,21 @@ function StatusBadge({
      statusBadge.tone === "warn" ? "warn" :
      statusBadge.tone === "err" ? "err" : "");
   return (
-    <span
-      id="statusBadge"
-      className={cls}
-      onClick={onClick}
-      title={statusBadge.title || statusBadge.label}
-    >
-      <span className={dotCls} aria-hidden="true" />
-      <span className="badge-short">{statusBadge.label}</span>
-    </span>
+    <>
+      <span
+        ref={ref}
+        id="statusBadge"
+        className={cls}
+        onClick={onClick}
+        title={statusBadge.title || statusBadge.label}
+      >
+        <span className={dotCls} aria-hidden="true" />
+        <span className="badge-short">{statusBadge.label}</span>
+      </span>
+      {open ? (
+        <ChannelMenu anchorRef={ref} onClose={() => setOpen(false)} />
+      ) : null}
+    </>
   );
 }
 

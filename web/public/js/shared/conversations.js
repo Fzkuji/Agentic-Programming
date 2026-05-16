@@ -183,6 +183,10 @@ function _currentChannelChoice() {
   return window._pendingChannelChoice || { channel: null, account_id: null };
 }
 
+// The channel dropdown is the React <ChannelMenu /> now
+// (components/chat/top-bar/channel-menu.tsx); it reuses the
+// fetchChannelAccounts / _currentChannelChoice / _channelIcon data
+// helpers below.
 window.refreshChannelBadge = function() {
   // Channel state is shown by the existing #statusBadge via
   // refreshStatusSource; this hook just delegates so callers don't
@@ -192,126 +196,6 @@ window.refreshChannelBadge = function() {
   }
 };
 
-function openChannelDropdown(evt) {
-  if (evt) evt.stopPropagation();
-  // Toggle close if our dropdown is already open.
-  if (document.getElementById('channelDropdown')) { _closeChannelDropdown(); return; }
-  // Mutual exclusivity with other topbar popovers (chat / exec / model
-  // selectors etc.) — same coordinator the agent selectors use.
-  if (window._closeAllPopovers) window._closeAllPopovers('channel');
-  var badge = document.getElementById('statusBadge');
-  if (!badge) return;
-  var sessionId = currentSessionId || null;
-  var cur = _currentChannelChoice();
-
-  fetchChannelAccounts().then(function(rows) {
-    var enabled = (rows || []).filter(function(r) { return r.enabled; });
-    var rect = badge.getBoundingClientRect();
-    var dd = document.createElement('div');
-    // Reuse the model-dropdown styling so chat / exec / channel pickers
-    // all look the same. Adds .channel-selector for any channel-only
-    // overrides we might want later.
-    dd.className = 'agent-selector model-dropdown channel-selector';
-    dd.id = 'channelDropdown';
-    dd.style.top = (rect.bottom + 4) + 'px';
-    dd.style.left = rect.left + 'px';
-
-    var brandFor = function(plat) {
-      var map = { wechat: 'WeChat', discord: 'Discord', telegram: 'Telegram', slack: 'Slack' };
-      return map[String(plat).toLowerCase()] || plat;
-    };
-
-    var html = '';
-    html += '<div class="model-dd-group-label" style="padding-top:6px"><span>Conversation channel</span></div>';
-
-    // "Local" sits at the top as its own row — no channel binding.
-    html += '<div class="model-dd-item' + (!cur.channel ? ' active' : '') + '" data-ch="" data-acct="">' +
-              '<span class="model-dd-name">Local</span>' +
-            '</div>';
-
-    if (enabled.length === 0) {
-      html += '<div class="model-dd-group-label" style="padding-top:10px;font-size:11px">' +
-                '<a href="/settings" style="color:var(--accent-blue);text-decoration:none">Add a channel in Settings →</a>' +
-              '</div>';
-    } else {
-      // Group accounts by platform: a group label row (icon + brand
-      // name) and then one row per account under it. Same shape as
-      // the chat / exec dropdowns.
-      var byPlat = {};
-      var order = [];
-      enabled.forEach(function(r) {
-        if (!byPlat[r.channel]) { byPlat[r.channel] = []; order.push(r.channel); }
-        byPlat[r.channel].push(r);
-      });
-      order.forEach(function(plat) {
-        html += '<div class="model-dd-group-label">' +
-                  '<span class="provider-icon" style="width:14px;height:14px">' +
-                    _channelIcon(plat) +
-                  '</span>' +
-                  '<span>' + escHtml(brandFor(plat)) + '</span>' +
-                '</div>';
-        byPlat[plat].forEach(function(r) {
-          var active = (r.channel === cur.channel && r.account_id === cur.account_id);
-          var meta = r.name && r.name !== r.account_id ? r.name : '';
-          html += '<div class="model-dd-item' + (active ? ' active' : '') + '"' +
-                    ' data-ch="' + escAttr(r.channel) + '"' +
-                    ' data-acct="' + escAttr(r.account_id) + '">' +
-                    '<span class="model-dd-name">' + escHtml(r.account_id) + '</span>' +
-                    (meta ? '<span class="model-dd-caps"><span class="cap-badge ctx">' + escHtml(meta) + '</span></span>' : '') +
-                  '</div>';
-        });
-      });
-    }
-
-    dd.innerHTML = html;
-    document.body.appendChild(dd);
-
-    dd.addEventListener('click', function(e) {
-      var item = e.target.closest('[data-ch]');
-      if (!item) return;
-      e.stopPropagation();
-      var ch = item.getAttribute('data-ch') || '';
-      var acct = item.getAttribute('data-acct') || '';
-      if (sessionId) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ action: 'set_conversation_channel',
-            session_id: sessionId, channel: ch, account_id: acct }));
-        }
-        var conv = conversations[sessionId];
-        if (conv) {
-          conv.channel = ch || null;
-          conv.account_id = (ch && acct) ? acct : null;
-        }
-      } else {
-        window._pendingChannelChoice = { channel: ch || null, account_id: ch ? (acct || null) : null };
-      }
-      window.refreshChannelBadge();
-      _closeChannelDropdown();
-    });
-
-    // Close on outside click — defer the listener so the click that
-    // opened the dropdown doesn't immediately close it.
-    setTimeout(function() {
-      document.addEventListener('click', _channelDropdownDocClick, { once: true });
-    }, 0);
-  });
-}
-window.openChannelDropdown = openChannelDropdown;
-
-function _channelDropdownDocClick(e) {
-  var dd = document.getElementById('channelDropdown');
-  if (dd && dd.contains(e.target)) {
-    document.addEventListener('click', _channelDropdownDocClick, { once: true });
-    return;
-  }
-  _closeChannelDropdown();
-}
-
-function _closeChannelDropdown() {
-  var dd = document.getElementById('channelDropdown');
-  if (dd) dd.remove();
-  document.removeEventListener('click', _channelDropdownDocClick);
-}
 
 // ===== Branch (git-style) selector ============================
 //
