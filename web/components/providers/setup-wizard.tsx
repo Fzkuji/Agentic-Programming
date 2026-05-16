@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, Check, AlertCircle, HelpCircle, ArrowRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface StepResult {
   status: "ok" | "error" | "needs_input";
@@ -331,16 +332,11 @@ function NeedsInputForm({
           ))}
         </div>
       ) : (
-        <input
+        <Input
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={result.default ?? ""}
-          className="h-8 w-full rounded-md border px-2 text-[12px]"
-          style={{
-            background: "var(--bg-input)",
-            borderColor: "var(--border)",
-            color: "var(--text-primary)",
-          }}
+          className="h-8 w-full text-[12px]"
         />
       )}
       <Button size="sm" onClick={() => onSubmit(value)}>

@@ -6,6 +6,7 @@ import { X, Play, Eye, Loader2, Folder } from "lucide-react";
 import type { AgenticFunction, FunctionParamDetail } from "@/lib/types";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 interface Props {
   fn: AgenticFunction;
@@ -250,16 +251,11 @@ function ParamInput({
       ) : /(Path|folder|dir|directory|workdir)/i.test(p.type) ||
         /(workdir|folder|directory|dir_path|work_dir)/i.test(p.name) ? (
         <div className="flex gap-2">
-          <input
+          <Input
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={p.placeholder ?? "/path/to/folder"}
-            className="h-8 flex-1 rounded-md border px-2 font-mono text-[12px]"
-            style={{
-              background: "var(--bg-input)",
-              borderColor: "var(--border)",
-              color: "var(--text-primary)",
-            }}
+            className="h-8 flex-1 font-mono text-[12px]"
           />
           <Button
             type="button"
@@ -281,16 +277,11 @@ function ParamInput({
           </Button>
         </div>
       ) : (
-        <input
+        <Input
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={p.placeholder}
-          className="h-8 w-full rounded-md border px-2 text-[13px]"
-          style={{
-            background: "var(--bg-input)",
-            borderColor: "var(--border)",
-            color: "var(--text-primary)",
-          }}
+          className="h-8 w-full text-[13px]"
         />
       )}
     </div>
