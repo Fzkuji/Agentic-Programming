@@ -13,6 +13,7 @@ import { Eye, Wrench, Brain, Video } from "lucide-react";
 import styles from "./settings-page.module.css";
 import { ProviderIcon } from "./provider-icon";
 import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
 
 interface Provider {
   id: string;
@@ -521,9 +522,9 @@ export function ApiKey({
         >
           {showText ? "🙈" : "👁"}
         </button>
-        <button className={styles.btn} onClick={save}>
+        <Button size="sm" onClick={save}>
           Save
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -566,9 +567,9 @@ function BaseUrl({
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
-        <button className={styles.btn} onClick={save}>
+        <Button size="sm" onClick={save}>
           Save
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -618,9 +619,9 @@ function Connectivity({ providerId }: { providerId: string }) {
             {result.text}
           </span>
         )}
-        <button className={styles.btn} onClick={test} disabled={busy}>
+        <Button size="sm" onClick={test} disabled={busy}>
           Check
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -730,16 +731,16 @@ function ModelList({
             </span>
           )}
           {provider.supports_fetch && (
-            <button className={styles.miniAction} onClick={fetchRemote}>
+            <Button variant="outline" size="sm" onClick={fetchRemote}>
               Fetch models
-            </button>
+            </Button>
           )}
-          <button className={styles.miniAction} onClick={() => bulkToggle(true)}>
+          <Button variant="outline" size="sm" onClick={() => bulkToggle(true)}>
             Enable all
-          </button>
-          <button className={styles.miniAction} onClick={() => bulkToggle(false)}>
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => bulkToggle(false)}>
             Disable all
-          </button>
+          </Button>
         </span>
       </div>
       <div className={styles.modelSearch}>

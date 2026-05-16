@@ -212,23 +212,8 @@
   border-color: var(--accent-blue);
 }
 
-.btn {
-  background: var(--accent-blue);
-  color: #fff;
-  border: none;
-  padding: 0 12px;
-  height: 28px;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: opacity 75ms;
-  white-space: nowrap;
-  box-sizing: border-box;
-}
-.btn:hover {
-  opacity: 0.85;
-}
+/* `.btn` — settings action buttons are the shadcn <Button> now. */
+
 .iconBtn {
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
@@ -592,22 +577,8 @@
   font-size: 14px;
   outline: none;
 }
-.miniAction {
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 12px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.miniAction:hover {
-  border-color: var(--accent-blue);
-  color: var(--text-bright);
-}
+/* `.miniAction` — fetch / bulk-toggle buttons are the shadcn
+   <Button variant="outline" size="sm"> now. */
 
 /* Test result */
 .testResult {

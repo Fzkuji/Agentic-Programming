@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "./settings-page.module.css";
 import { ApiKey } from "./providers-section";
+import { Button } from "@/components/ui/button";
 
 interface SearchProvider {
   id: string;
@@ -380,15 +381,15 @@ function SearchProviderSetup({ provider }: { provider: SearchProvider }) {
             Get API key <span aria-hidden>→</span>
           </a>
           {provider.docs_url && provider.docs_url !== provider.signup_url && (
-            <a
-              href={provider.docs_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.miniAction}
-              style={{ textDecoration: "none" }}
-            >
-              Docs
-            </a>
+            <Button asChild variant="outline" size="sm">
+              <a
+                href={provider.docs_url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Docs
+              </a>
+            </Button>
           )}
         </div>
       )}
@@ -476,14 +477,14 @@ function SearchConnectivity({
             {result.text}
           </span>
         )}
-        <button
-          className={styles.btn}
+        <Button
+          size="sm"
           onClick={test}
           disabled={busy || disabled}
           title={disabled ? "Configure the API key first" : undefined}
         >
           Check
-        </button>
+        </Button>
       </div>
     </div>
   );
