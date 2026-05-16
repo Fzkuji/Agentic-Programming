@@ -496,46 +496,8 @@
   font-weight: 400;
 }
 
-/* Toggle switch */
-.toggleSwitch {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-}
-.toggleSwitch input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggleSwitch .slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  transition: 0.2s;
-}
-.toggleSwitch .slider::before {
-  position: absolute;
-  content: "";
-  height: 14px;
-  width: 14px;
-  left: 2px;
-  top: 2px;
-  background: var(--text-secondary);
-  border-radius: 50%;
-  transition: 0.2s;
-}
-.toggleSwitch input:checked + .slider {
-  background: var(--accent-blue);
-  border-color: var(--accent-blue);
-}
-.toggleSwitch input:checked + .slider::before {
-  transform: translateX(16px);
-  background: white;
-}
+/* Toggle switch — the provider / model enable toggles are the shadcn
+   <Switch> component now. */
 
 /* Model list — no inner scroll. The whole settings page is a single
    scroll root (`.view`); the model list grows naturally and rides

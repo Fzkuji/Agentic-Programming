@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Eye, Wrench, Brain, Video } from "lucide-react";
 import styles from "./settings-page.module.css";
 import { ProviderIcon } from "./provider-icon";
+import { Switch } from "@/components/ui/switch";
 
 interface Provider {
   id: string;
@@ -293,14 +294,11 @@ function Detail({
           <div className={styles.detailTitle}>{provider.label}</div>
           <div className={styles.detailSubtitle}>{subtitle}</div>
         </div>
-        <label className={styles.toggleSwitch} title="Enable this provider">
-          <input
-            type="checkbox"
-            checked={provider.enabled}
-            onChange={(e) => onToggle(e.target.checked)}
-          />
-          <span className={styles.slider} />
-        </label>
+        <Switch
+          checked={provider.enabled}
+          onCheckedChange={onToggle}
+          title="Enable this provider"
+        />
       </div>
 
       {provider.setup_hint && (
@@ -793,14 +791,7 @@ function ModelRow({
         <span className={styles.modelItemId}>{model.id}</span>
       </div>
       <div className={styles.modelCapabilities}>{caps}</div>
-      <label className={styles.toggleSwitch}>
-        <input
-          type="checkbox"
-          checked={model.enabled}
-          onChange={(e) => onToggle(e.target.checked)}
-        />
-        <span className={styles.slider} />
-      </label>
+      <Switch checked={model.enabled} onCheckedChange={onToggle} />
     </div>
   );
 }
