@@ -456,6 +456,16 @@ class Agent:
 
         except Exception as err:
             is_aborted = self._cancel_event.is_set() if self._cancel_event else False
+            # ``str(err)`` is empty for bare exceptions (e.g. RuntimeError()),
+            # which would surface downstream as a content-free
+            # "Agent session failed". Always carry the exception TYPE so the
+            # error_message is never empty, and dump the full traceback to
+            # stderr so the real cause is recoverable.
+            if not is_aborted:
+                import traceback as _tb
+                import sys as _sys
+                _tb.print_exc(file=_sys.stderr)
+            err_text = f"{type(err).__name__}: {err}" if str(err) else type(err).__name__
             error_msg = AssistantMessage(
                 role="assistant",
                 content=[TextContent(type="text", text="")],
@@ -464,11 +474,11 @@ class Agent:
                 model=model.id,
                 usage=Usage(),
                 stop_reason="aborted" if is_aborted else "error",
-                error_message=str(err),
+                error_message=err_text,
                 timestamp=int(time.time() * 1000),
             )
             self.append_message(error_msg)
-            self._state.error = str(err)
+            self._state.error = err_text
             self._emit(AgentEventAgentEnd(messages=[error_msg]))
         finally:
             self._state.is_streaming = False

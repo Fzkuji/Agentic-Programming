@@ -765,7 +765,11 @@ class Runtime:
         if final is None:
             raise RuntimeError("Agent session produced no assistant message")
         if final.stop_reason == "error":
-            raise RuntimeError(final.error_message or "Agent session failed")
+            raise RuntimeError(
+                final.error_message
+                or f"Agent session ended with stop_reason='error' but no "
+                f"error_message (model={final.model!r})"
+            )
 
         if final.usage is not None:
             # `final.usage.input` is already net of cache reads (see
