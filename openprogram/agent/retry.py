@@ -36,14 +36,23 @@ def is_retryable_error(msg: Any, context_window: int = 0) -> bool:
     """True if this error response should trigger a retry.
 
     Context-overflow errors are *not* retryable — those should be handled by
-    compaction instead. Only transient errors (rate limits, 5xx, connection
+    compaction instead. Transient errors (rate limits, 5xx, connection
     issues) match the retry pattern.
+
+    A ``stop_reason="error"`` with an *empty* ``error_message`` is also
+    treated as retryable: a content-free error almost always means the
+    provider stream dropped (connection reset, SSL EOF, gateway hiccup)
+    before any structured error body arrived. Without this, such errors
+    fail the pattern match, skip AgentSession's auto-retry entirely, and
+    surface downstream as the opaque "Agent session failed".
     """
     if getattr(msg, "stop_reason", "") != "error":
         return False
     if context_window and is_context_overflow(msg, context_window):
         return False
     err = getattr(msg, "error_message", "") or ""
+    if not err.strip():
+        return True
     return bool(_RETRY_PATTERN.search(err))
 
 
