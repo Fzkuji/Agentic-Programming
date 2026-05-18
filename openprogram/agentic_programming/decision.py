@@ -291,10 +291,22 @@ def render_options(available) -> str:
 
 
 class _ParseError(Exception):
+    """Internal — one failed parse/validate attempt inside parse_args."""
     def __init__(self, kind: str, message: str):
         self.kind = kind
         self.message = message
         super().__init__(message)
+
+
+class DecisionError(ValueError):
+    """Raised when the LLM's reply cannot be resolved to a valid choice
+    after all re-pick attempts are exhausted.
+
+    Subclasses ``ValueError`` so existing ``except ValueError`` keeps
+    working; catch ``DecisionError`` specifically to handle "the model
+    never picked a valid option" without swallowing unrelated errors —
+    e.g. a GUI planner treating it as "end the step".
+    """
 
 
 def _iter_json_objects(text: str):
@@ -542,8 +554,8 @@ def parse_args(
                 "Call: example line — JSON only, no prose."
             )}]))
 
-    raise ValueError(
-        f"parse_args failed after {max_retries + 1} attempt(s). "
+    raise DecisionError(
+        f"decision failed after {max_retries + 1} attempt(s). "
         f"Last error ({last_error.kind}): {last_error.message}. "
         f"Last reply head: {last_reply[:200]!r}"
     )

@@ -130,7 +130,9 @@ schema 是 `{字段名: 字段类型}`,字段类型可以**递归嵌套**,这样
 
 ### 4. 解析失败重试
 
-任一步抛 `_ParseError`,`parse_args` 走重试(默认 `max_retries=1`,设 0 关闭):用 `runtime.exec` 把"上次回复 + 错误原因 + 重渲染的菜单"发给 LLM 让它重选。这次重试也是一次模型调用,照样落进 DAG。重试全部用尽仍失败 → 抛 `ValueError`,带最后一次错误类型、消息、回复头部。
+任一步抛 `_ParseError`,`parse_args` 走重试(默认 `max_retries=1`,设 0 关闭):用 `runtime.exec` 把"上次回复 + 错误原因 + 重渲染的菜单"发给 LLM 让它重选。这次重试也是一次模型调用,照样落进 DAG。重试全部用尽仍失败 → 抛 `DecisionError`,带最后一次错误类型、消息、回复头部。
+
+`DecisionError` 继承 `ValueError`(老的 `except ValueError` 仍能接住),调用方可以 `except DecisionError` 精确捕获"模型始终没选出合法选项"这一种情况、不误伤无关的 `ValueError`——例如让某个 planner 把它当作"结束这一步"。框架到"抛清晰异常"为止,接住后怎么收场是调用方的事,框架不内置任何 fallback。
 
 ### 5. `resolve_decision` 解析成结果
 

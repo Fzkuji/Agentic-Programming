@@ -131,6 +131,20 @@ def test_decide_schema_option_validates_nested():
         }, runtime=rt, max_retries=0)
 
 
+def test_decide_raises_decisionerror_when_retries_exhausted():
+    """An unresolvable reply raises DecisionError (a ValueError subclass),
+    so a caller can catch it precisely."""
+    import pytest
+    from openprogram.agentic_programming.decision import DecisionError
+
+    rt = _CannedRuntime("not json at all, no pick here")
+    with pytest.raises(DecisionError):
+        decision.make("Pick one.", [_greet, _farewell], runtime=rt, max_retries=0)
+    # Backwards-compatible: still catchable as ValueError.
+    with pytest.raises(ValueError):
+        decision.make("Pick one.", [_greet, _farewell], runtime=rt, max_retries=0)
+
+
 def test_decide_picks_up_ambient_runtime_inside_agentic_function():
     """Inside an @agentic_function, decision.make() needs no runtime= — it reads
     the ambient runtime the decorator installs."""
