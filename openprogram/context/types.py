@@ -1,7 +1,7 @@
 """Shared dataclasses for the context-management pipeline.
 
 Kept in a separate module so every component (UsageTracker, BudgetAllocator,
-TurnAger, Summarizer, ContextEngine) can import them without sucking in
+Microcompactor, Summarizer, ContextEngine) can import them without sucking in
 the whole package. Pure data containers — no behaviour.
 """
 from __future__ import annotations
@@ -110,7 +110,7 @@ class TurnPrep:
 
     # Aging telemetry
     tool_results_redacted: int = 0
-    tokens_freed_by_aging: int = 0
+    tokens_freed_by_microcompact: int = 0
     references_protected: int = 0
     summary_id: Optional[str] = None
 
@@ -164,8 +164,8 @@ class ReferenceMap:
     """Inverse index: tool_use_id → did any later assistant message
     *quote* / *cite* / *re-reference* its result?
 
-    Built by ``ReferenceTracker.build()`` and consumed by ``TurnAger``
-    to skip aging on results the model is still working with.
+    Built by ``ReferenceTracker.build()`` and consumed by ``Microcompactor``
+    to skip microcompact on results the model is still working with.
     """
     cited_tool_use_ids: set[str] = field(default_factory=set)
     quoted_snippets_by_msg: dict[str, set[str]] = field(default_factory=dict)

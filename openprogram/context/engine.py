@@ -47,7 +47,7 @@ import asyncio
 import threading
 from typing import Any, Callable, Optional
 
-from openprogram.context.aging import TurnAger, default_ager
+from openprogram.context.microcompact import Microcompactor, default_microcompactor
 from openprogram.context.budget import BudgetAllocator, default_allocator
 from openprogram.context.persistence import Persister, default_persister
 from openprogram.context.references import ReferenceTracker, default_tracker as _ref_tracker
@@ -157,7 +157,7 @@ class DefaultContextEngine(ContextEngine):
                  *,
                  usage_tracker: UsageTracker | None = None,
                  budget_allocator: BudgetAllocator | None = None,
-                 ager: TurnAger | None = None,
+                 microcompactor: Microcompactor | None = None,
                  summarizer: Summarizer | None = None,
                  persister: Persister | None = None,
                  references: ReferenceTracker | None = None,
@@ -166,7 +166,7 @@ class DefaultContextEngine(ContextEngine):
                  ):
         self.usage = usage_tracker or _usage_tracker
         self.budgets = budget_allocator or default_allocator
-        self.ager = ager or default_ager
+        self.microcompactor = microcompactor or default_microcompactor
         self.summarizer = summarizer or default_summarizer
         self.persister = persister or default_persister
         self.references = references or _ref_tracker
@@ -208,8 +208,8 @@ class DefaultContextEngine(ContextEngine):
                 f"references:protected={len(ref_map.cited_tool_use_ids)}"
             )
 
-        # 2. Apply aging.
-        aged_history, n_redacted, tokens_freed = self.ager.age(
+        # 2. Apply microcompact.
+        aged_history, n_redacted, tokens_freed = self.microcompactor.microcompact(
             history, ref_map=ref_map,
         )
         if n_redacted:
@@ -258,7 +258,7 @@ class DefaultContextEngine(ContextEngine):
             budget=budget,
             usage=usage,
             tool_results_redacted=n_redacted,
-            tokens_freed_by_aging=tokens_freed,
+            tokens_freed_by_microcompact=tokens_freed,
             references_protected=len(ref_map.cited_tool_use_ids),
             summary_id=summary_id,
             decision_path=decision,

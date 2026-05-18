@@ -1,6 +1,6 @@
 """ReferenceTracker — don't redact what the model is still citing.
 
-When ``TurnAger`` ages a tool result older than the keep-window, the
+When ``Microcompactor`` ages a tool result older than the keep-window, the
 naïve rule is "replace any large old result". Better rule, lifted from
 Hermes' reference graph: if a later assistant message **quotes** the
 tool result body (a file path mentioned, a specific line from a grep

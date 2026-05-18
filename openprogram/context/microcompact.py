@@ -1,8 +1,17 @@
-"""TurnAger — tool-result aging (microcompact).
+"""Microcompactor — incremental tool-result clearing (microcompact).
 
 Stale tool outputs are the single biggest waste in long agent loops:
 the agent reads a 50K-line file once, digests it, then the next 20
 turns drag that wall of text through prompt cache for no reason.
+Microcompact swaps the bulky content of an old tool_result for a short
+placeholder.
+
+Non-destructive: ``microcompact()`` returns a transformed *copy* of the
+turn's message list. It does NOT touch the stored DAG nodes — the
+original tool_result stays in the database intact. The effect is purely
+"the model does not see this content in this turn's prompt"; the data
+is still recoverable, and if the model needs it again it can re-run the
+tool.
 
 Three independent gates decide whether a tool_result is "stale":
 
@@ -10,18 +19,23 @@ Three independent gates decide whether a tool_result is "stale":
    assistant turns must have passed since the message was created.
    Newer than that and the agent might still be acting on it.
 
-2. **Wall-clock age** (Claude Code's trick): in addition to turn
-   distance, the result must be older than ``keep_recent_seconds``.
-   Useful when the agent is in tight tool-call loops — 4 turns in 10
-   seconds isn't really "stale".
+2. **Wall-clock age**: in addition to turn distance, the result must be
+   older than ``keep_recent_seconds``. Useful when the agent is in
+   tight tool-call loops — 4 turns in 10 seconds isn't really "stale".
 
 3. **Not referenced**: if the ``ReferenceTracker`` thinks a later
    message is still citing the result (file path, hash, snippet), we
-   don't age it even if it's old. The model is clearly still working
-   with it.
+   keep it even if it's old. The model is clearly still working with it.
 
 A result that fails any one of these gates is preserved. Only when ALL
 three say "stale AND large enough to matter" do we redact.
+
+Attribution: "microcompact" is borrowed from Claude Code, which
+pioneered clearing stale tool results before the request. The *idea* is
+shared; the *algorithm here is our own* — Claude Code's microcompact
+triggers on a ~60-minute gap (cache-TTL heuristic) and keeps the last N
+results; this runs every turn and selects per-result via the three
+gates above. Do not assume implementation parity.
 """
 from __future__ import annotations
 
@@ -36,14 +50,14 @@ from openprogram.context.types import ReferenceMap
 
 # Defaults — overridable via constructor for testing / per-engine tuning.
 KEEP_RECENT_TURNS = 4
-KEEP_RECENT_SECONDS = 60.0          # 1 minute — don't age in tight loops
+KEEP_RECENT_SECONDS = 60.0          # 1 minute — don't compact in tight loops
 LARGE_RESULT_TOKENS = 800           # below this, redaction nets negative
 
 _REDACTED_TEMPLATE = "[Old tool result content cleared (was {n} tokens)]"
 
 
-class TurnAger:
-    """Apply the three-gate aging rules over a session branch."""
+class Microcompactor:
+    """Apply the three-gate microcompact rules over a session branch."""
 
     def __init__(self, *,
                  keep_recent_turns: int = KEEP_RECENT_TURNS,
@@ -62,14 +76,14 @@ class TurnAger:
 
     # ---- Main entry point ---------------------------------------------
 
-    def age(self, history: list[dict],
+    def microcompact(self, history: list[dict],
             *,
             now: float | None = None,
             ref_map: ReferenceMap | None = None,
             ) -> tuple[list[dict], int, int]:
         """Return ``(new_history, n_redacted, tokens_freed)``.
 
-        Input is NOT mutated — callers get a fresh list with aged
+        Input is NOT mutated — callers get a fresh list with redacted
         messages replaced by new dicts.
         """
         if not history:
@@ -82,7 +96,7 @@ class TurnAger:
         if ref_map is None:
             ref_map = self.references.build(history)
 
-        # Find cut-off: messages BEFORE this index are eligible for aging.
+        # Find cut-off: messages BEFORE this index are eligible for microcompact.
         cut_idx = self._cut_index(history)
         if cut_idx <= self.protect_first_n:
             return history, 0, 0
@@ -93,7 +107,7 @@ class TurnAger:
 
         for i in range(self.protect_first_n, cut_idx):
             m = history[i]
-            # Don't age messages cited downstream.
+            # Don't compact messages cited downstream.
             if self.references.is_referenced(ref_map, m.get("id")):
                 continue
             extra = m.get("extra")
@@ -117,7 +131,7 @@ class TurnAger:
 
     def _cut_index(self, history: list[dict]) -> int:
         """The smallest index past which messages are 'fresh enough'
-        to not age. Cut at the start of the (N+1)-th most-recent
+        to not compact. Cut at the start of the (N+1)-th most-recent
         assistant turn, where N = keep_recent_turns.
         """
         assistant_count = sum(1 for m in history if m.get("role") == "assistant")
@@ -180,4 +194,4 @@ class TurnAger:
 
 # Module-level default — engines compose this rather than instantiating
 # their own unless they want different thresholds.
-default_ager = TurnAger()
+default_microcompactor = Microcompactor()
