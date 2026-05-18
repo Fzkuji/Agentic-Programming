@@ -195,7 +195,13 @@ def handle_ticket(ticket: str, runtime: Runtime) -> dict:
     )
 ```
 
-Option forms — `options` / `choices` is a dict `{name: handler}` (handler is a callable for a function option, or any value for a value option; `{name: (value, "description")}` to add a description) or a list of callables / option tuples. The resolution leaves **no `if` for you to write**: a picked function is run and its return value handed back; a picked value is returned as-is. The decision *is* the branch.
+Option forms — `options` / `choices` is a dict `{name: handler}` or a list of callables / option tuples. A handler can be:
+
+- a **callable** — a function option; picking it runs the function, its return value is the result
+- a **value** — a value option; picking it returns that value as-is (`{name: (value, "description")}` adds a description)
+- a **`("description", schema)`** pair — a schema option; the model fills the schema and the filled structure is returned as `{"decision": name, **fields}`. The `schema` is `{field: type}` and nests: `[item]` for a list, `{sub: ...}` for a nested object — so one option can ask for any structured JSON
+
+The resolution leaves **no `if` for you to write**: a picked function runs, a picked value/structure comes back. The decision *is* the branch. If the model never produces a resolvable pick after retries, `DecisionError` (a `ValueError` subclass) is raised — catch it if you want a graceful fallback.
 
 Rule: if you find yourself writing `runtime.exec(...)` followed by `if "..." in reply:` to route on what the model said, replace it with `decision.make` / `exec(choices=)`.
 
