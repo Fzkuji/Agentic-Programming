@@ -69,21 +69,45 @@ def handle_ticket(ticket: str) -> dict:
 
 ## 选项容器
 
+每个选项像一个 tool:有名字、描述,以及一份**负载 schema**。三种选项:
+
+| 选项类型 | 选中后 | schema 来自 |
+|---|---|---|
+| 函数选项 | 执行函数,返回它的返回值 | 函数签名 |
+| 值选项 | 返回那个固定值 | 无 |
+| schema 选项 | 模型按 schema 填一份结构化数据,返回 `{"decision": 名字, **填好的字段}` | 你显式声明的 schema |
+
 `options` 可以是 dict 或 list。
 
-**dict 形式** `{名字: handler}`——`handler` 是可调用对象(函数选项)或任意非可调用值(值选项)。dict 的 key 是选项名(函数选项、值选项都一样)。给值选项加描述用 `{名字: (值, "描述")}`:
+**dict 形式** `{名字: handler}`,key 是选项名:
 
 ```python
 decision.make("...", {
-    "retry":  retry_fn,                          # 函数选项
-    "skip":   "SKIPPED",                         # 值选项,选中返回 "SKIPPED"
-    "abort":  (AbortSignal(), "无法继续时选这个"),  # 值选项 + 描述
+    "retry":     retry_fn,                       # 函数选项
+    "skip":      "SKIPPED",                      # 值选项
+    "abort":     (AbortSignal(), "无法继续时选"),  # 值选项 + 描述
+    "emit_plan": ("产出一份计划。", {              # schema 选项:("描述", schema)
+        "steps": [{"action": str, "target": str}],
+        "rationale": str,
+    }),
 })
 ```
 
-**list 形式**——每项是可调用对象、`(callable, "描述")`、或字符串选项形态(`"name"` / `("name", "描述")` / `("name", "描述", schema)`)。list 形式函数选项的名字取函数 `__name__`;裸字符串选项选中后返回它自己的名字。
+**list 形式**——每项是可调用对象、`(callable, "描述")`、或字符串选项形态(`"name"` / `("name", "描述")` / `("name", "描述", schema)`)。list 形式函数选项的名字取函数 `__name__`。
 
-内部 `_functions_to_registry` 把它们归一成 registry dict,函数项 `_is_text=False`,值/文本项 `_is_text=True`。
+### schema 的结构
+
+schema 是 `{字段名: 字段类型}`,字段类型可以**递归嵌套**,这样一个选项就能让模型返回任意结构化 JSON:
+
+| 写法 | 含义 |
+|---|---|
+| `字段: str` (任意 Python 类型) | 该类型的标量 |
+| `字段: "描述"` | 带描述的 `str` 标量 |
+| `字段: [子schema]` | 列表,每个元素匹配 `子schema` |
+| `字段: {子字段: ...}` | 嵌套对象(键名是子字段名) |
+| `字段: {"type": T, "description": ..., "options": [...]}` | 带类型/描述/枚举的元描述 |
+
+`parse_args` 解析后会按 schema **递归校验**类型与嵌套结构;`render_options` 渲染的 `Call:` 示例也带嵌套占位形状。这让"有限分支选择"和 tool calling 对齐——每个分支带任意结构的负载。需求若是"压根不分支、永远返回同一份结构",就用单选项的 `decision.make`,或直接 `exec(response_format=...)`。
 
 ## 内部步骤
 

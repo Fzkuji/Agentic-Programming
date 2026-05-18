@@ -92,6 +92,45 @@ def test_exec_without_choices_returns_raw_text():
     assert rt.exec("hello") == "just some text"
 
 
+def test_decide_schema_option_returns_nested_struct():
+    """A schema option lets the model fill an arbitrary nested structure;
+    the filled struct comes back, no function runs."""
+    rt = _CannedRuntime(
+        '{"call": "emit_plan", "args": {'
+        '"steps": [{"action": "click", "target": "OK"}], '
+        '"rationale": "because"}}'
+    )
+    result = decision.make("Decide.", {
+        "emit_plan": ("Return a structured plan.", {
+            "steps": [{"action": str, "target": str}],
+            "rationale": str,
+        }),
+        "abort": "ABORTED",
+    }, runtime=rt)
+    assert result == {
+        "decision": "emit_plan",
+        "steps": [{"action": "click", "target": "OK"}],
+        "rationale": "because",
+    }
+
+
+def test_decide_schema_option_validates_nested():
+    """A nested field of the wrong type fails validation (with no retries,
+    surfaces as ValueError)."""
+    import pytest
+    rt = _CannedRuntime(
+        '{"call": "emit_plan", "args": {"steps": [{"action": 123, '
+        '"target": "OK"}], "rationale": "x"}}'
+    )
+    with pytest.raises(ValueError):
+        decision.make("Decide.", {
+            "emit_plan": ("Plan.", {
+                "steps": [{"action": str, "target": str}],
+                "rationale": str,
+            }),
+        }, runtime=rt, max_retries=0)
+
+
 def test_decide_picks_up_ambient_runtime_inside_agentic_function():
     """Inside an @agentic_function, decision.make() needs no runtime= — it reads
     the ambient runtime the decorator installs."""

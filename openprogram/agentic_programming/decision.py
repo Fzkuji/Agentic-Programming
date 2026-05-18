@@ -148,6 +148,60 @@ def _callable_entry(fn, override_desc) -> tuple[str, dict]:
     }
 
 
+# Keys a *meta-spec* dict may use. A schema dict whose keys all fall in
+# this set is read as a meta-spec ({type, description, ...}); any other
+# dict is read as a nested object schema (its keys are field names).
+_META_KEYS = {"type", "description", "options", "fields", "items"}
+
+
+def _normalize_field(value) -> dict:
+    """Normalize one schema field value into a field-spec dict.
+
+    A field value can be, recursively:
+      - a Python type (``str`` / ``int`` / ...) — a scalar of that type
+      - a ``str`` — a description; the field is a ``str`` scalar
+      - ``[item]`` — a list; every element matches ``item``
+      - a meta-spec dict ``{type, description, options, fields, items}``
+      - any other dict — a nested object; its keys are field names
+    """
+    if isinstance(value, str):
+        return {"type": str, "description": value}
+    if isinstance(value, type):
+        return {"type": value}
+    if isinstance(value, list):
+        if len(value) != 1:
+            raise TypeError(
+                "A list schema needs exactly one item template, "
+                "e.g. [str] or [{...}]"
+            )
+        return {"type": list, "items": _normalize_field(value[0])}
+    if isinstance(value, dict):
+        if value and not set(value).issubset(_META_KEYS):
+            # Nested object — keys are field names.
+            return {
+                "type": dict,
+                "fields": {k: _normalize_field(v) for k, v in value.items()},
+            }
+        entry: dict = {"type": value.get("type", str)}
+        if "description" in value:
+            entry["description"] = value["description"]
+        if "options" in value:
+            entry["options"] = value["options"]
+        if "fields" in value:
+            entry["type"] = dict
+            entry["fields"] = {
+                k: _normalize_field(v) for k, v in value["fields"].items()
+            }
+        if "items" in value:
+            entry["type"] = list
+            entry["items"] = _normalize_field(value["items"])
+        return entry
+    raise TypeError(
+        f"Schema value must be a type, str, list, or dict; "
+        f"got {type(value).__name__}"
+    )
+
+
 def _normalize_text_schema(schema) -> dict:
     """Turn a text option's user-supplied schema into registry input_spec form."""
     if not isinstance(schema, dict):
@@ -156,20 +210,9 @@ def _normalize_text_schema(schema) -> dict:
         )
     out: dict = {}
     for arg_name, value in schema.items():
-        if isinstance(value, str):
-            out[arg_name] = {"source": "llm", "type": str, "description": value}
-        elif isinstance(value, dict):
-            entry: dict = {"source": "llm", "type": value.get("type", str)}
-            if "description" in value:
-                entry["description"] = value["description"]
-            if "options" in value:
-                entry["options"] = value["options"]
-            out[arg_name] = entry
-        else:
-            raise TypeError(
-                f"Schema value for {arg_name!r} must be str or dict, "
-                f"got {type(value).__name__}"
-            )
+        field = _normalize_field(value)
+        field["source"] = "llm"
+        out[arg_name] = field
     return out
 
 
@@ -178,12 +221,26 @@ def _normalize_text_schema(schema) -> dict:
 # ===========================================================================
 
 
+def _field_placeholder(meta: dict) -> str:
+    """JSON-snippet placeholder for one field, recursing into nested shapes."""
+    t = meta.get("type", str)
+    if t is dict and "fields" in meta:
+        inner = ", ".join(
+            f'"{k}": {_field_placeholder(v)}' for k, v in meta["fields"].items()
+        )
+        return "{" + inner + "}"
+    if t is list and "items" in meta:
+        return "[" + _field_placeholder(meta["items"]) + "]"
+    tname = getattr(t, "__name__", None) or str(t)
+    return _TYPE_PLACEHOLDERS.get(tname, "null")
+
+
 def render_options(available) -> str:
     """Render the LLM-facing options menu from an options list/registry.
 
     Only ``source="llm"`` parameters are shown — runtime / context params
     stay hidden. Each option gets a ``Call:`` example with JSON-native
-    placeholder values.
+    placeholder values; nested object / list schemas render nested.
     """
     if isinstance(available, (list, tuple)):
         available = _functions_to_registry(available)
@@ -193,14 +250,15 @@ def render_options(available) -> str:
         description = spec.get("description", "")
         input_spec = spec.get("input", {})
 
-        llm_params: list[str] = []
+        llm_fields = [
+            (n, m) for n, m in input_spec.items() if m.get("source") == "llm"
+        ]
+        sig_parts: list[str] = []
         param_details: list[str] = []
-        for param_name, param_info in input_spec.items():
-            if param_info.get("source") != "llm":
-                continue
+        for param_name, param_info in llm_fields:
             type_obj = param_info.get("type", str)
             type_name = getattr(type_obj, "__name__", None) or str(type_obj)
-            llm_params.append(f"{param_name}: {type_name}")
+            sig_parts.append(f"{param_name}: {type_name}")
             detail = f"    {param_name}"
             if "description" in param_info:
                 detail += f": {param_info['description']}"
@@ -209,17 +267,15 @@ def render_options(available) -> str:
                 detail += f" (options: {opts})"
             param_details.append(detail)
 
-        sig = f"{name}({', '.join(llm_params)})" if llm_params else f"{name}()"
+        sig = f"{name}({', '.join(sig_parts)})" if sig_parts else f"{name}()"
         lines.append(sig)
         if description:
             lines.append(f"    {description}")
         lines.extend(param_details)
 
-        if llm_params:
+        if llm_fields:
             example_args = ", ".join(
-                f'"{p.split(":")[0].strip()}": '
-                + _TYPE_PLACEHOLDERS.get(p.split(":")[1].strip(), "null")
-                for p in llm_params
+                f'"{n}": {_field_placeholder(m)}' for n, m in llm_fields
             )
             lines.append(f'    Call: {{"call": "{name}", "args": {{{example_args}}}}}')
         else:
@@ -317,8 +373,38 @@ def extract_action(text: str) -> dict | None:
 
 
 def _validate_field(name: str, value, meta: dict) -> None:
-    """Type and enum check for a single field. Raises _ParseError on mismatch."""
+    """Type / enum / structure check for a field. Recurses into nested
+    object (``fields``) and list (``items``) schemas. Raises _ParseError."""
     expected = meta.get("type")
+
+    # Nested object.
+    if expected is dict and "fields" in meta:
+        if not isinstance(value, dict):
+            raise _ParseError(
+                "type_mismatch",
+                f"Field {name!r} must be an object, got {type(value).__name__}",
+            )
+        for fname, fmeta in meta["fields"].items():
+            if fname not in value:
+                raise _ParseError(
+                    "missing_required",
+                    f"Field {name!r} is missing nested field {fname!r}",
+                )
+            _validate_field(f"{name}.{fname}", value[fname], fmeta)
+        return
+
+    # List.
+    if expected is list and "items" in meta:
+        if not isinstance(value, list):
+            raise _ParseError(
+                "type_mismatch",
+                f"Field {name!r} must be a list, got {type(value).__name__}",
+            )
+        for i, item in enumerate(value):
+            _validate_field(f"{name}[{i}]", item, meta["items"])
+        return
+
+    # Scalar.
     if expected in _VALIDATABLE_TYPES:
         if expected in (int, float) and isinstance(value, bool):
             raise _ParseError(
@@ -502,20 +588,36 @@ def _normalize_options(options):
     values: dict[str, Any] = {}
 
     if isinstance(options, dict):
-        # Dict input: the key is the authoritative option name, for
-        # function options as well as value options.
+        # Dict input: the key is the authoritative option name. A handler
+        # can be:
+        #   callable                     → function option
+        #   (callable, "desc")           → function option + description
+        #   ("desc", schema_dict)        → schema option: the model fills
+        #                                  the schema, the filled struct
+        #                                  is returned
+        #   (value, "desc")              → value option + description
+        #   any other non-callable       → value option (the value itself)
         registry: dict = {}
         for name, handler in options.items():
-            desc = ""
+            if name in registry:
+                raise ValueError(f"Duplicate option name {name!r}")
+
             if isinstance(handler, tuple) and len(handler) == 2:
-                handler, desc = handler
+                first, second = handler
+                if isinstance(second, dict) and not callable(first):
+                    # ("description", schema) — a schema option.
+                    _, entry = _normalize_option((name, first, second))
+                    registry[name] = entry
+                    continue
+                handler, desc = first, second
+            else:
+                desc = ""
+
             if callable(handler):
                 _, entry = _callable_entry(handler, override_desc=desc or None)
             else:
                 _, entry = _normalize_option((name, desc) if desc else name)
                 values[name] = handler
-            if name in registry:
-                raise ValueError(f"Duplicate option name {name!r}")
             registry[name] = entry
         return registry, values
 
